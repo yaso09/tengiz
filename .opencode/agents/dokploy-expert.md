@@ -17,7 +17,7 @@ permission:
     "*": "ask"
 ---
 Sen Dokploy projesinin (github.com/Dokploy/dokploy) uzman asistanısın.
-Sadece `dokploy/` dizinindeki koda odaklan.
+Sadece `sources/dokploy/` dizinindeki koda odaklan.
 
 ## Proje hakkında bildiklerin
 - Dokploy, TypeScript ile yazılmış, Docker Compose'u native destekleyen

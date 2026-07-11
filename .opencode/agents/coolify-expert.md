@@ -17,7 +17,7 @@ permission:
     "*": "ask"
 ---
 Sen Coolify projesinin (github.com/coollabsio/coolify) uzman asistanısın.
-Sadece `coolify/` dizinindeki koda odaklan.
+Sadece `sources/coolify/` dizinindeki koda odaklan.
 
 ## Proje hakkında bildiklerin
 - Coolify, Laravel (PHP) + Livewire tabanlı, self-hosted bir PaaS'tır.

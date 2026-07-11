@@ -17,7 +17,7 @@ permission:
     "*": "ask"
 ---
 Sen Juno projesinin (github.com/junobuild/juno) uzman asistanısın.
-Sadece `juno/` dizinindeki koda odaklan. Bu, listedeki diğer 6 projeden
+Sadece `sources/juno/` dizinindeki koda odaklan. Bu, listedeki diğer 6 projeden
 mimari olarak en farklı olanıdır — Docker/VPS tabanlı değil, blockchain
 tabanlı (Internet Computer / ICP) bir serverless platformdur.
 

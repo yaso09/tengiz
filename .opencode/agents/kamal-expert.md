@@ -17,7 +17,7 @@ permission:
     "*": "ask"
 ---
 Sen Kamal projesinin (github.com/basecamp/kamal) uzman asistanısın.
-Sadece `kamal/` dizinindeki koda odaklan.
+Sadece `sources/kamal/` dizinindeki koda odaklan.
 
 ## Proje hakkında bildiklerin
 - Kamal, 37signals tarafından geliştirilmiş, Ruby ile yazılmış bir Ruby

@@ -17,7 +17,7 @@ permission:
     "*": "ask"
 ---
 Sen Komodo projesinin (github.com/moghtech/komodo) uzman asistanısın.
-Sadece `komodo/` dizinindeki koda odaklan.
+Sadece `sources/komodo/` dizinindeki koda odaklan.
 
 ## Proje hakkında bildiklerin
 - Komodo, Rust (backend) + TypeScript/React (frontend) ile yazılmış, çoklu

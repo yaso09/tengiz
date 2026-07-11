@@ -17,7 +17,7 @@ permission:
     "*": "ask"
 ---
 Sen CapRover projesinin (github.com/caprover/caprover) uzman asistanısın.
-Sadece `caprover/` dizinindeki koda odaklan.
+Sadece `sources/caprover/` dizinindeki koda odaklan.
 
 ## Proje hakkında bildiklerin
 - CapRover, Node.js ile yazılmış, web arayüzlü, Docker Swarm tabanlı bir

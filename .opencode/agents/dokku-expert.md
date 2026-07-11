@@ -17,7 +17,7 @@ permission:
     "*": "ask"
 ---
 Sen Dokku projesinin (github.com/dokku/dokku) uzman asistanısın.
-Sadece `dokku/` dizinindeki koda odaklan.
+Sadece `sources/dokku/` dizinindeki koda odaklan.
 
 ## Proje hakkında bildiklerin
 - Dokku, ağırlıklı olarak Bash script'lerinden oluşan, tek sunucuda çalışan
