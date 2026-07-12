@@ -1,0 +1,82 @@
+name: Daily Feature Analysis
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+env:
+  OPENAI_BASE_URL: ${{ secrets.OPENCODE_ZEN_BASE_URL }}
+  OPENAI_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
+  OPENCODE_MODEL: deepseek-v4-flash-free
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Clone alternatives
+        run: python clone_alternatives.py --dest ./sources --depth 1 --workers 4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install opencode CLI
+        run: npm install -g @opencode-ai/cli
+
+      - name: Run analysis
+        run: |
+          cat <<'PROMPT' | opencode --agent vercel-alt-router
+          Tengiz adlı Go ile yazılmış Vercel alternatifimize eklenmesi mantıklı olan özellikleri tespit et.
+
+          Mevcut Tengiz özellikleri:
+          - CLI tabanlı deploy (tengiz deploy)
+          - Framework auto-detection (Next.js, Vite, Go, Node, Python, static)
+          - Docker container yönetimi (Docker SDK'sız, exec-based)
+          - Scale-to-zero (idle timeout ile)
+          - Reverse proxy (host-based routing)
+          - State persistence (~/.tengiz/*.json)
+
+          Yapman gerekenler:
+          1. Her bir expert agent'ı çağır (@coolify-expert, @dokploy-expert, @dokku-expert, @caprover-expert, @kamal-expert, @komodo-expert, @juno-expert)
+          2. Her alternatifte Tengiz'de olmayan ve eklenmesi mantıklı olan özellikleri sor
+          3. Gelen cevapları karşılaştır ve Tengiz'in roadmap'ine uygun olanları filtrele
+          4. docs/FUTURES_FEATURES.md dosyasını kontrol et
+          5. Daha önce kaydedilmemiş özellikleri dosyaya ekle (işaretle: [Tarih: $(date +%Y-%m-%d)])
+
+          Özellikleri şu formatta ekle:
+          ## [Feature Name]
+          - **Kaynak:** [alternatif adı]
+          - **Açıklama:** [kısa açıklama]
+          - **Neden Tengiz'e eklenmeli:** [gerekçe]
+          - **Tespit Tarihi:** $(date +%Y-%m-%d)
+          PROMPT
+
+      - name: Check for changes
+        id: git-check
+        run: |
+          git add docs/FUTURES_FEATURES.md
+          if git diff --staged --quiet; then
+            echo "No new features detected"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit changes
+        if: steps.git-check.outputs.has_changes == 'true'
+        run: |
+          git config user.name "tengiz-bot"
+          git config user.email "bot@tengiz.dev"
+          git commit -m "docs: daily feature analysis update"
+          git push
