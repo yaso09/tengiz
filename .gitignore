@@ -1,1 +1,5 @@
 sources
+*.exe
+*.test
+*.out
+dist/

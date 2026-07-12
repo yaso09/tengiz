@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.20"
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      - name: Test
+        run: go test ./... -v -count=1
+
+      - name: Build (linux/amd64)
+        run: GOOS=linux GOARCH=amd64 go build -o tengiz-linux-amd64 .
+
+      - name: Build (linux/arm64)
+        run: GOOS=linux GOARCH=arm64 go build -o tengiz-linux-arm64 .
+
+      - name: Build (darwin/amd64)
+        run: GOOS=darwin GOARCH=amd64 go build -o tengiz-darwin-amd64 .
+
+      - name: Build (darwin/arm64)
+        run: GOOS=darwin GOARCH=arm64 go build -o tengiz-darwin-arm64 .
+
+      - name: Build (windows/amd64)
+        run: GOOS=windows GOARCH=amd64 go build -o tengiz-windows-amd64.exe .
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: tengiz-binaries
+          path: tengiz-*
