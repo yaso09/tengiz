@@ -13,17 +13,20 @@ import (
 const defaultIdleTimeout = 5 * time.Minute
 
 func Load(path string) (*types.AppConfig, error) {
+	configPath := filepath.Join(path, ".tengiz.yaml")
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf(".tengiz.yaml not found in %s", path)
+	}
+
 	v := viper.New()
-	v.SetConfigFile(filepath.Join(path, ".tengiz.yaml"))
+	v.SetConfigFile(configPath)
 	v.SetConfigType("yaml")
 
 	v.SetDefault("serverless.enabled", true)
 	v.SetDefault("serverless.idle_timeout", defaultIdleTimeout)
 
-	if _, err := os.Stat(v.ConfigFileUsed()); err == nil {
-		if err := v.ReadInConfig(); err != nil {
-			return nil, fmt.Errorf("config read: %w", err)
-		}
+	if err := v.ReadInConfig(); err != nil {
+		return nil, fmt.Errorf("config read: %w", err)
 	}
 
 	var cfg types.AppConfig
@@ -50,7 +53,7 @@ func FindProjectRoot(path string) (string, error) {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return abs, nil
+			return "", fmt.Errorf(".tengiz.yaml not found from %s", path)
 		}
 		dir = parent
 	}
