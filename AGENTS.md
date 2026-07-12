@@ -1,0 +1,47 @@
+# AGENTS.md
+
+## Repo
+
+- Single Go module: `github.com/yaso09/tengiz`, Go 1.26
+- Entry: `main.go` → `internal/cli/root.go` (Cobra CLI)
+- Only 2 direct deps: `cobra`, `viper`
+- No Docker SDK — runtime calls `docker` CLI via `os/exec`. Docker must be installed separately.
+- `sources/` dir contains cloned Vercel alternative repos (gitignored). Agent definitions in `.opencode/agents/`.
+
+## Key architecture
+
+| Package | Responsibility |
+|---------|---------------|
+| `runtime.Manager` | Interface for container lifecycle. `NewDocker()` = exec-based impl, `NewStub()` = test mock. |
+| `builder` | Framework detection (`detect.go`) + Dockerfile generation (`builder.go`). Supports: Docker, Next.js, Vite, Go, Node, Python, static. |
+| `proxy` | `httputil.ReverseProxy` with host-based routing (`appname.tengiz.local` → port 9000+). Cold-starts stopped containers on demand. |
+| `idle` | Per-app timer. `Reset(name)` extends deadline. On expiry: calls `runtime.Stop()`. Default 5m timeout. |
+| `config` | Loads `.tengiz.yaml` via viper. `Store` persists apps + port allocations in `~/.tengiz/*.json`. |
+| `types` | Shared: `AppConfig`, `AppStatus`, `AppEntry`, `PortEntry`. |
+
+## Commands
+
+```bash
+go build -o tengiz .          # build binary
+go test ./... -v -count=1     # run all tests (no -count=1 can skip cached results)
+go vet ./...                  # static analysis
+```
+
+## CLI
+
+```
+tengiz deploy [dir]   → detect, build, run container
+tengiz proxy          → start reverse proxy on :8080
+tengiz ps             → list apps from Docker
+tengiz logs [-f] app  → stream logs
+tengiz stop/start/rm  → lifecycle
+```
+
+## Quirks
+
+- Container names are prefixed `tengiz-<appname>`, labeled with `tengiz-app=<appname>`
+- Port allocations: 9000-9999, persisted in `~/.tengiz/ports.json`
+- No config file = uses dir name as app name + defaults
+- Proxy's `extractApp()` splits host on `.` and returns `parts[0]` if len >= 3 (e.g. `myapp.tengiz.local` → `myapp`)
+- Tests for `proxy` are slow (~2s each) due to TCP dial timeout on unreachable ports
+- `idle` tests are time-sensitive (use `time.Sleep` with 50ms granularity)
