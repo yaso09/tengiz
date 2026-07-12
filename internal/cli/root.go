@@ -1,4 +1,4 @@
-package tengiz
+package cli
 
 import (
 	"fmt"

@@ -3,7 +3,7 @@ package types
 import "time"
 
 type AppConfig struct {
-	Name      string          `mapstructure:"app"`
+	Name      string          `mapstructure:"name"`
 	Port      int             `mapstructure:"port"`
 	Build     BuildConfig     `mapstructure:"build"`
 	Serverless ServerlessConfig `mapstructure:"serverless"`
