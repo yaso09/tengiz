@@ -37,6 +37,12 @@ tengiz logs [-f] app  → stream logs
 tengiz stop/start/rm  → lifecycle
 ```
 
+## Rules
+
+- UI/UX değişikliklerinde README.md ve dokümantasyonu güncelle
+- Yeni özellik geliştirirken branch oluştur (`git checkout -b feat/<name>`)
+- Her değişiklikte test ekle/güncelle, testleri geçir, sonra commit et
+
 ## Quirks
 
 - Container names are prefixed `tengiz-<appname>`, labeled with `tengiz-app=<appname>`
