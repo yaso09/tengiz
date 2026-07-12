@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yasir/tengiz/internal/runtime"
+	"github.com/yaso09/tengiz/internal/runtime"
 )
 
 type Manager struct {

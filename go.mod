@@ -1,4 +1,4 @@
-module github.com/yasir/tengiz
+module github.com/yaso09/tengiz
 
 go 1.26.0
 

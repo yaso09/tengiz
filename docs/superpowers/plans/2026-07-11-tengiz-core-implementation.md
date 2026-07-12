@@ -53,7 +53,7 @@ tengiz/
 
 Run:
 ```powershell
-go mod init github.com/yasir/tengiz
+go mod init github.com/yaso09/tengiz
 ```
 
 - [ ] **Step 2: Write main.go**
@@ -62,7 +62,7 @@ go mod init github.com/yasir/tengiz
 ```go
 package main
 
-import "github.com/yasir/tengiz/cmd/tengiz"
+import "github.com/yaso09/tengiz/cmd/tengiz"
 
 func main() {
 	tengiz.Execute()
@@ -191,7 +191,7 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
-	"github.com/yasir/tengiz/internal/types"
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 const defaultIdleTimeout = 5 * time.Minute
@@ -332,7 +332,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/yasir/tengiz/internal/types"
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 type Manager interface {
@@ -457,7 +457,7 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
-	"github.com/yasir/tengiz/internal/types"
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 const labelKey = "tengiz-app"
@@ -998,8 +998,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/yasir/tengiz/internal/runtime"
-	"github.com/yasir/tengiz/internal/types"
+	"github.com/yaso09/tengiz/internal/runtime"
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 type Proxy struct {
@@ -1194,7 +1194,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yasir/tengiz/internal/runtime"
+	"github.com/yaso09/tengiz/internal/runtime"
 )
 
 type Manager struct {
@@ -1264,7 +1264,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yasir/tengiz/internal/types"
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 type mockRuntime struct {
@@ -1352,7 +1352,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/yasir/tengiz/internal/types"
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 type Store struct {
@@ -1459,12 +1459,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/yasir/tengiz/internal/builder"
-	"github.com/yasir/tengiz/internal/config"
-	"github.com/yasir/tengiz/internal/idle"
-	"github.com/yasir/tengiz/internal/proxy"
-	"github.com/yasir/tengiz/internal/runtime"
-	"github.com/yasir/tengiz/internal/types"
+	"github.com/yaso09/tengiz/internal/builder"
+	"github.com/yaso09/tengiz/internal/config"
+	"github.com/yaso09/tengiz/internal/idle"
+	"github.com/yaso09/tengiz/internal/proxy"
+	"github.com/yaso09/tengiz/internal/runtime"
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 var dataDir string
@@ -1731,8 +1731,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/yasir/tengiz/internal/idle"
-	"github.com/yasir/tengiz/internal/runtime"
+	"github.com/yaso09/tengiz/internal/idle"
+	"github.com/yaso09/tengiz/internal/runtime"
 )
 
 type Proxy struct {
@@ -1850,8 +1850,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/yasir/tengiz/internal/idle"
-	"github.com/yasir/tengiz/internal/types"
+	"github.com/yaso09/tengiz/internal/idle"
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 type mockRuntime struct {

@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/yasir/tengiz/internal/builder"
-	"github.com/yasir/tengiz/internal/config"
-	"github.com/yasir/tengiz/internal/idle"
-	"github.com/yasir/tengiz/internal/proxy"
-	"github.com/yasir/tengiz/internal/runtime"
-	"github.com/yasir/tengiz/internal/types"
+	"github.com/yaso09/tengiz/internal/builder"
+	"github.com/yaso09/tengiz/internal/config"
+	"github.com/yaso09/tengiz/internal/idle"
+	"github.com/yaso09/tengiz/internal/proxy"
+	"github.com/yaso09/tengiz/internal/runtime"
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 var dataDir string

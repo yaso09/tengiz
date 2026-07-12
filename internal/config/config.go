@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
-	"github.com/yasir/tengiz/internal/types"
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 const defaultIdleTimeout = 5 * time.Minute

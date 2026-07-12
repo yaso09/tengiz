@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/yasir/tengiz/internal/types"
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 type Manager interface {

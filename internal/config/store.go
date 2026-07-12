@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/yasir/tengiz/internal/types"
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 type Store struct {

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/yasir/tengiz/internal/runtime"
+	"github.com/yaso09/tengiz/internal/runtime"
 )
 
 type Proxy struct {

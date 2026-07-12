@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yasir/tengiz/internal/types"
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 const labelKey = "tengiz-app"
