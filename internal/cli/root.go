@@ -106,7 +106,11 @@ var deployCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("detect: %w", err)
 		}
-		fmt.Printf("[tengiz] detected: %s\n", detection.Framework)
+		fmt.Printf("[tengiz] detected: %s (port %d)\n", detection.Framework, detection.InternalPort)
+
+		if cfg.Port == 0 {
+			cfg.Port = detection.InternalPort
+		}
 
 		b := builder.New(dataDir)
 		imageTag, err := b.Build(context.Background(), projectRoot, cfg.Name, detection)

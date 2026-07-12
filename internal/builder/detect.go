@@ -55,7 +55,7 @@ func Detect(dir string) (*Detection, error) {
 		return &Detection{
 			Framework:    FrameworkNode,
 			BuildCmd:     "npm run build",
-			InternalPort: 8080,
+			InternalPort: 3000,
 		}, nil
 	}
 	if hasFile(dir, "requirements.txt") || hasFile(dir, "Pipfile") || hasFile(dir, "pyproject.toml") {

@@ -52,11 +52,7 @@ func (r *dockerRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageT
 func (r *dockerRuntime) Start(ctx context.Context, name string) error {
 	containerName := fmt.Sprintf("tengiz-%s", name)
 
-	// Get image before start (inspect fails on stopped containers for some fields)
-	imageTag, err := r.getImageTag(ctx, containerName)
-	if err != nil {
-		imageTag = ""
-	}
+	imageTag, ports := r.getContainerConfig(ctx, containerName)
 
 	cmd := exec.CommandContext(ctx, "docker", "start", containerName)
 	out, err := cmd.CombinedOutput()
@@ -64,18 +60,19 @@ func (r *dockerRuntime) Start(ctx context.Context, name string) error {
 		return fmt.Errorf("docker start: %w\n%s", err, string(out))
 	}
 
-	// Check if container is actually running (may have exited immediately)
+	// Verify container is actually running (may have exited immediately)
 	active, _ := r.IsActive(ctx, name)
 	if !active && imageTag != "" {
-		// Container exited. Recreate it.
 		log.Printf("[runtime] container %s exited after start, recreating", name)
 		exec.CommandContext(ctx, "docker", "rm", "-f", containerName).Run()
-		cmd := exec.CommandContext(ctx, "docker", "run", "-d",
+		args := []string{"run", "-d",
 			"--name", containerName,
 			"--label", fmt.Sprintf("%s=%s", labelKey, name),
 			"--restart", "no",
-			imageTag,
-		)
+		}
+		args = append(args, ports...)
+		args = append(args, imageTag)
+		cmd := exec.CommandContext(ctx, "docker", args...)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("docker recreate: %w\n%s", err, string(out))
@@ -85,14 +82,43 @@ func (r *dockerRuntime) Start(ctx context.Context, name string) error {
 	return nil
 }
 
-func (r *dockerRuntime) getImageTag(ctx context.Context, containerName string) (string, error) {
+func (r *dockerRuntime) getContainerConfig(ctx context.Context, containerName string) (string, []string) {
+	// Get image
 	cmd := exec.CommandContext(ctx, "docker", "inspect",
 		"--format", "{{.Config.Image}}", containerName)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("get image: %w\n%s", err, string(out))
+		return "", nil
 	}
-	return strings.TrimSpace(string(out)), nil
+	imageTag := strings.TrimSpace(string(out))
+
+	// Get port bindings
+	portCmd := exec.CommandContext(ctx, "docker", "inspect",
+		"--format", "{{json .HostConfig.PortBindings}}", containerName)
+	portOut, err := portCmd.CombinedOutput()
+	if err != nil {
+		return imageTag, nil
+	}
+
+	var bindings map[string][]map[string]string
+	if err := json.Unmarshal(portOut, &bindings); err != nil {
+		return imageTag, nil
+	}
+
+	var ports []string
+	for containerPort, hosts := range bindings {
+		for _, h := range hosts {
+			hostIP := h["HostIP"]
+			hostPort := h["HostPort"]
+			if hostIP == "" {
+				hostIP = "127.0.0.1"
+			}
+			p := fmt.Sprintf("%s:%s:%s", hostIP, hostPort, containerPort)
+			ports = append(ports, "-p", p)
+		}
+	}
+
+	return imageTag, ports
 }
 
 func (r *dockerRuntime) Stop(ctx context.Context, name string) error {
@@ -212,14 +238,30 @@ func (r *dockerRuntime) WaitForReady(ctx context.Context, name string, internalP
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
-	// Get the host port
-	portCmd := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{(index (index .NetworkSettings.Ports \""+fmt.Sprintf("%d", internalPort)+"/tcp\") 0).HostPort}}", containerName)
+	// Auto-detect host port from container inspect
+	portCmd := exec.CommandContext(ctx, "docker", "inspect",
+		"--format", "{{json .NetworkSettings.Ports}}", containerName)
 	portOut, err := portCmd.CombinedOutput()
 	if err != nil {
 		return nil
 	}
-	hostPort := 0
-	if _, err := fmt.Sscanf(strings.TrimSpace(string(portOut)), "%d", &hostPort); err != nil {
+	var ports map[string][]map[string]string
+	if err := json.Unmarshal(portOut, &ports); err != nil {
+		return nil
+	}
+	var hostPort int
+	for _, bindings := range ports {
+		for _, b := range bindings {
+			if hp := b["HostPort"]; hp != "" {
+				fmt.Sscanf(hp, "%d", &hostPort)
+				break
+			}
+		}
+		if hostPort != 0 {
+			break
+		}
+	}
+	if hostPort == 0 {
 		return nil
 	}
 	return waitForPort(ctx, "127.0.0.1", hostPort, 30*time.Second)
