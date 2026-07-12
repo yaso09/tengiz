@@ -1,0 +1,59 @@
+package idle
+
+import (
+	"context"
+	"io"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/yasir/tengiz/internal/types"
+)
+
+type mockRuntime struct {
+	stopped atomic.Bool
+}
+
+func (m *mockRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
+func (m *mockRuntime) Start(ctx context.Context, name string) error { return nil }
+func (m *mockRuntime) Stop(ctx context.Context, name string) error { m.stopped.Store(true); return nil }
+func (m *mockRuntime) Remove(ctx context.Context, name string) error { return nil }
+func (m *mockRuntime) IsActive(ctx context.Context, name string) (bool, error) { return false, nil }
+func (m *mockRuntime) List(ctx context.Context) ([]types.AppStatus, error) { return nil, nil }
+func (m *mockRuntime) Logs(ctx context.Context, name string, follow bool) (io.ReadCloser, error) { return nil, nil }
+func (m *mockRuntime) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
+
+func TestResetExtendsTimer(t *testing.T) {
+	mock := &mockRuntime{}
+	mgr := New(mock, 50*time.Millisecond)
+
+	mgr.Reset("testapp")
+	time.Sleep(30 * time.Millisecond)
+	mgr.Reset("testapp") // reset before expiry
+	time.Sleep(30 * time.Millisecond)
+	mgr.Reset("testapp") // reset again
+	time.Sleep(30 * time.Millisecond)
+
+	if mock.stopped.Load() {
+		t.Error("app stopped too early, Reset() did not extend timer")
+	}
+
+	// wait for final timer to expire
+	time.Sleep(60 * time.Millisecond)
+	if !mock.stopped.Load() {
+		t.Error("app was not stopped after idle timeout")
+	}
+}
+
+func TestStopPreventsTimeout(t *testing.T) {
+	mock := &mockRuntime{}
+	mgr := New(mock, 50*time.Millisecond)
+
+	mgr.Reset("testapp")
+	mgr.Stop("testapp")
+	time.Sleep(100 * time.Millisecond)
+
+	if mock.stopped.Load() {
+		t.Error("app was stopped despite Stop() being called")
+	}
+}
