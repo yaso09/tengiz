@@ -38,8 +38,37 @@ jobs:
       - name: Build (windows/amd64)
         run: GOOS=windows GOARCH=amd64 go build -o tengiz-windows-amd64.exe .
 
-      - name: Upload binaries
+      - name: Upload linux/amd64
         uses: actions/upload-artifact@v4
         with:
-          name: tengiz-binaries
-          path: tengiz-*
+          name: tengiz-linux-amd64
+          path: tengiz-linux-amd64
+          if-no-files-found: error
+
+      - name: Upload linux/arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: tengiz-linux-arm64
+          path: tengiz-linux-arm64
+          if-no-files-found: error
+
+      - name: Upload darwin/amd64
+        uses: actions/upload-artifact@v4
+        with:
+          name: tengiz-darwin-amd64
+          path: tengiz-darwin-amd64
+          if-no-files-found: error
+
+      - name: Upload darwin/arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: tengiz-darwin-arm64
+          path: tengiz-darwin-arm64
+          if-no-files-found: error
+
+      - name: Upload windows/amd64
+        uses: actions/upload-artifact@v4
+        with:
+          name: tengiz-windows-amd64
+          path: tengiz-windows-amd64.exe
+          if-no-files-found: error
