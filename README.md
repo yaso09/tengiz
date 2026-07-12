@@ -35,33 +35,72 @@ go build -o tengiz .
 
 ## Quick Start
 
-### 1. Deploy an application
-
 ```bash
 cd my-project
-tengiz deploy
+tengiz deploy          # detect framework, build image, start container
+tengiz proxy           # start reverse proxy on :8080 with scale-to-zero
+# Visit http://my-project.tengiz.local:8080
 ```
 
-Tengiz detects the framework, builds a Docker image, starts the container, and assigns a port.
+## CLI Reference
 
-### 2. Start the proxy (for scale-to-zero + routing)
+### `tengiz deploy [directory]`
 
-```bash
-tengiz proxy
-```
+Build and deploy an application.
 
-Now visit `http://my-project.tengiz.local:8080`. The proxy routes by hostname.
+| Argument | Description |
+|----------|-------------|
+| `directory` | Project directory (default: `.`) |
 
-### 3. Manage applications
+Detects the framework, builds a Docker image, allocates a port (9000-9999), starts the container, and persists the config to `~/.tengiz/`. If no `.tengiz.yaml` exists, uses the directory name as app name with serverless defaults.
 
-```bash
-tengiz ps          # List all apps
-tengiz logs my-app # Show logs
-tengiz logs -f my-app  # Follow logs
-tengiz stop my-app  # Stop container
-tengiz start my-app # Cold start container
-tengiz rm my-app    # Remove app entirely
-```
+### `tengiz proxy`
+
+Start the reverse proxy on port `:8080`.
+
+Restores previously deployed apps from `~/.tengiz/apps.json` and registers their routes. Routes by hostname: `http://<app-name>.tengiz.local:8080` → container port. If a container is stopped, performs a cold start on the first request. Resets the idle timer on each request (default 5m timeout). Press Ctrl+C to stop.
+
+### `tengiz ps`
+
+List all deployed applications and their status.
+
+Output: `NAME`, `STATE` (running/stopped), `PORT`.
+
+### `tengiz logs [-f] <app>`
+
+Show application logs.
+
+| Flag | Description |
+|------|-------------|
+| `-f`, `--follow` | Stream logs in real time |
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name (required) |
+
+### `tengiz start <app>`
+
+Cold-start a stopped container.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name (required) |
+
+### `tengiz stop <app>`
+
+Stop a running container (5s grace period).
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name (required) |
+
+### `tengiz rm <app>`
+
+Remove an application completely — stops the container, deletes it, and cleans up `~/.tengiz/apps.json`.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name (required) |
 
 ## Configuration
 
@@ -96,10 +135,10 @@ When no Dockerfile exists, Tengiz auto-generates one with a multi-stage build op
 ## Architecture
 
 ```
-                    ┌──────────────────┐
-                    │   tengiz proxy    │
-                    │  (port 8080)      │
-                    └──────┬───────────┘
+                 ┌──────────────────┐
+                 │   tengiz proxy   │
+                 │  (port 8080)     │
+                 └─────────┬────────┘
                            │
               ┌────────────┴────────────┐
               │  Host-based routing     │
@@ -108,9 +147,9 @@ When no Dockerfile exists, Tengiz auto-generates one with a multi-stage build op
               └────────────┬────────────┘
                            │
               ┌────────────┴────────────┐
-              │  Runtime (Docker)        │
-              │  - Create / Start / Stop │
-              │  - Scale-to-zero idle    │
+              │  Runtime (Docker)       │
+              │  - Create / Start / Stop│
+              │  - Scale-to-zero idle   │
               └─────────────────────────┘
 ```
 
