@@ -8,3 +8,4 @@ tengiz-linux-*
 tengiz-darwin-*
 tengiz-windows-*
 */__pycache__
+*.egg-info

@@ -1,2 +1,0 @@
-[console_scripts]
-tengiz-installer = installer.__main__:main

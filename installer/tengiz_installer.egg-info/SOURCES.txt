@@ -1,7 +1,0 @@
-pyproject.toml
-tengiz_installer.egg-info/PKG-INFO
-tengiz_installer.egg-info/SOURCES.txt
-tengiz_installer.egg-info/dependency_links.txt
-tengiz_installer.egg-info/entry_points.txt
-tengiz_installer.egg-info/requires.txt
-tengiz_installer.egg-info/top_level.txt
