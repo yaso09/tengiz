@@ -1,6 +1,6 @@
 module github.com/yasir/tengiz
 
-go 1.20
+go 1.26.0
 
 require (
 	github.com/spf13/cobra v1.10.2
