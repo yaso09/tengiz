@@ -3,3 +3,7 @@ sources
 *.test
 *.out
 dist/
+Dockerfile
+tengiz-linux-*
+tengiz-darwin-*
+tengiz-windows-*
