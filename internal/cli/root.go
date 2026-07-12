@@ -23,6 +23,7 @@ var dataDir string
 func init() {
 	home, _ := os.UserHomeDir()
 	dataDir = filepath.Join(home, ".tengiz")
+	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(deployCmd)
 	rootCmd.AddCommand(proxyCmd)
 	rootCmd.AddCommand(psCmd)
@@ -36,6 +37,40 @@ var rootCmd = &cobra.Command{
 	Use:   "tengiz",
 	Short: "Tengiz - Serverless deployment platform",
 	Long:  "Tengiz is a Vercel alternative. Deploy any app with scale-to-zero.",
+}
+
+var initCmd = &cobra.Command{
+	Use:   "init [name]",
+	Short: "Create a .tengiz.yaml configuration file",
+	Long:  "Creates a .tengiz.yaml in the current directory with an optional app name. Prompts for missing values.",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := filepath.Base(getwd())
+		if len(args) > 0 {
+			name = args[0]
+		}
+
+		path := ".tengiz.yaml"
+		if _, err := os.Stat(path); err == nil {
+			return fmt.Errorf(".tengiz.yaml already exists")
+		}
+
+		content := fmt.Sprintf(`name: %s
+# port: 3000            # container internal port (auto-detected if omitted)
+serverless:
+  enabled: true
+  idle_timeout: 5m      # scale-to-zero timeout
+# domains:
+#   - app.example.com
+`, name)
+
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			return fmt.Errorf("write .tengiz.yaml: %w", err)
+		}
+
+		fmt.Printf("[tengiz] created .tengiz.yaml for %s\n", name)
+		return nil
+	},
 }
 
 var deployCmd = &cobra.Command{
@@ -242,6 +277,14 @@ var logsCmd = &cobra.Command{
 		_, err = io.Copy(os.Stdout, reader)
 		return err
 	},
+}
+
+func getwd() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "app"
+	}
+	return wd
 }
 
 func Execute() {

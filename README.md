@@ -44,6 +44,16 @@ tengiz proxy           # start reverse proxy on :8080 with scale-to-zero
 
 ## CLI Reference
 
+### `tengiz init [name]`
+
+Create a `.tengiz.yaml` configuration file in the current directory.
+
+| Argument | Description |
+|----------|-------------|
+| `name` | Application name (optional, defaults to directory name) |
+
+Creates a minimal `.tengiz.yaml` with serverless enabled. Errors if one already exists.
+
 ### `tengiz deploy [directory]`
 
 Build and deploy an application.
