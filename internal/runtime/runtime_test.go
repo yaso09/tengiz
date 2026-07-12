@@ -4,18 +4,15 @@ import (
 	"testing"
 )
 
-func TestNew(t *testing.T) {
-	m := New()
+func TestNewStub(t *testing.T) {
+	m := NewStub()
 	if m == nil {
-		t.Fatal("New() returned nil")
+		t.Fatal("NewStub() returned nil")
 	}
 }
 
-func TestStubMethods(t *testing.T) {
-	m := New()
-	if m == nil {
-		t.Fatal("New() returned nil")
-	}
+func TestStubSatisfiesInterface(t *testing.T) {
+	m := NewStub()
 	var iface Manager = m
 	if iface == nil {
 		t.Fatal("Manager interface not satisfied")

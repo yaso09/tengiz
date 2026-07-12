@@ -20,7 +20,7 @@ type Manager interface {
 
 type stubManager struct{}
 
-func New() Manager {
+func NewStub() Manager {
 	return &stubManager{}
 }
 
