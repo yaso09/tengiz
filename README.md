@@ -64,13 +64,14 @@ Build and deploy an application.
 
 Detects the framework, builds a Docker image, allocates a port (9000-9999), starts the container, and persists the config to `~/.tengiz/`. If no `.tengiz.yaml` exists, uses the directory name as app name with serverless defaults.
 
-### `tengiz proxy [-a <app>]`
+### `tengiz proxy [-a <app>] [-p <port>]`
 
-Start the reverse proxy on port `:8080`.
+Start the reverse proxy.
 
 | Flag | Description |
 |------|-------------|
 | `-a`, `--app` | Route all requests to this app (bypasses hostname routing) |
+| `-p`, `--port` | Listen port (default: 8080) |
 
 Restores previously deployed apps from `~/.tengiz/apps.json` and registers their routes. Routes by hostname: `http://<app-name>.tengiz.local:8080` → container port. Use `-a <app>` to route all traffic (including `localhost:8080`) to a single app. If a container is stopped, performs a cold start on the first request. Resets the idle timer on each request (default 5m timeout). Press Ctrl+C to stop.
 

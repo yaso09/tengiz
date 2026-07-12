@@ -150,13 +150,14 @@ var proxyCmd = &cobra.Command{
 	Short: "Start the reverse proxy",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appFlag, _ := cmd.Flags().GetString("app")
+		portFlag, _ := cmd.Flags().GetInt("port")
 
 		rt, err := runtime.NewDocker()
 		if err != nil {
 			return fmt.Errorf("docker: %w", err)
 		}
 
-		p := proxy.New(rt, 8080)
+		p := proxy.New(rt, portFlag)
 
 		if appFlag != "" {
 			p.SetDefaultApp(appFlag)
@@ -295,6 +296,7 @@ func getwd() string {
 
 func Execute() {
 	proxyCmd.Flags().StringP("app", "a", "", "route all requests to this app (bypasses hostname routing)")
+	proxyCmd.Flags().IntP("port", "p", 8080, "proxy listen port")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
