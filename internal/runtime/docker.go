@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os/exec"
 	"strings"
@@ -50,12 +51,48 @@ func (r *dockerRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageT
 
 func (r *dockerRuntime) Start(ctx context.Context, name string) error {
 	containerName := fmt.Sprintf("tengiz-%s", name)
+
+	// Get image before start (inspect fails on stopped containers for some fields)
+	imageTag, err := r.getImageTag(ctx, containerName)
+	if err != nil {
+		imageTag = ""
+	}
+
 	cmd := exec.CommandContext(ctx, "docker", "start", containerName)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker start: %w\n%s", err, string(out))
 	}
+
+	// Check if container is actually running (may have exited immediately)
+	active, _ := r.IsActive(ctx, name)
+	if !active && imageTag != "" {
+		// Container exited. Recreate it.
+		log.Printf("[runtime] container %s exited after start, recreating", name)
+		exec.CommandContext(ctx, "docker", "rm", "-f", containerName).Run()
+		cmd := exec.CommandContext(ctx, "docker", "run", "-d",
+			"--name", containerName,
+			"--label", fmt.Sprintf("%s=%s", labelKey, name),
+			"--restart", "no",
+			imageTag,
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("docker recreate: %w\n%s", err, string(out))
+		}
+	}
+
 	return nil
+}
+
+func (r *dockerRuntime) getImageTag(ctx context.Context, containerName string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "inspect",
+		"--format", "{{.Config.Image}}", containerName)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("get image: %w\n%s", err, string(out))
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func (r *dockerRuntime) Stop(ctx context.Context, name string) error {

@@ -21,6 +21,11 @@ type Proxy struct {
 	idleManager interface {
 		Reset(name string)
 	}
+	defaultApp string
+}
+
+func (p *Proxy) SetDefaultApp(app string) {
+	p.defaultApp = app
 }
 
 type route struct {
@@ -73,6 +78,9 @@ func (p *Proxy) extractApp(host string) string {
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	app := p.extractApp(r.Host)
+	if app == "" {
+		app = p.defaultApp
+	}
 	if app == "" {
 		http.Error(w, "missing app name in host", http.StatusBadRequest)
 		return
