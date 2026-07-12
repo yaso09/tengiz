@@ -261,6 +261,10 @@ go test ./... -v -count=1
 ```
 tengiz/
 ├── main.go                  # Entry point
+├── installer/               # TUI installer (Python/Textual)
+│   ├── app.py               #   Textual app
+│   ├── gh.py                #   GitHub API client
+│   └── requirements.txt     #   Dependencies
 ├── internal/
 │   ├── builder/             # Framework detection + Dockerfile generation
 │   ├── cli/                 # Cobra CLI commands
@@ -269,8 +273,22 @@ tengiz/
 │   ├── proxy/               # Reverse proxy with cold-start routing
 │   ├── runtime/             # Docker container lifecycle (via CLI)
 │   └── types/               # Shared types
-└── .github/workflows/ci.yml # CI pipeline
+├── .github/workflows/
+│   ├── ci.yml               # CI pipeline
+│   └── daily-analysis.yml   # Daily competitor analysis
 ```
+
+### Installer (TUI)
+
+A Textual-based TUI installer for downloading and installing Tengiz binaries:
+
+```bash
+cd installer
+pip install -r requirements.txt
+python -m installer
+```
+
+Lists both stable releases (from GitHub Releases) and per-commit builds (from CI artifacts). Auto-detects OS/arch and lets you download + install with one click.
 
 ### CI Pipeline
 

@@ -7,3 +7,4 @@ Dockerfile
 tengiz-linux-*
 tengiz-darwin-*
 tengiz-windows-*
+*/__pycache__
