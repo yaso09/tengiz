@@ -1,0 +1,57 @@
+package runtime
+
+import (
+	"context"
+	"io"
+
+	"github.com/yasir/tengiz/internal/types"
+)
+
+type Manager interface {
+	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
+	Start(ctx context.Context, name string) error
+	Stop(ctx context.Context, name string) error
+	Remove(ctx context.Context, name string) error
+	IsActive(ctx context.Context, name string) (bool, error)
+	List(ctx context.Context) ([]types.AppStatus, error)
+	Logs(ctx context.Context, name string, follow bool) (io.ReadCloser, error)
+	WaitForReady(ctx context.Context, name string, internalPort int) error
+}
+
+type stubManager struct{}
+
+func New() Manager {
+	return &stubManager{}
+}
+
+func (m *stubManager) Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error {
+	return nil
+}
+
+func (m *stubManager) Start(ctx context.Context, name string) error {
+	return nil
+}
+
+func (m *stubManager) Stop(ctx context.Context, name string) error {
+	return nil
+}
+
+func (m *stubManager) Remove(ctx context.Context, name string) error {
+	return nil
+}
+
+func (m *stubManager) IsActive(ctx context.Context, name string) (bool, error) {
+	return false, nil
+}
+
+func (m *stubManager) List(ctx context.Context) ([]types.AppStatus, error) {
+	return nil, nil
+}
+
+func (m *stubManager) Logs(ctx context.Context, name string, follow bool) (io.ReadCloser, error) {
+	return nil, nil
+}
+
+func (m *stubManager) WaitForReady(ctx context.Context, name string, internalPort int) error {
+	return nil
+}
