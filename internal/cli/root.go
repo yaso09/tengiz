@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"time"
@@ -31,6 +32,7 @@ func init() {
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(rmCmd)
 	rootCmd.AddCommand(logsCmd)
+	rootCmd.AddCommand(devCmd)
 }
 
 var rootCmd = &cobra.Command{
@@ -287,6 +289,61 @@ var logsCmd = &cobra.Command{
 		defer reader.Close()
 		_, err = io.Copy(os.Stdout, reader)
 		return err
+	},
+}
+
+var devCmd = &cobra.Command{
+	Use:   "dev [directory]",
+	Short: "Run the development server locally",
+	Long:  "Detects the framework and runs the development server without Docker. Streams output to terminal.",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dir := "."
+		if len(args) > 0 {
+			dir = args[0]
+		}
+
+		detection, err := builder.Detect(dir)
+		if err != nil {
+			return fmt.Errorf("detect: %w", err)
+		}
+		fmt.Printf("[tengiz] detected: %s (port %d)\n", detection.Framework, detection.InternalPort)
+
+		var devArgs []string
+		switch detection.Framework {
+		case builder.FrameworkNextJS, builder.FrameworkVite, builder.FrameworkNode:
+			devArgs = []string{"npm", "run", "dev"}
+		case builder.FrameworkGo:
+			devArgs = []string{"go", "run", "."}
+		case builder.FrameworkPython:
+			devArgs = []string{"python", "app.py"}
+		case builder.FrameworkDocker:
+			return fmt.Errorf("dev mode not supported for Docker-based projects; run your Dockerfile directly")
+		case builder.FrameworkStatic:
+			return fmt.Errorf("dev mode not supported for static sites; serve the directory with any HTTP server")
+		default:
+			return fmt.Errorf("unsupported framework: %s", detection.Framework)
+		}
+
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+
+		dcmd := exec.CommandContext(ctx, devArgs[0], devArgs[1:]...)
+		dcmd.Dir = dir
+		dcmd.Stdout = os.Stdout
+		dcmd.Stderr = os.Stderr
+		dcmd.Env = append(os.Environ(),
+			fmt.Sprintf("PORT=%d", detection.InternalPort),
+		)
+
+		fmt.Printf("[tengiz] running: %s (http://localhost:%d)\n", detection.Framework, detection.InternalPort)
+		if err := dcmd.Run(); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("dev server: %w", err)
+		}
+		return nil
 	},
 }
 
