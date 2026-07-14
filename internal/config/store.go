@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -79,6 +80,53 @@ func (s *Store) FreePort(port int) error {
 	s.readJSON("ports.json", &ports)
 	delete(ports, port)
 	return s.writeJSON("ports.json", ports)
+}
+
+func (s *Store) GetApp(name string) (*types.AppEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make(map[string]types.AppEntry)
+	s.readJSON("apps.json", &apps)
+	app, ok := apps[name]
+	if !ok {
+		return nil, fmt.Errorf("app %q not found", name)
+	}
+	return &app, nil
+}
+
+func (s *Store) UpdateApp(app types.AppEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make(map[string]types.AppEntry)
+	s.readJSON("apps.json", &apps)
+	apps[app.Name] = app
+	return s.writeJSON("apps.json", apps)
+}
+
+func (s *Store) AddDeployment(appName string, dep types.DeploymentEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	deployments := make(map[string][]types.DeploymentEntry)
+	s.readJSON("deployments.json", &deployments)
+	entries := deployments[appName]
+	entries = append(entries, dep)
+	if len(entries) > 10 {
+		entries = entries[len(entries)-10:]
+	}
+	deployments[appName] = entries
+	return s.writeJSON("deployments.json", deployments)
+}
+
+func (s *Store) GetDeployments(appName string) ([]types.DeploymentEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	deployments := make(map[string][]types.DeploymentEntry)
+	s.readJSON("deployments.json", &deployments)
+	return deployments[appName], nil
 }
 
 func (s *Store) readJSON(name string, v interface{}) {

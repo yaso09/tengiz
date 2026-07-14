@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -77,7 +78,7 @@ serverless:
 
 var deployCmd = &cobra.Command{
 	Use:   "deploy [directory]",
-	Short: "Build and deploy an application",
+	Short: "Build and deploy an application (zero-downtime)",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir := "."
@@ -127,26 +128,112 @@ var deployCmd = &cobra.Command{
 		}
 
 		store := config.NewStore(dataDir)
-		port, err := store.AllocatePort(cfg.Name)
+
+		// Check if this app already exists (previous deploy)
+		existingApp, lookupErr := store.GetApp(cfg.Name)
+
+		if lookupErr != nil {
+			// First deploy — simple: allocate port, create container
+			port, err := store.AllocatePort(cfg.Name)
+			if err != nil {
+				return fmt.Errorf("port: %w", err)
+			}
+
+			if err := rt.Create(context.Background(), cfg, imageTag, port); err != nil {
+				return fmt.Errorf("create: %w", err)
+			}
+			fmt.Printf("[tengiz] running on port %d\n", port)
+
+			store.SaveApp(types.AppEntry{
+				Name:     cfg.Name,
+				ImageTag: imageTag,
+				Port:     port,
+				Domains:  cfg.Domains,
+				Config:   *cfg,
+			})
+
+			if err := proxy.RegisterRouteWithProxy(cfg.Name, port); err != nil {
+				log.Printf("[tengiz] proxy not available (route will be registered on proxy start): %v", err)
+			}
+
+			fmt.Printf("[tengiz] deployed: %s at http://%s.tengiz.local:%d\n",
+				cfg.Name, cfg.Name, port)
+			return nil
+		}
+
+		// Zero-downtime deploy: blue/green
+		deploymentID := fmt.Sprintf("%d", time.Now().Unix())
+
+		// Allocate a second port for the new container
+		newPort, err := store.AllocatePort(cfg.Name)
 		if err != nil {
-			return fmt.Errorf("port: %w", err)
+			return fmt.Errorf("port allocation: %w", err)
 		}
 
-		if err := rt.Create(context.Background(), cfg, imageTag, port); err != nil {
-			return fmt.Errorf("create: %w", err)
+		// Create new container with versioned name
+		if err := rt.CreateVersioned(context.Background(), cfg, imageTag, newPort, deploymentID); err != nil {
+			store.FreePort(newPort)
+			return fmt.Errorf("create versioned: %w", err)
 		}
-		fmt.Printf("[tengiz] running on port %d\n", port)
+		fmt.Printf("[tengiz] new container starting on port %d\n", newPort)
 
-		store.SaveApp(types.AppEntry{
-			Name:     cfg.Name,
-			ImageTag: imageTag,
-			Port:     port,
-			Domains:  cfg.Domains,
-			Config:   *cfg,
+		// Wait for the new container to be ready
+		if err := rt.WaitForReady(context.Background(), fmt.Sprintf("%s-%s", cfg.Name, deploymentID), cfg.Port); err != nil {
+			log.Printf("[tengiz] warning: new container may not be ready: %v", err)
+		}
+
+		// Register new route with proxy (if running)
+		if err := proxy.RegisterRouteWithProxy(cfg.Name, newPort); err != nil {
+			log.Printf("[tengiz] proxy not available (route will be registered on proxy start): %v", err)
+		}
+
+		// Stop old container
+		oldSuffix := existingApp.DeploymentSuffix
+		if oldSuffix != "" {
+			if err := rt.RemoveBySuffix(context.Background(), cfg.Name, oldSuffix); err != nil {
+				log.Printf("[tengiz] warning: failed to remove old container: %v", err)
+			}
+		} else {
+			if err := rt.Remove(context.Background(), cfg.Name); err != nil {
+				log.Printf("[tengiz] warning: failed to remove old container: %v", err)
+			}
+		}
+
+		// Free old port
+		store.FreePort(existingApp.Port)
+
+		// Record deployment in history
+		store.AddDeployment(cfg.Name, types.DeploymentEntry{
+			ID:        deploymentID,
+			ImageTag:  imageTag,
+			Port:      newPort,
+			CreatedAt: time.Now(),
+			Status:    string(types.DeployActive),
 		})
 
-		fmt.Printf("[tengiz] deployed: %s at http://%s.tengiz.local:%d\n",
-			cfg.Name, cfg.Name, port)
+		// Mark previous deployment as previous
+		if existingApp.DeploymentSuffix != "" {
+			store.AddDeployment(cfg.Name, types.DeploymentEntry{
+				ID:        existingApp.DeploymentSuffix,
+				ImageTag:  existingApp.ImageTag,
+				Port:      existingApp.Port,
+				CreatedAt: time.Now(),
+				Status:    string(types.DeployPrevious),
+			})
+		}
+
+		// Update store with new app entry
+		store.SaveApp(types.AppEntry{
+			Name:             cfg.Name,
+			ImageTag:         imageTag,
+			Port:             newPort,
+			Domains:          cfg.Domains,
+			Config:           *cfg,
+			DeploymentSuffix: deploymentID,
+		})
+
+		fmt.Printf("[tengiz] deployed (zero-downtime): %s at http://%s.tengiz.local:%d\n",
+			cfg.Name, cfg.Name, newPort)
 		return nil
 	},
 }

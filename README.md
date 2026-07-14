@@ -6,7 +6,10 @@
 
 - **Framework auto-detection** — Next.js, Vite, Go, Node.js, Python, static sites. No config needed.
 - **Scale-to-zero** — Containers stop after 5 minutes of inactivity, start on first request (cold start).
-- **On-demand reverse proxy** — Route traffic by hostname (`myapp.tengiz.local:8080`).
+- **Zero-downtime deployment** — Blue/green container switching: new container starts before the old one stops, traffic switches atomically at the proxy layer.
+- **On-demand reverse proxy** — Route traffic by hostname (`myapp.tengiz.local:8080`). Admin API (`127.0.0.1:9099`) for dynamic route management.
+- **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
+- **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
 
@@ -56,13 +59,13 @@ Creates a minimal `.tengiz.yaml` with serverless enabled. Errors if one already 
 
 ### `tengiz deploy [directory]`
 
-Build and deploy an application.
+Build and deploy an application with zero-downtime.
 
 | Argument | Description |
 |----------|-------------|
 | `directory` | Project directory (default: `.`) |
 
-Detects the framework, builds a Docker image, allocates a port (9000-9999), starts the container, and persists the config to `~/.tengiz/`. If no `.tengiz.yaml` exists, uses the directory name as app name with serverless defaults.
+Detects the framework, builds a Docker image, and deploys. On first deploy, allocates a port (9000-9999), starts the container. On subsequent deploys, performs a **blue/green switch**: new versioned container starts on a new port, readiness is checked, traffic is routed to the new container atomically via the proxy admin API, then the old container is stopped and removed. Deployment history is recorded in `~/.tengiz/deployments.json`. If no `.tengiz.yaml` exists, uses the directory name as app name with serverless defaults.
 
 ### `tengiz proxy [-a <app>] [-p <port>]`
 
@@ -74,6 +77,8 @@ Start the reverse proxy.
 | `-p`, `--port` | Listen port (default: 8080) |
 
 Restores previously deployed apps from `~/.tengiz/apps.json` and registers their routes. Routes by hostname: `http://<app-name>.tengiz.local:8080` → container port. Use `-a <app>` to route all traffic (including `localhost:8080`) to a single app. If a container is stopped, performs a cold start on the first request. Resets the idle timer on each request (default 5m timeout). Press Ctrl+C to stop.
+
+The proxy also starts an **admin API** on `127.0.0.1:9099` for dynamic route management. During deploy, `POST /register` and `POST /unregister` endpoints allow the CLI to update routes atomically without restarting the proxy.
 
 ### `tengiz ps`
 
@@ -129,6 +134,13 @@ serverless:
   idle_timeout: 5m    # scale-to-zero timeout
 domains:
   - my-app.example.com
+healthcheck:
+  enabled: true
+  endpoint: /health
+  port: 3000
+  interval: 10
+  retries: 3
+  timeout: 5
 ```
 
 Without a config file, Tengiz uses defaults: app name = directory name, port auto-detected, serverless enabled, 5m timeout.
@@ -150,22 +162,32 @@ When no Dockerfile exists, Tengiz auto-generates one with a multi-stage build op
 ## Architecture
 
 ```
-                 ┌──────────────────┐
-                 │   tengiz proxy   │
-                 │  (port 8080)     │
-                 └─────────┬────────┘
-                           │
-              ┌────────────┴────────────┐
-              │  Host-based routing     │
-              │  app1 → :9001           │
-              │  app2 → :9002           │
-              └────────────┬────────────┘
-                           │
-              ┌────────────┴────────────┐
-              │  Runtime (Docker)       │
-              │  - Create / Start / Stop│
-              │  - Scale-to-zero idle   │
-              └─────────────────────────┘
+                     ┌──────────────────────┐
+                     │    tengiz proxy      │
+                     │  • port 8080 (traffic)│
+                     │  • port 9099 (admin)  │
+                     └──────────┬───────────┘
+                                │
+                   ┌────────────┴────────────┐
+                   │  Host-based routing     │
+                   │  app1 → :9001           │
+                   │  app2 → :9002           │
+                   │  (atomic route switch)  │
+                   └────────────┬────────────┘
+                                │
+              ┌─────────────────┴─────────────────┐
+              │  Runtime (Docker)                 │
+              │  - Create / CreateVersioned       │
+              │  - Start / Stop / RemoveBySuffix  │
+              │  - Scale-to-zero idle             │
+              └───────────────────────────────────┘
+                                │
+              ┌─────────────────┴─────────────────┐
+              │  Store (~/.tengiz/)               │
+              │  - apps.json (deployed apps)      │
+              │  - deployments.json (history)     │
+              │  - ports.json (port allocations)  │
+              └───────────────────────────────────┘
 ```
 
 ## Deployment Guide (Self-Hosted)

@@ -1,7 +1,9 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -21,7 +23,9 @@ type Proxy struct {
 	idleManager interface {
 		Reset(name string)
 	}
-	defaultApp string
+	defaultApp  string
+	adminServer *http.Server
+	adminWg     sync.WaitGroup
 }
 
 func (p *Proxy) SetDefaultApp(app string) {
@@ -115,6 +119,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Proxy) Start(ctx context.Context) error {
+	p.StartAdmin(ctx)
 	addr := fmt.Sprintf(":%d", p.port)
 	log.Printf("[proxy] listening on %s", addr)
 	server := &http.Server{
@@ -126,4 +131,123 @@ func (p *Proxy) Start(ctx context.Context) error {
 		server.Close()
 	}()
 	return server.ListenAndServe()
+}
+
+const adminAddr = "127.0.0.1:9099"
+
+func (p *Proxy) StartAdmin(ctx context.Context) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/register", p.handleRegister)
+	mux.HandleFunc("/unregister", p.handleUnregister)
+
+	p.adminServer = &http.Server{
+		Addr:    adminAddr,
+		Handler: mux,
+	}
+
+	p.adminWg.Add(1)
+	go func() {
+		defer p.adminWg.Done()
+		<-ctx.Done()
+		p.adminServer.Close()
+	}()
+
+	go func() {
+		if err := p.adminServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("[proxy] admin server error: %v", err)
+		}
+	}()
+}
+
+func (p *Proxy) StopAdmin() {
+	if p.adminServer != nil {
+		p.adminServer.Close()
+	}
+	p.adminWg.Wait()
+}
+
+type adminRegisterReq struct {
+	App  string `json:"app"`
+	Port int    `json:"port"`
+}
+
+type adminUnregisterReq struct {
+	App string `json:"app"`
+}
+
+func (p *Proxy) handleRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req adminRegisterReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.App == "" || req.Port == 0 {
+		http.Error(w, "app and port required", http.StatusBadRequest)
+		return
+	}
+	p.Register(req.App, req.Port)
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (p *Proxy) handleUnregister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req adminUnregisterReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.App == "" {
+		http.Error(w, "app required", http.StatusBadRequest)
+		return
+	}
+	p.Unregister(req.App)
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func RegisterRouteWithProxy(app string, port int) error {
+	body := adminRegisterReq{App: app, Port: port}
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(body); err != nil {
+		return err
+	}
+	resp, err := http.Post(fmt.Sprintf("http://%s/register", adminAddr), "application/json", &buf)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("admin API returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func UnregisterRouteWithProxy(app string) error {
+	body := adminUnregisterReq{App: app}
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(body); err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/unregister", adminAddr), &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("admin API returned %d", resp.StatusCode)
+	}
+	return nil
 }
