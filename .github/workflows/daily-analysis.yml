@@ -27,13 +27,13 @@ jobs:
       - name: Clone alternatives
         run: python clone_alternatives.py --dest ./sources --depth 1 --workers 4
 
-      - name: Run analysis
+      - name: Analyze Coolify
         uses: anomalyco/opencode/github@latest
         with:
           model: opencode/deepseek-v4-flash-free
-          agent: vercel-alt-router
+          agent: coolify-expert
           prompt: |
-            Analyze features from open-source Vercel alternatives that should be added to Tengiz (our Go-based Vercel alternative).
+            Analyze features from Coolify that should be added to Tengiz (our Go-based Vercel alternative).
 
             Current Tengiz capabilities:
             - CLI-based deploy (tengiz deploy)
@@ -44,15 +44,181 @@ jobs:
             - State persistence (~/.tengiz/*.json)
 
             Instructions:
-            1. Call each expert agent (@coolify-expert, @dokploy-expert, @dokku-expert, @caprover-expert, @kamal-expert, @komodo-expert, @juno-expert)
-            2. Ask what valuable features they have that Tengiz is missing and would make sense to add
-            3. Compare responses and filter for features suitable for Tengiz's architecture
-            4. Check docs/FUTURES_FEATURES.md for already recorded features
-            5. Append any new, unrecorded features to the file (mark with [Detected: $(date +%Y-%m-%d)])
+            1. Ask @coolify-expert what valuable features Coolify has that Tengiz is missing and would make sense to add
+            2. Check docs/FUTURES_FEATURES.md for already recorded features
+            3. Append any new, unrecorded features to the file (mark with [Detected: $(date +%Y-%m-%d)])
 
             Use this format for each feature:
             ## [Feature Name]
-            - **Source:** [alternative name]
+            - **Source:** Coolify
+            - **Description:** [brief description]
+            - **Why add to Tengiz:** [rationale]
+            - **Detected:** $(date +%Y-%m-%d)
+
+      - name: Analyze Dokploy
+        uses: anomalyco/opencode/github@latest
+        with:
+          model: opencode/deepseek-v4-flash-free
+          agent: dokploy-expert
+          prompt: |
+            Analyze features from Dokploy that should be added to Tengiz (our Go-based Vercel alternative).
+
+            Current Tengiz capabilities:
+            - CLI-based deploy (tengiz deploy)
+            - Framework auto-detection (Next.js, Vite, Go, Node, Python, static)
+            - Docker container management (exec-based, no Docker SDK)
+            - Scale-to-zero (configurable idle timeout)
+            - Reverse proxy (host-based routing)
+            - State persistence (~/.tengiz/*.json)
+
+            Instructions:
+            1. Ask @dokploy-expert what valuable features Dokploy has that Tengiz is missing and would make sense to add
+            2. Check docs/FUTURES_FEATURES.md for already recorded features
+            3. Append any new, unrecorded features to the file (mark with [Detected: $(date +%Y-%m-%d)])
+
+            Use this format for each feature:
+            ## [Feature Name]
+            - **Source:** Dokploy
+            - **Description:** [brief description]
+            - **Why add to Tengiz:** [rationale]
+            - **Detected:** $(date +%Y-%m-%d)
+
+      - name: Analyze Dokku
+        uses: anomalyco/opencode/github@latest
+        with:
+          model: opencode/deepseek-v4-flash-free
+          agent: dokku-expert
+          prompt: |
+            Analyze features from Dokku that should be added to Tengiz (our Go-based Vercel alternative).
+
+            Current Tengiz capabilities:
+            - CLI-based deploy (tengiz deploy)
+            - Framework auto-detection (Next.js, Vite, Go, Node, Python, static)
+            - Docker container management (exec-based, no Docker SDK)
+            - Scale-to-zero (configurable idle timeout)
+            - Reverse proxy (host-based routing)
+            - State persistence (~/.tengiz/*.json)
+
+            Instructions:
+            1. Ask @dokku-expert what valuable features Dokku has that Tengiz is missing and would make sense to add
+            2. Check docs/FUTURES_FEATURES.md for already recorded features
+            3. Append any new, unrecorded features to the file (mark with [Detected: $(date +%Y-%m-%d)])
+
+            Use this format for each feature:
+            ## [Feature Name]
+            - **Source:** Dokku
+            - **Description:** [brief description]
+            - **Why add to Tengiz:** [rationale]
+            - **Detected:** $(date +%Y-%m-%d)
+
+      - name: Analyze CapRover
+        uses: anomalyco/opencode/github@latest
+        with:
+          model: opencode/deepseek-v4-flash-free
+          agent: caprover-expert
+          prompt: |
+            Analyze features from CapRover that should be added to Tengiz (our Go-based Vercel alternative).
+
+            Current Tengiz capabilities:
+            - CLI-based deploy (tengiz deploy)
+            - Framework auto-detection (Next.js, Vite, Go, Node, Python, static)
+            - Docker container management (exec-based, no Docker SDK)
+            - Scale-to-zero (configurable idle timeout)
+            - Reverse proxy (host-based routing)
+            - State persistence (~/.tengiz/*.json)
+
+            Instructions:
+            1. Ask @caprover-expert what valuable features CapRover has that Tengiz is missing and would make sense to add
+            2. Check docs/FUTURES_FEATURES.md for already recorded features
+            3. Append any new, unrecorded features to the file (mark with [Detected: $(date +%Y-%m-%d)])
+
+            Use this format for each feature:
+            ## [Feature Name]
+            - **Source:** CapRover
+            - **Description:** [brief description]
+            - **Why add to Tengiz:** [rationale]
+            - **Detected:** $(date +%Y-%m-%d)
+
+      - name: Analyze Kamal
+        uses: anomalyco/opencode/github@latest
+        with:
+          model: opencode/deepseek-v4-flash-free
+          agent: kamal-expert
+          prompt: |
+            Analyze features from Kamal that should be added to Tengiz (our Go-based Vercel alternative).
+
+            Current Tengiz capabilities:
+            - CLI-based deploy (tengiz deploy)
+            - Framework auto-detection (Next.js, Vite, Go, Node, Python, static)
+            - Docker container management (exec-based, no Docker SDK)
+            - Scale-to-zero (configurable idle timeout)
+            - Reverse proxy (host-based routing)
+            - State persistence (~/.tengiz/*.json)
+
+            Instructions:
+            1. Ask @kamal-expert what valuable features Kamal has that Tengiz is missing and would make sense to add
+            2. Check docs/FUTURES_FEATURES.md for already recorded features
+            3. Append any new, unrecorded features to the file (mark with [Detected: $(date +%Y-%m-%d)])
+
+            Use this format for each feature:
+            ## [Feature Name]
+            - **Source:** Kamal
+            - **Description:** [brief description]
+            - **Why add to Tengiz:** [rationale]
+            - **Detected:** $(date +%Y-%m-%d)
+
+      - name: Analyze Komodo
+        uses: anomalyco/opencode/github@latest
+        with:
+          model: opencode/deepseek-v4-flash-free
+          agent: komodo-expert
+          prompt: |
+            Analyze features from Komodo that should be added to Tengiz (our Go-based Vercel alternative).
+
+            Current Tengiz capabilities:
+            - CLI-based deploy (tengiz deploy)
+            - Framework auto-detection (Next.js, Vite, Go, Node, Python, static)
+            - Docker container management (exec-based, no Docker SDK)
+            - Scale-to-zero (configurable idle timeout)
+            - Reverse proxy (host-based routing)
+            - State persistence (~/.tengiz/*.json)
+
+            Instructions:
+            1. Ask @komodo-expert what valuable features Komodo has that Tengiz is missing and would make sense to add
+            2. Check docs/FUTURES_FEATURES.md for already recorded features
+            3. Append any new, unrecorded features to the file (mark with [Detected: $(date +%Y-%m-%d)])
+
+            Use this format for each feature:
+            ## [Feature Name]
+            - **Source:** Komodo
+            - **Description:** [brief description]
+            - **Why add to Tengiz:** [rationale]
+            - **Detected:** $(date +%Y-%m-%d)
+
+      - name: Analyze Juno
+        uses: anomalyco/opencode/github@latest
+        with:
+          model: opencode/deepseek-v4-flash-free
+          agent: juno-expert
+          prompt: |
+            Analyze features from Juno that should be added to Tengiz (our Go-based Vercel alternative).
+
+            Current Tengiz capabilities:
+            - CLI-based deploy (tengiz deploy)
+            - Framework auto-detection (Next.js, Vite, Go, Node, Python, static)
+            - Docker container management (exec-based, no Docker SDK)
+            - Scale-to-zero (configurable idle timeout)
+            - Reverse proxy (host-based routing)
+            - State persistence (~/.tengiz/*.json)
+
+            Instructions:
+            1. Ask @juno-expert what valuable features Juno has that Tengiz is missing and would make sense to add
+            2. Check docs/FUTURES_FEATURES.md for already recorded features
+            3. Append any new, unrecorded features to the file (mark with [Detected: $(date +%Y-%m-%d)])
+
+            Use this format for each feature:
+            ## [Feature Name]
+            - **Source:** Juno
             - **Description:** [brief description]
             - **Why add to Tengiz:** [rationale]
             - **Detected:** $(date +%Y-%m-%d)
