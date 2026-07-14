@@ -43,3 +43,23 @@ func TestDeployZeroDowntimeCreatesVersionedContainer(t *testing.T) {
 		t.Fatal("mock does not implement Manager")
 	}
 }
+
+func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
+	configCmd, _, err := rootCmd.Find([]string{"config"})
+	if err != nil {
+		t.Fatalf("config command not found: %v", err)
+	}
+
+	expected := map[string]bool{"set": false, "get": false, "unset": false, "show": false}
+	for _, sub := range configCmd.Commands() {
+		if _, ok := expected[sub.Name()]; ok {
+			expected[sub.Name()] = true
+		}
+	}
+
+	for name, found := range expected {
+		if !found {
+			t.Fatalf("config subcommand %q not found", name)
+		}
+	}
+}
