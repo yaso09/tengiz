@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
 
 env:
-  OPENAI_BASE_URL: ${{ secrets.OPENCODE_ZEN_BASE_URL }}
+  OPENAI_BASE_URL: https://opencode.ai/zen/v1
   OPENAI_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
-  OPENCODE_MODEL: deepseek-v4-flash-free
+  OPENCODE_MODEL: opencode/deepseek-v4-flash-free
 
 jobs:
   analyze:
