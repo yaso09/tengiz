@@ -165,6 +165,66 @@ func (s *Store) UpdateApp(app types.AppEntry) error {
 	return s.writeJSON("apps.json", apps)
 }
 
+func (s *Store) AddDomain(appName, domain string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make(map[string]types.AppEntry)
+	s.readJSON("apps.json", &apps)
+	app, ok := apps[appName]
+	if !ok {
+		return fmt.Errorf("app %q not found", appName)
+	}
+	for _, d := range app.Domains {
+		if d == domain {
+			return fmt.Errorf("domain %q already added to app %q", domain, appName)
+		}
+	}
+	app.Domains = append(app.Domains, domain)
+	apps[appName] = app
+	return s.writeJSON("apps.json", apps)
+}
+
+func (s *Store) RemoveDomain(appName, domain string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make(map[string]types.AppEntry)
+	s.readJSON("apps.json", &apps)
+	app, ok := apps[appName]
+	if !ok {
+		return fmt.Errorf("app %q not found", appName)
+	}
+	found := false
+	for i, d := range app.Domains {
+		if d == domain {
+			app.Domains = append(app.Domains[:i], app.Domains[i+1:]...)
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("domain %q not found for app %q", domain, appName)
+	}
+	apps[appName] = app
+	return s.writeJSON("apps.json", apps)
+}
+
+func (s *Store) ListDomains(appName string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make(map[string]types.AppEntry)
+	s.readJSON("apps.json", &apps)
+	app, ok := apps[appName]
+	if !ok {
+		return nil, fmt.Errorf("app %q not found", appName)
+	}
+	result := make([]string, len(app.Domains))
+	copy(result, app.Domains)
+	return result, nil
+}
+
 func (s *Store) AddDeployment(appName string, dep types.DeploymentEntry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
