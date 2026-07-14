@@ -82,6 +82,66 @@ func (s *Store) FreePort(port int) error {
 	return s.writeJSON("ports.json", ports)
 }
 
+func (s *Store) GetEnv(appName, key string) (string, bool, error) {
+	app, err := s.GetApp(appName)
+	if err != nil {
+		return "", false, err
+	}
+	val, ok := app.Config.Env[key]
+	return val, ok, nil
+}
+
+func (s *Store) SetEnv(appName, key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make(map[string]types.AppEntry)
+	s.readJSON("apps.json", &apps)
+	app, ok := apps[appName]
+	if !ok {
+		return fmt.Errorf("app %q not found", appName)
+	}
+	if app.Config.Env == nil {
+		app.Config.Env = make(map[string]string)
+	}
+	app.Config.Env[key] = value
+	apps[appName] = app
+	return s.writeJSON("apps.json", apps)
+}
+
+func (s *Store) UnsetEnv(appName, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make(map[string]types.AppEntry)
+	s.readJSON("apps.json", &apps)
+	app, ok := apps[appName]
+	if !ok {
+		return fmt.Errorf("app %q not found", appName)
+	}
+	delete(app.Config.Env, key)
+	if len(app.Config.Env) == 0 {
+		app.Config.Env = nil
+	}
+	apps[appName] = app
+	return s.writeJSON("apps.json", apps)
+}
+
+func (s *Store) ListEnv(appName string) (map[string]string, error) {
+	app, err := s.GetApp(appName)
+	if err != nil {
+		return nil, err
+	}
+	if app.Config.Env == nil {
+		return map[string]string{}, nil
+	}
+	result := make(map[string]string, len(app.Config.Env))
+	for k, v := range app.Config.Env {
+		result[k] = v
+	}
+	return result, nil
+}
+
 func (s *Store) GetApp(name string) (*types.AppEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

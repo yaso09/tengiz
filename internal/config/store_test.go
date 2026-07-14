@@ -39,6 +39,76 @@ func TestSaveAndGetApp(t *testing.T) {
 	}
 }
 
+func TestStoreSetGetEnv(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	// Save an app first
+	s.SaveApp(types.AppEntry{Name: "testapp", Config: types.AppConfig{Name: "testapp"}})
+
+	// Set env
+	if err := s.SetEnv("testapp", "DATABASE_URL", "postgres://localhost/db"); err != nil {
+		t.Fatalf("SetEnv: %v", err)
+	}
+
+	// Get env
+	val, ok, err := s.GetEnv("testapp", "DATABASE_URL")
+	if err != nil {
+		t.Fatalf("GetEnv: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected env to exist")
+	}
+	if val != "postgres://localhost/db" {
+		t.Fatalf("expected 'postgres://localhost/db', got %q", val)
+	}
+}
+
+func TestStoreUnsetEnv(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{Name: "testapp", Config: types.AppConfig{
+		Name: "testapp",
+		Env:  map[string]string{"MY_KEY": "myval"},
+	}})
+
+	// Unset
+	if err := s.UnsetEnv("testapp", "MY_KEY"); err != nil {
+		t.Fatalf("UnsetEnv: %v", err)
+	}
+
+	// Verify gone
+	_, ok, err := s.GetEnv("testapp", "MY_KEY")
+	if err != nil {
+		t.Fatalf("GetEnv after unset: %v", err)
+	}
+	if ok {
+		t.Fatal("expected env to be unset")
+	}
+}
+
+func TestStoreListEnv(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{Name: "testapp", Config: types.AppConfig{
+		Name: "testapp",
+		Env:  map[string]string{"A": "1", "B": "2"},
+	}})
+
+	env, err := s.ListEnv("testapp")
+	if err != nil {
+		t.Fatalf("ListEnv: %v", err)
+	}
+	if len(env) != 2 {
+		t.Fatalf("expected 2 env vars, got %d", len(env))
+	}
+	if env["A"] != "1" || env["B"] != "2" {
+		t.Fatalf("unexpected env map: %v", env)
+	}
+}
+
 func TestAddDeploymentHistory(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)
