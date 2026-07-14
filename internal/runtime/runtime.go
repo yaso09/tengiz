@@ -9,10 +9,13 @@ import (
 
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
+	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Remove(ctx context.Context, name string) error
+	RemoveBySuffix(ctx context.Context, name string, suffix string) error
 	IsActive(ctx context.Context, name string) (bool, error)
+	GetContainerPort(ctx context.Context, name string, suffix string) (int, error)
 	List(ctx context.Context) ([]types.AppStatus, error)
 	Logs(ctx context.Context, name string, follow bool) (io.ReadCloser, error)
 	WaitForReady(ctx context.Context, name string, internalPort int) error
@@ -50,6 +53,18 @@ func (m *stubManager) List(ctx context.Context) ([]types.AppStatus, error) {
 
 func (m *stubManager) Logs(ctx context.Context, name string, follow bool) (io.ReadCloser, error) {
 	return nil, nil
+}
+
+func (m *stubManager) CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error {
+	return nil
+}
+
+func (m *stubManager) RemoveBySuffix(ctx context.Context, name string, suffix string) error {
+	return nil
+}
+
+func (m *stubManager) GetContainerPort(ctx context.Context, name string, suffix string) (int, error) {
+	return 0, nil
 }
 
 func (m *stubManager) WaitForReady(ctx context.Context, name string, internalPort int) error {

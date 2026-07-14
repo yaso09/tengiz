@@ -220,6 +220,67 @@ func (r *dockerRuntime) Logs(ctx context.Context, name string, follow bool) (io.
 	return stdout, nil
 }
 
+func (r *dockerRuntime) CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error {
+	internalPort := cfg.Port
+	if internalPort == 0 {
+		internalPort = 8080
+	}
+	containerName := fmt.Sprintf("tengiz-%s-%s", sanitizeContainerName(cfg.Name), suffix)
+
+	args := []string{
+		"run", "-d",
+		"--name", containerName,
+		"--label", fmt.Sprintf("%s=%s", labelKey, cfg.Name),
+		"--label", fmt.Sprintf("tengiz-deployment=%s", suffix),
+		"-p", fmt.Sprintf("127.0.0.1:%d:%d", port, internalPort),
+		"--restart", "no",
+		imageTag,
+	}
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker versioned run: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
+func (r *dockerRuntime) RemoveBySuffix(ctx context.Context, name string, suffix string) error {
+	containerName := fmt.Sprintf("tengiz-%s-%s", sanitizeContainerName(name), suffix)
+	cmd := exec.CommandContext(ctx, "docker", "rm", "-f", containerName)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker rm %s: %w\n%s", containerName, err, string(out))
+	}
+	return nil
+}
+
+func (r *dockerRuntime) GetContainerPort(ctx context.Context, name string, suffix string) (int, error) {
+	containerName := fmt.Sprintf("tengiz-%s-%s", sanitizeContainerName(name), suffix)
+	portCmd := exec.CommandContext(ctx, "docker", "inspect",
+		"--format", "{{json .NetworkSettings.Ports}}", containerName)
+	portOut, err := portCmd.CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("inspect %s: %w", containerName, err)
+	}
+	var ports map[string][]map[string]string
+	if err := json.Unmarshal(portOut, &ports); err != nil {
+		return 0, nil
+	}
+	var hostPort int
+	for _, bindings := range ports {
+		for _, b := range bindings {
+			if hp := b["HostPort"]; hp != "" {
+				fmt.Sscanf(hp, "%d", &hostPort)
+				break
+			}
+		}
+		if hostPort != 0 {
+			break
+		}
+	}
+	return hostPort, nil
+}
+
 func (r *dockerRuntime) WaitForReady(ctx context.Context, name string, internalPort int) error {
 	containerName := fmt.Sprintf("tengiz-%s", name)
 	// Wait for container to be running
