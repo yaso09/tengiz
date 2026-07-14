@@ -1,6 +1,6 @@
 ---
 description: Kamal (37signals) kod tabanı, agent'sız Docker deploy mimarisi konusunda uzman. Kamal ile ilgili sorularda otomatik devreye girer.
-mode: subagent
+mode: primary
 tools:
   write: false
   edit: false

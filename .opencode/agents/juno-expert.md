@@ -1,6 +1,6 @@
 ---
 description: Juno kod tabanı, WASM Satellite mimarisi ve serverless backend katmanı konusunda uzman. Juno ile ilgili sorularda otomatik devreye girer.
-mode: subagent
+mode: primary
 tools:
   write: false
   edit: false

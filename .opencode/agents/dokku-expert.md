@@ -1,6 +1,6 @@
 ---
 description: Dokku kod tabanı, plugin mimarisi ve git-push deploy mekanizması konusunda uzman. Dokku ile ilgili sorularda otomatik devreye girer.
-mode: subagent
+mode: primary
 tools:
   write: false
   edit: false

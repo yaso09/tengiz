@@ -1,6 +1,6 @@
 ---
 description: Dokploy kod tabanı, mimarisi ve deployment mantığı konusunda uzman. Dokploy ile ilgili sorularda otomatik devreye girer.
-mode: subagent
+mode: primary
 tools:
   write: false
   edit: false

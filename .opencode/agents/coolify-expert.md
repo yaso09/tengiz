@@ -1,6 +1,6 @@
 ---
 description: Coolify kod tabanı, mimarisi ve deployment mantığı konusunda uzman. Coolify ile ilgili sorularda otomatik devreye girer.
-mode: subagent
+mode: primary
 tools:
   write: false
   edit: false

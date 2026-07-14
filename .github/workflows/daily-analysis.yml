@@ -44,7 +44,7 @@ jobs:
             - State persistence (~/.tengiz/*.json)
 
             Instructions:
-            1. Ask @coolify-expert what valuable features Coolify has that Tengiz is missing and would make sense to add
+            1. Analyze the Coolify source code and identify valuable features that Tengiz is missing and would make sense to add
             2. Check docs/FUTURES_FEATURES.md for already recorded features
             3. Append any new, unrecorded features to the file (mark with [Detected: $(date +%Y-%m-%d)])
 
@@ -72,7 +72,7 @@ jobs:
             - State persistence (~/.tengiz/*.json)
 
             Instructions:
-            1. Ask @dokploy-expert what valuable features Dokploy has that Tengiz is missing and would make sense to add
+            1. Analyze the Dokploy source code and identify valuable features that Tengiz is missing and would make sense to add
             2. Check docs/FUTURES_FEATURES.md for already recorded features
             3. Append any new, unrecorded features to the file (mark with [Detected: $(date +%Y-%m-%d)])
 
@@ -100,7 +100,7 @@ jobs:
             - State persistence (~/.tengiz/*.json)
 
             Instructions:
-            1. Ask @dokku-expert what valuable features Dokku has that Tengiz is missing and would make sense to add
+            1. Analyze the Dokku source code and identify valuable features that Tengiz is missing and would make sense to add
             2. Check docs/FUTURES_FEATURES.md for already recorded features
             3. Append any new, unrecorded features to the file (mark with [Detected: $(date +%Y-%m-%d)])
 
@@ -128,7 +128,7 @@ jobs:
             - State persistence (~/.tengiz/*.json)
 
             Instructions:
-            1. Ask @caprover-expert what valuable features CapRover has that Tengiz is missing and would make sense to add
+            1. Analyze the CapRover source code and identify valuable features that Tengiz is missing and would make sense to add
             2. Check docs/FUTURES_FEATURES.md for already recorded features
             3. Append any new, unrecorded features to the file (mark with [Detected: $(date +%Y-%m-%d)])
 
@@ -156,7 +156,7 @@ jobs:
             - State persistence (~/.tengiz/*.json)
 
             Instructions:
-            1. Ask @kamal-expert what valuable features Kamal has that Tengiz is missing and would make sense to add
+            1. Analyze the Kamal source code and identify valuable features that Tengiz is missing and would make sense to add
             2. Check docs/FUTURES_FEATURES.md for already recorded features
             3. Append any new, unrecorded features to the file (mark with [Detected: $(date +%Y-%m-%d)])
 
@@ -184,7 +184,7 @@ jobs:
             - State persistence (~/.tengiz/*.json)
 
             Instructions:
-            1. Ask @komodo-expert what valuable features Komodo has that Tengiz is missing and would make sense to add
+            1. Analyze the Komodo source code and identify valuable features that Tengiz is missing and would make sense to add
             2. Check docs/FUTURES_FEATURES.md for already recorded features
             3. Append any new, unrecorded features to the file (mark with [Detected: $(date +%Y-%m-%d)])
 
@@ -212,7 +212,7 @@ jobs:
             - State persistence (~/.tengiz/*.json)
 
             Instructions:
-            1. Ask @juno-expert what valuable features Juno has that Tengiz is missing and would make sense to add
+            1. Analyze the Juno source code and identify valuable features that Tengiz is missing and would make sense to add
             2. Check docs/FUTURES_FEATURES.md for already recorded features
             3. Append any new, unrecorded features to the file (mark with [Detected: $(date +%Y-%m-%d)])
 

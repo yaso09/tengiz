@@ -1,6 +1,6 @@
 ---
 description: CapRover kod tabanı, Docker Swarm entegrasyonu ve one-click app sistemi konusunda uzman. CapRover ile ilgili sorularda otomatik devreye girer.
-mode: subagent
+mode: primary
 tools:
   write: false
   edit: false
