@@ -21,6 +21,9 @@ func (m *mockRuntime) Remove(ctx context.Context, name string) error { return ni
 func (m *mockRuntime) IsActive(ctx context.Context, name string) (bool, error) { return m.active, nil }
 func (m *mockRuntime) List(ctx context.Context) ([]types.AppStatus, error) { return nil, nil }
 func (m *mockRuntime) Logs(ctx context.Context, name string, follow bool) (io.ReadCloser, error) { return nil, nil }
+func (m *mockRuntime) CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error { return nil }
+func (m *mockRuntime) RemoveBySuffix(ctx context.Context, name string, suffix string) error { return nil }
+func (m *mockRuntime) GetContainerPort(ctx context.Context, name string, suffix string) (int, error) { return 0, nil }
 func (m *mockRuntime) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
 
 func TestExtractApp(t *testing.T) {
