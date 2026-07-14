@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/yaso09/tengiz/internal/types"
@@ -70,4 +71,93 @@ func TestIdleResetOnRequest(t *testing.T) {
 	req.Host = "testapp.tengiz.local"
 	w := httptest.NewRecorder()
 	p.ServeHTTP(w, req)
+}
+
+// adminPortMu prevents parallel admin server port conflicts
+var adminPortMu = make(chan struct{}, 1)
+
+func init() {
+	adminPortMu <- struct{}{}
+}
+
+func TestAdminRegisterEndpoint(t *testing.T) {
+	<-adminPortMu
+
+	ctx, cancel := context.WithCancel(context.Background())
+	mock := &mockRuntime{active: true}
+	p := New(mock, 8080)
+	p.StartAdmin(ctx)
+
+	defer func() {
+		cancel()
+		p.StopAdmin()
+		adminPortMu <- struct{}{}
+	}()
+
+	// Wait for admin server to start
+	var resp *http.Response
+	var err error
+	body := `{"app":"testapp","port":9001}`
+	for i := 0; i < 20; i++ {
+		resp, err = http.Post("http://127.0.0.1:9099/register", "application/json", strings.NewReader(body))
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+
+	p.mu.RLock()
+	_, ok := p.routes["testapp"]
+	p.mu.RUnlock()
+	if !ok {
+		t.Error("route not registered after admin API call")
+	}
+}
+
+func TestAdminUnregisterEndpoint(t *testing.T) {
+	<-adminPortMu
+
+	ctx, cancel := context.WithCancel(context.Background())
+	mock := &mockRuntime{active: true}
+	p := New(mock, 8080)
+	p.StartAdmin(ctx)
+	p.Register("testapp", 9001)
+
+	defer func() {
+		cancel()
+		p.StopAdmin()
+		adminPortMu <- struct{}{}
+	}()
+
+	var resp *http.Response
+	var err error
+	for i := 0; i < 20; i++ {
+		body := `{"app":"testapp"}`
+		req, _ := http.NewRequest("DELETE", "http://127.0.0.1:9099/unregister", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err = http.DefaultClient.Do(req)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+
+	p.mu.RLock()
+	_, ok := p.routes["testapp"]
+	p.mu.RUnlock()
+	if ok {
+		t.Error("route still registered after unregister")
+	}
 }
