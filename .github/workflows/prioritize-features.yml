@@ -1,0 +1,57 @@
+name: Prioritize Features
+
+on:
+  workflow_run:
+    workflows: ["Daily Feature Analysis"]
+    types:
+      - completed
+
+env:
+  OPENAI_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
+
+jobs:
+  prioritize:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prioritize features
+        uses: anomalyco/opencode/github@latest
+        with:
+          model: opencode/deepseek-v4-flash-free
+          prompt: |
+            Read docs/FUTURES_FEATURES.md and prioritize the detected features by implementation priority.
+
+            For each feature, evaluate:
+            - **Impact:** How many users benefit? How critical is it for a Vercel alternative?
+            - **Effort:** How complex is the implementation given Tengiz's current architecture?
+            - **Alignment:** Does it fit Tengiz's existing patterns (Go, CLI-first, Docker exec, scale-to-zero)?
+
+            Then reorder all features from highest to lowest priority.
+            Add a "## Priority Ranking" section at the top with the ranked list.
+            Preserve all existing feature details (Description, Source, Detected date).
+
+      - name: Check for changes
+        id: git-check
+        run: |
+          git add docs/FUTURES_FEATURES.md
+          if git diff --staged --quiet; then
+            echo "No changes to prioritize"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit changes
+        if: steps.git-check.outputs.has_changes == 'true'
+        run: |
+          git config user.name "tengiz-bot"
+          git config user.email "bot@tengiz.dev"
+          git commit -m "docs: prioritize features by implementation priority"
+          git push
