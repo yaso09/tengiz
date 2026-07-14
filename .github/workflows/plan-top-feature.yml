@@ -22,6 +22,14 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Clone alternatives
+        run: python clone_alternatives.py --dest ./sources --depth 1 --workers 4
+
       - name: Create implementation plan
         uses: anomalyco/opencode/github@latest
         with:

@@ -27,6 +27,14 @@ jobs:
         with:
           go-version: "1.26"
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Clone alternatives
+        run: python clone_alternatives.py --dest ./sources --depth 1 --workers 4
+
       - name: Find latest plan
         id: find-plan
         run: |
@@ -51,9 +59,12 @@ jobs:
             2. Run tests after each task: `go test ./... -v -count=1`
             3. If a test fails, fix it before moving on
             4. Run `go vet ./...` and fix any issues
-            5. Update documentation (README.md, AGENTS.md) if the changes affect CLI commands or behavior
-            6. After all tasks are complete, delete the plan file: ${{ steps.find-plan.outputs.plan_file }}
-            7. Run `go build -o tengiz .` at the end to verify the build succeeds
+            5. Update documentation (README.md, AGENTS.md, CLI help texts) if the changes affect CLI commands or behavior
+            6. After all tasks are complete, find the implemented feature in docs/FUTURES_FEATURES.md and mark it with:
+               - **Status:** ✅ Implemented (use today's date)
+               Add this line right after "Why add to Tengiz" line.
+            7. Delete the plan file: ${{ steps.find-plan.outputs.plan_file }}
+            8. Run `go build -o tengiz .` at the end to verify the build succeeds
 
             Use Test-Driven Development: write the test first, make it fail, then implement.
             Commit after each passing task with a descriptive conventional commit message.
