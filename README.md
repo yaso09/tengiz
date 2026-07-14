@@ -122,6 +122,46 @@ Remove an application completely — stops the container, deletes it, and cleans
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz config`
+
+Manage environment variables for an application.
+
+#### `tengiz config set <app> <key> <value>`
+
+Set an environment variable for an application. Persisted in `~/.tengiz/apps.json` and injected as `-e KEY=VALUE` on next deploy/start.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `key` | Environment variable name |
+| `value` | Environment variable value |
+
+#### `tengiz config get <app> <key>`
+
+Get the value of an environment variable.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `key` | Environment variable name |
+
+#### `tengiz config unset <app> <key>`
+
+Remove an environment variable.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `key` | Environment variable name |
+
+#### `tengiz config show <app>`
+
+Show all environment variables for an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+
 ## Configuration
 
 Create a `.tengiz.yaml` in your project root:
@@ -141,6 +181,9 @@ healthcheck:
   interval: 10
   retries: 3
   timeout: 5
+env:
+  DATABASE_URL: postgres://localhost:5432/myapp
+  API_KEY: your-secret-key
 ```
 
 Without a config file, Tengiz uses defaults: app name = directory name, port auto-detected, serverless enabled, 5m timeout.
