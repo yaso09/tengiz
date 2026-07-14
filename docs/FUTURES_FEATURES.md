@@ -172,6 +172,7 @@ Her özellik Impact (I), Effort (E), Alignment (A) kriterlerine göre değerlend
 - **Source:** Dokku
 - **Description:** App başına custom domain listesi yönetimi (`domains:add`, `domains:remove`, `domains:set`). Vhost detection ile otomatik domain ekleme. Global wildcard domain desteği (`*.tengiz.local`). Proxy'de host-based routing'e domain listesini enjekte eder.
 - **Why add to Tengiz:** Şu an sadece `<app>.tengiz.local` host pattern'i destekleniyor. Production'da kullanıcılar `myapp.com`, `api.myapp.com` gibi kendi domainlerini eklemek ister. AppEntry.Domains alanı zaten veri modelinde var, CLI komutları eklenmeli.
+- **Status:** ✅ Implemented (2026-07-14)
 - **Detected:** 2026-07-14
 
 ## Persistent Storage (Volume Management)

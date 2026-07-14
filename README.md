@@ -122,6 +122,40 @@ Remove an application completely — stops the container, deletes it, and cleans
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz domain`
+
+Manage custom domains for applications.
+
+#### `tengiz domain add <app> <domain>`
+
+Add a custom domain to an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `domain` | Custom domain (e.g. `myapp.com`) |
+
+The domain is persisted in `~/.tengiz/apps.json` and, if the proxy is running, registered immediately via the admin API. The proxy routes requests to the correct app when the `Host` header matches the domain.
+
+#### `tengiz domain remove <app> <domain>`
+
+Remove a custom domain from an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `domain` | Custom domain to remove |
+
+Removes the domain from persistent storage and unregisters it from a running proxy.
+
+#### `tengiz domain list <app>`
+
+List all custom domains for an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+
 ### `tengiz config`
 
 Manage environment variables for an application.
