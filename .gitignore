@@ -7,5 +7,6 @@ Dockerfile
 tengiz-linux-*
 tengiz-darwin-*
 tengiz-windows-*
+tengiz
 */__pycache__
 *.egg-info
