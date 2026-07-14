@@ -11,7 +11,7 @@ Her özellik Impact (I), Effort (E), Alignment (A) kriterlerine göre değerlend
 
 | # | Feature | I | E | A | Gerekçe |
 |---|---------|---|---|---|---------|
-| 1 | **Zero-Downtime Deployment** | Çok Yüksek | Orta | Mükemmel | Her deploy downtime üretir → production'da kabul edilemez. Proxy katmanında blue/green geçiş ile çözülür. |
+| 1 | **Zero-Downtime Deployment** ✅ | Çok Yüksek | Orta | Mükemmel | Her deploy downtime üretir → production'da kabul edilemez. Proxy katmanında blue/green geçiş ile çözülür. |
 | 2 | **Environment Variable Management** | Çok Yüksek | Düşük | Mükemmel | Her uygulama env var gerektirir. `.tengiz.yaml` + `-e` flag'leri ile birkaç saatte eklenebilir. |
 | 3 | **Custom Domain Management** | Çok Yüksek | Düşük | Mükemmel | Production domain zorunluluğu. `AppEntry.Domains` alanı zaten mevcut, CLI komutları eksik. |
 | 4 | **One-off Process Execution** | Yüksek | Düşük | Mükemmel | Migration/console/data import. `tengiz run` = `docker run --rm`. Mevcut `os/exec` yapısına çok uygun. |
@@ -249,6 +249,7 @@ Her özellik Impact (I), Effort (E), Alignment (A) kriterlerine göre değerlend
 - **Source:** Kamal
 - **Description:** Kamal, `kamal-proxy` ile deploy sırasında eski container'dan yenisine sıfır kesintiyle geçiş yapar. Eski container `GET /up` endpoint'i 200 dönene kadar trafik almaya devam eder, yeni container hazır olunca trafik atomik olarak yönlendirilir.
 - **Why add to Tengiz:** Bir Vercel alternatifi için en kritik eksik özellik. Tengiz deploy her çalıştığında eski container'ı durdurup yenisini başlatır → downtime yaşanır. Proxy katmanı (`internal/proxy/proxy.go`) deploy sırasında yeni rotayı ekleyip eskisini kaldıracak şekilde genişletilebilir.
+- **Status:** ✅ Implemented (2026-07-14)
 - **Detected:** 2026-07-14
 
 ## SSH Tabanlı Remote Deployment (Multi-Server)
