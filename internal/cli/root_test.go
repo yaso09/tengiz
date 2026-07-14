@@ -44,6 +44,26 @@ func TestDeployZeroDowntimeCreatesVersionedContainer(t *testing.T) {
 	}
 }
 
+func TestDomainCommandsRegistered(t *testing.T) {
+	domainCmd, _, err := rootCmd.Find([]string{"domain"})
+	if err != nil {
+		t.Fatalf("domain command not found: %v", err)
+	}
+
+	expected := map[string]bool{"add": false, "remove": false, "list": false}
+	for _, sub := range domainCmd.Commands() {
+		if _, ok := expected[sub.Name()]; ok {
+			expected[sub.Name()] = true
+		}
+	}
+
+	for name, found := range expected {
+		if !found {
+			t.Fatalf("domain subcommand %q not found", name)
+		}
+	}
+}
+
 func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	configCmd, _, err := rootCmd.Find([]string{"config"})
 	if err != nil {

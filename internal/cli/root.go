@@ -38,6 +38,10 @@ func init() {
 	configCmd.AddCommand(configGetCmd)
 	configCmd.AddCommand(configUnsetCmd)
 	configCmd.AddCommand(configShowCmd)
+	domainCmd.AddCommand(domainAddCmd)
+	domainCmd.AddCommand(domainRemoveCmd)
+	domainCmd.AddCommand(domainListCmd)
+	rootCmd.AddCommand(domainCmd)
 	rootCmd.AddCommand(configCmd)
 }
 
@@ -273,6 +277,11 @@ var proxyCmd = &cobra.Command{
 			for _, app := range apps {
 				p.Register(app.Name, app.Port)
 				fmt.Printf("[tengiz] route: %s -> :%d\n", app.Name, app.Port)
+				// Register custom domains
+				for _, domain := range app.Domains {
+					p.RegisterDomain(domain, app.Name)
+					fmt.Printf("[tengiz] domain: %s -> %s\n", domain, app.Name)
+				}
 			}
 		}
 
@@ -437,6 +446,82 @@ var devCmd = &cobra.Command{
 				return nil
 			}
 			return fmt.Errorf("dev server: %w", err)
+		}
+		return nil
+	},
+}
+
+var domainCmd = &cobra.Command{
+	Use:   "domain",
+	Short: "Manage custom domains for applications",
+}
+
+var domainAddCmd = &cobra.Command{
+	Use:   "add <app> <domain>",
+	Short: "Add a custom domain to an application",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName, domain := args[0], args[1]
+		store := config.NewStore(dataDir)
+
+		if _, err := store.GetApp(appName); err != nil {
+			return fmt.Errorf("app %q not found", appName)
+		}
+
+		if err := store.AddDomain(appName, domain); err != nil {
+			return err
+		}
+
+		// Notify proxy if running
+		if err := proxy.RegisterDomainWithProxy(domain, appName); err != nil {
+			fmt.Printf("[tengiz] domain added to store, but proxy not running: %v\n", err)
+		} else {
+			fmt.Printf("[tengiz] domain added: %s -> %s\n", domain, appName)
+		}
+		return nil
+	},
+}
+
+var domainRemoveCmd = &cobra.Command{
+	Use:   "remove <app> <domain>",
+	Short: "Remove a custom domain from an application",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName, domain := args[0], args[1]
+		store := config.NewStore(dataDir)
+
+		if err := store.RemoveDomain(appName, domain); err != nil {
+			return err
+		}
+
+		// Notify proxy if running
+		if err := proxy.UnregisterDomainWithProxy(domain); err != nil {
+			fmt.Printf("[tengiz] domain removed from store, but proxy not running: %v\n", err)
+		} else {
+			fmt.Printf("[tengiz] domain removed: %s from %s\n", domain, appName)
+		}
+		return nil
+	},
+}
+
+var domainListCmd = &cobra.Command{
+	Use:   "list <app>",
+	Short: "List custom domains for an application",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		store := config.NewStore(dataDir)
+
+		domains, err := store.ListDomains(appName)
+		if err != nil {
+			return err
+		}
+		if len(domains) == 0 {
+			fmt.Printf("No custom domains for %s.\n", appName)
+			return nil
+		}
+		for _, d := range domains {
+			fmt.Println(d)
 		}
 		return nil
 	},

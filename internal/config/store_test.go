@@ -109,6 +109,120 @@ func TestStoreListEnv(t *testing.T) {
 	}
 }
 
+func TestStoreAddDomain(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{
+		Name: "testapp",
+		Config: types.AppConfig{Name: "testapp"},
+	})
+
+	if err := s.AddDomain("testapp", "example.com"); err != nil {
+		t.Fatalf("AddDomain: %v", err)
+	}
+	if err := s.AddDomain("testapp", "api.example.com"); err != nil {
+		t.Fatalf("AddDomain: %v", err)
+	}
+
+	app, err := s.GetApp("testapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(app.Domains) != 2 {
+		t.Fatalf("expected 2 domains, got %d", len(app.Domains))
+	}
+	if app.Domains[0] != "example.com" {
+		t.Errorf("domains[0] = %q, want example.com", app.Domains[0])
+	}
+}
+
+func TestStoreAddDomainDuplicate(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{
+		Name: "testapp",
+		Config: types.AppConfig{Name: "testapp"},
+	})
+
+	s.AddDomain("testapp", "example.com")
+	err := s.AddDomain("testapp", "example.com")
+	if err == nil {
+		t.Fatal("expected error for duplicate domain")
+	}
+}
+
+func TestStoreRemoveDomain(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{
+		Name:    "testapp",
+		Domains: []string{"example.com", "api.example.com"},
+		Config:  types.AppConfig{Name: "testapp"},
+	})
+
+	if err := s.RemoveDomain("testapp", "example.com"); err != nil {
+		t.Fatalf("RemoveDomain: %v", err)
+	}
+
+	app, err := s.GetApp("testapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(app.Domains) != 1 {
+		t.Fatalf("expected 1 domain, got %d", len(app.Domains))
+	}
+	if app.Domains[0] != "api.example.com" {
+		t.Errorf("domains[0] = %q, want api.example.com", app.Domains[0])
+	}
+}
+
+func TestStoreRemoveDomainNotFound(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{
+		Name:   "testapp",
+		Config: types.AppConfig{Name: "testapp"},
+	})
+
+	err := s.RemoveDomain("testapp", "nonexistent.com")
+	if err == nil {
+		t.Fatal("expected error for non-existent domain")
+	}
+}
+
+func TestStoreListDomains(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{
+		Name:    "testapp",
+		Domains: []string{"example.com", "api.example.com"},
+		Config:  types.AppConfig{Name: "testapp"},
+	})
+
+	domains, err := s.ListDomains("testapp")
+	if err != nil {
+		t.Fatalf("ListDomains: %v", err)
+	}
+	if len(domains) != 2 {
+		t.Fatalf("expected 2 domains, got %d", len(domains))
+	}
+}
+
+func TestStoreListDomainsNoApp(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	_, err := s.ListDomains("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent app")
+	}
+}
+
 func TestAddDeploymentHistory(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)

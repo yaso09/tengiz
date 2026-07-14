@@ -18,6 +18,7 @@ import (
 type Proxy struct {
 	mu          sync.RWMutex
 	routes      map[string]*route
+	domains     map[string]string
 	rt          runtime.Manager
 	port        int
 	idleManager interface {
@@ -40,9 +41,10 @@ type route struct {
 
 func New(rt runtime.Manager, port int) *Proxy {
 	return &Proxy{
-		routes: make(map[string]*route),
-		rt:     rt,
-		port:   port,
+		routes:  make(map[string]*route),
+		domains: make(map[string]string),
+		rt:      rt,
+		port:    port,
 	}
 }
 
@@ -71,8 +73,28 @@ func (p *Proxy) Unregister(app string) {
 	delete(p.routes, app)
 }
 
+func (p *Proxy) RegisterDomain(domain, app string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.domains[domain] = app
+}
+
+func (p *Proxy) UnregisterDomain(domain string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.domains, domain)
+}
+
 func (p *Proxy) extractApp(host string) string {
 	host = strings.Split(host, ":")[0]
+
+	p.mu.RLock()
+	app, ok := p.domains[host]
+	p.mu.RUnlock()
+	if ok {
+		return app
+	}
+
 	parts := strings.Split(host, ".")
 	if len(parts) < 3 {
 		return ""
@@ -139,6 +161,8 @@ func (p *Proxy) StartAdmin(ctx context.Context) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/register", p.handleRegister)
 	mux.HandleFunc("/unregister", p.handleUnregister)
+	mux.HandleFunc("/add-domain", p.handleAddDomain)
+	mux.HandleFunc("/remove-domain", p.handleRemoveDomain)
 
 	p.adminServer = &http.Server{
 		Addr:    adminAddr,
@@ -213,6 +237,53 @@ func (p *Proxy) handleUnregister(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+type adminAddDomainReq struct {
+	Domain string `json:"domain"`
+	App    string `json:"app"`
+}
+
+type adminRemoveDomainReq struct {
+	Domain string `json:"domain"`
+}
+
+func (p *Proxy) handleAddDomain(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req adminAddDomainReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Domain == "" || req.App == "" {
+		http.Error(w, "domain and app required", http.StatusBadRequest)
+		return
+	}
+	p.RegisterDomain(req.Domain, req.App)
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (p *Proxy) handleRemoveDomain(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req adminRemoveDomainReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Domain == "" {
+		http.Error(w, "domain required", http.StatusBadRequest)
+		return
+	}
+	p.UnregisterDomain(req.Domain)
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
 func RegisterRouteWithProxy(app string, port int) error {
 	body := adminRegisterReq{App: app, Port: port}
 	var buf bytes.Buffer
@@ -220,6 +291,45 @@ func RegisterRouteWithProxy(app string, port int) error {
 		return err
 	}
 	resp, err := http.Post(fmt.Sprintf("http://%s/register", adminAddr), "application/json", &buf)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("admin API returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func RegisterDomainWithProxy(domain, app string) error {
+	body := adminAddDomainReq{Domain: domain, App: app}
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(body); err != nil {
+		return err
+	}
+	resp, err := http.Post(fmt.Sprintf("http://%s/add-domain", adminAddr), "application/json", &buf)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("admin API returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func UnregisterDomainWithProxy(domain string) error {
+	body := adminRemoveDomainReq{Domain: domain}
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(body); err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("http://%s/remove-domain", adminAddr), &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
