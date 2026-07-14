@@ -165,6 +165,7 @@ Her özellik Impact (I), Effort (E), Alignment (A) kriterlerine göre değerlend
 - **Source:** Dokku
 - **Description:** App başına environment variable yönetimi (`config:set`, `config:get`, `config:unset`, `config:show`). Global (`--global`) ve app-level scope. Set/unset sonrası opsiyonel restart. Değerler app-specific ENV dosyasında saklanır ve Docker run'a `-e` flag'leri olarak aktarılır.
 - **Why add to Tengiz:** Tengiz'de env var yönetimi yok; kullanıcılar `DATABASE_URL`, `API_KEY` gibi değerleri Docker run argümanlarına gömmek veya image'de hardcode etmek zorunda. `.tengiz.yaml`'da `env:` bölümü veya `tengiz config:set` komutu ile basit bir çözüm eklenebilir.
+- **Status:** ✅ Implemented (2026-07-14)
 - **Detected:** 2026-07-14
 
 ## Custom Domain Management

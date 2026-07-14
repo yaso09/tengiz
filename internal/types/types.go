@@ -9,6 +9,7 @@ type AppConfig struct {
 	Serverless  ServerlessConfig    `mapstructure:"serverless"`
 	Domains     []string            `mapstructure:"domains"`
 	HealthCheck *HealthCheckConfig  `mapstructure:"healthcheck,omitempty"`
+	Env         map[string]string   `mapstructure:"env" json:"env,omitempty"`
 }
 
 type BuildConfig struct {

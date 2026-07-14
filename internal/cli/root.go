@@ -34,6 +34,11 @@ func init() {
 	rootCmd.AddCommand(rmCmd)
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(devCmd)
+	configCmd.AddCommand(configSetCmd)
+	configCmd.AddCommand(configGetCmd)
+	configCmd.AddCommand(configUnsetCmd)
+	configCmd.AddCommand(configShowCmd)
+	rootCmd.AddCommand(configCmd)
 }
 
 var rootCmd = &cobra.Command{
@@ -65,6 +70,9 @@ serverless:
   idle_timeout: 5m      # scale-to-zero timeout
 # domains:
 #   - app.example.com
+# env:
+#   DATABASE_URL: postgres://localhost:5432/myapp
+#   API_KEY: your-secret-key
 `, name)
 
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
@@ -429,6 +437,79 @@ var devCmd = &cobra.Command{
 				return nil
 			}
 			return fmt.Errorf("dev server: %w", err)
+		}
+		return nil
+	},
+}
+
+var configCmd = &cobra.Command{
+	Use:   "config",
+	Short: "Manage environment variables for an application",
+}
+
+var configSetCmd = &cobra.Command{
+	Use:   "set <app> <key> <value>",
+	Short: "Set an environment variable",
+	Args:  cobra.ExactArgs(3),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName, key, value := args[0], args[1], args[2]
+		store := config.NewStore(dataDir)
+		if err := store.SetEnv(appName, key, value); err != nil {
+			return err
+		}
+		fmt.Printf("[tengiz] set %s=%s for %s\n", key, value, appName)
+		return nil
+	},
+}
+
+var configGetCmd = &cobra.Command{
+	Use:   "get <app> <key>",
+	Short: "Get an environment variable",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		store := config.NewStore(dataDir)
+		val, ok, err := store.GetEnv(args[0], args[1])
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("env var %q not set for %s", args[1], args[0])
+		}
+		fmt.Printf("%s=%s\n", args[1], val)
+		return nil
+	},
+}
+
+var configUnsetCmd = &cobra.Command{
+	Use:   "unset <app> <key>",
+	Short: "Remove an environment variable",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		store := config.NewStore(dataDir)
+		if err := store.UnsetEnv(args[0], args[1]); err != nil {
+			return err
+		}
+		fmt.Printf("[tengiz] unset %s for %s\n", args[1], args[0])
+		return nil
+	},
+}
+
+var configShowCmd = &cobra.Command{
+	Use:   "show <app>",
+	Short: "Show all environment variables for an application",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		store := config.NewStore(dataDir)
+		env, err := store.ListEnv(args[0])
+		if err != nil {
+			return err
+		}
+		if len(env) == 0 {
+			fmt.Printf("No environment variables set for %s.\n", args[0])
+			return nil
+		}
+		for k, v := range env {
+			fmt.Printf("%s=%s\n", k, v)
 		}
 		return nil
 	},
