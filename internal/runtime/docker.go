@@ -9,11 +9,28 @@ import (
 	"log"
 	"net"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/yaso09/tengiz/internal/types"
 )
+
+func envArgs(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var args []string
+	for _, k := range keys {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", k, env[k]))
+	}
+	return args
+}
 
 const labelKey = "tengiz-app"
 
@@ -39,8 +56,9 @@ func (r *dockerRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageT
 		"--label", fmt.Sprintf("%s=%s", labelKey, cfg.Name),
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", port, internalPort),
 		"--restart", "no",
-		imageTag,
 	}
+	args = append(args, envArgs(cfg.Env)...)
+	args = append(args, imageTag)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -52,7 +70,7 @@ func (r *dockerRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageT
 func (r *dockerRuntime) Start(ctx context.Context, name string) error {
 	containerName := fmt.Sprintf("tengiz-%s", name)
 
-	imageTag, ports := r.getContainerConfig(ctx, containerName)
+	imageTag, ports, envs := r.getContainerConfig(ctx, containerName)
 
 	cmd := exec.CommandContext(ctx, "docker", "start", containerName)
 	out, err := cmd.CombinedOutput()
@@ -71,6 +89,7 @@ func (r *dockerRuntime) Start(ctx context.Context, name string) error {
 			"--restart", "no",
 		}
 		args = append(args, ports...)
+		args = append(args, envs...)
 		args = append(args, imageTag)
 		cmd := exec.CommandContext(ctx, "docker", args...)
 		out, err := cmd.CombinedOutput()
@@ -82,13 +101,13 @@ func (r *dockerRuntime) Start(ctx context.Context, name string) error {
 	return nil
 }
 
-func (r *dockerRuntime) getContainerConfig(ctx context.Context, containerName string) (string, []string) {
+func (r *dockerRuntime) getContainerConfig(ctx context.Context, containerName string) (string, []string, []string) {
 	// Get image
 	cmd := exec.CommandContext(ctx, "docker", "inspect",
 		"--format", "{{.Config.Image}}", containerName)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", nil
+		return "", nil, nil
 	}
 	imageTag := strings.TrimSpace(string(out))
 
@@ -97,12 +116,12 @@ func (r *dockerRuntime) getContainerConfig(ctx context.Context, containerName st
 		"--format", "{{json .HostConfig.PortBindings}}", containerName)
 	portOut, err := portCmd.CombinedOutput()
 	if err != nil {
-		return imageTag, nil
+		return imageTag, nil, nil
 	}
 
 	var bindings map[string][]map[string]string
 	if err := json.Unmarshal(portOut, &bindings); err != nil {
-		return imageTag, nil
+		return imageTag, nil, nil
 	}
 
 	var ports []string
@@ -118,7 +137,21 @@ func (r *dockerRuntime) getContainerConfig(ctx context.Context, containerName st
 		}
 	}
 
-	return imageTag, ports
+	// Get env variables
+	envCmd := exec.CommandContext(ctx, "docker", "inspect",
+		"--format", "{{json .Config.Env}}", containerName)
+	envOut, err := envCmd.CombinedOutput()
+	var envs []string
+	if err == nil {
+		var envList []string
+		if err := json.Unmarshal(envOut, &envList); err == nil {
+			for _, e := range envList {
+				envs = append(envs, "-e", e)
+			}
+		}
+	}
+
+	return imageTag, ports, envs
 }
 
 func (r *dockerRuntime) Stop(ctx context.Context, name string) error {
@@ -234,8 +267,9 @@ func (r *dockerRuntime) CreateVersioned(ctx context.Context, cfg *types.AppConfi
 		"--label", fmt.Sprintf("tengiz-deployment=%s", suffix),
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", port, internalPort),
 		"--restart", "no",
-		imageTag,
 	}
+	args = append(args, envArgs(cfg.Env)...)
+	args = append(args, imageTag)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

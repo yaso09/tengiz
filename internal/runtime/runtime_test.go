@@ -39,6 +39,32 @@ func TestStubRemoveBySuffix(t *testing.T) {
 	}
 }
 
+func TestCreateWithEnv(t *testing.T) {
+	var m Manager = NewStub()
+	cfg := &types.AppConfig{
+		Name: "testapp",
+		Env: map[string]string{
+			"MY_VAR": "myval",
+		},
+	}
+	if err := m.Create(context.Background(), cfg, "test:latest", 9000); err != nil {
+		t.Fatalf("Create with env: %v", err)
+	}
+}
+
+func TestCreateVersionedWithEnv(t *testing.T) {
+	var m Manager = NewStub()
+	cfg := &types.AppConfig{
+		Name: "testapp",
+		Env: map[string]string{
+			"MY_VAR": "myval",
+		},
+	}
+	if err := m.CreateVersioned(context.Background(), cfg, "test:latest", 9001, "v2"); err != nil {
+		t.Fatalf("CreateVersioned with env: %v", err)
+	}
+}
+
 func TestStubGetContainerPort(t *testing.T) {
 	m := NewStub()
 	port, err := m.GetContainerPort(context.Background(), "testapp", "v2")
