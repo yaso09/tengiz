@@ -1,0 +1,56 @@
+name: Plan Top Feature
+
+on:
+  workflow_run:
+    workflows: ["Prioritize Features"]
+    types:
+      - completed
+  workflow_dispatch:
+
+env:
+  OPENAI_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
+
+jobs:
+  plan:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create implementation plan
+        uses: anomalyco/opencode/github@latest
+        with:
+          model: opencode/deepseek-v4-flash-free
+          prompt: |
+            Read the writing-plans skill from .agents/skills/writing-plans/SKILL.md and follow its instructions.
+
+            Then:
+            1. Find the top-priority feature in docs/FUTURES_FEATURES.md (first feature in the Priority Ranking section, or first feature overall)
+            2. Create a comprehensive implementation plan using the writing-plans skill format
+            3. Save the plan to docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md (use today's date)
+
+            Announce "I'm using the writing-plans skill to create the implementation plan."
+
+      - name: Check for changes
+        id: git-check
+        run: |
+          git add docs/superpowers/plans/
+          if git diff --staged --quiet; then
+            echo "No plan created"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit changes
+        if: steps.git-check.outputs.has_changes == 'true'
+        run: |
+          git config user.name "tengiz-bot"
+          git config user.email "bot@tengiz.dev"
+          git commit -m "docs: add implementation plan for top-priority feature"
+          git push
