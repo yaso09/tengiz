@@ -3,11 +3,12 @@ package types
 import "time"
 
 type AppConfig struct {
-	Name      string          `mapstructure:"name"`
-	Port      int             `mapstructure:"port"`
-	Build     BuildConfig     `mapstructure:"build"`
-	Serverless ServerlessConfig `mapstructure:"serverless"`
-	Domains   []string        `mapstructure:"domains"`
+	Name        string              `mapstructure:"name"`
+	Port        int                 `mapstructure:"port"`
+	Build       BuildConfig         `mapstructure:"build"`
+	Serverless  ServerlessConfig    `mapstructure:"serverless"`
+	Domains     []string            `mapstructure:"domains"`
+	HealthCheck *HealthCheckConfig  `mapstructure:"healthcheck,omitempty"`
 }
 
 type BuildConfig struct {
@@ -42,10 +43,37 @@ type PortEntry struct {
 	Port    int    `json:"port"`
 }
 
+type HealthCheckConfig struct {
+	Enabled  bool   `mapstructure:"enabled" yaml:"enabled"`
+	Endpoint string `mapstructure:"endpoint" yaml:"endpoint"`
+	Port     int    `mapstructure:"port" yaml:"port"`
+	Interval int    `mapstructure:"interval" yaml:"interval"`
+	Retries  int    `mapstructure:"retries" yaml:"retries"`
+	Timeout  int    `mapstructure:"timeout" yaml:"timeout"`
+}
+
+type DeploymentEntry struct {
+	ID        string    `json:"id"`
+	ImageTag  string    `json:"image_tag"`
+	Port      int       `json:"port"`
+	CreatedAt time.Time `json:"created_at"`
+	Status    string    `json:"status"`
+}
+
+type DeploymentStatus string
+
+const (
+	DeployActive   DeploymentStatus = "active"
+	DeployPrevious DeploymentStatus = "previous"
+	DeployRolled   DeploymentStatus = "rolled"
+)
+
 type AppEntry struct {
-	Name     string   `json:"name"`
-	ImageTag string   `json:"image_tag"`
-	Port     int      `json:"port"`
-	Domains  []string `json:"domains"`
-	Config   AppConfig `json:"config"`
+	Name             string            `json:"name"`
+	ImageTag         string            `json:"image_tag"`
+	Port             int               `json:"port"`
+	Domains          []string          `json:"domains"`
+	Config           AppConfig         `json:"config"`
+	DeploymentSuffix string            `json:"deployment_suffix,omitempty"`
+	Deployments      []DeploymentEntry `json:"deployments,omitempty"`
 }
