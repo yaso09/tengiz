@@ -3,6 +3,78 @@
 Bu dosya, günlük analiz workflow'u tarafından otomatik olarak güncellenir.
 Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan özellikler buraya kaydedilir.
 
+## Priority Ranking
+
+Her özellik Impact (I), Effort (E), Alignment (A) kriterlerine göre değerlendirilmiştir.
+
+### P0 — Critical (Vercel alternatifi için olmazsa olmaz)
+
+| # | Feature | I | E | A | Gerekçe |
+|---|---------|---|---|---|---------|
+| 1 | **Zero-Downtime Deployment** | Çok Yüksek | Orta | Mükemmel | Her deploy downtime üretir → production'da kabul edilemez. Proxy katmanında blue/green geçiş ile çözülür. |
+| 2 | **Environment Variable Management** | Çok Yüksek | Düşük | Mükemmel | Her uygulama env var gerektirir. `.tengiz.yaml` + `-e` flag'leri ile birkaç saatte eklenebilir. |
+| 3 | **Custom Domain Management** | Çok Yüksek | Düşük | Mükemmel | Production domain zorunluluğu. `AppEntry.Domains` alanı zaten mevcut, CLI komutları eksik. |
+| 4 | **One-off Process Execution** | Yüksek | Düşük | Mükemmel | Migration/console/data import. `tengiz run` = `docker run --rm`. Mevcut `os/exec` yapısına çok uygun. |
+| 5 | **Container Health Check + Auto Restart** | Yüksek | Düşük-Orta | Mükemmel | Scale-to-zero'da cold start/crash yönetimi kritik. Docker health check + restart policy. |
+| 6 | **Resource Limits (CPU/Memory)** | Yüksek | Düşük | Mükemmel | Noisy neighbor'ı önler. Docker `--memory`/`--cpus` flag'leri. |
+| 7 | **Persistent Storage (Volume Management)** | Yüksek | Düşük-Orta | Mükemmel | Scale-to-zero stateful app'lerde veri kaybını önler. `runtime.Run()`'a `--volume` eklenir. |
+
+### P1 — High (Production-ready platform için gerekli)
+
+| # | Feature | I | E | A | Gerekçe |
+|---|---------|---|---|---|---------|
+| 8 | **Rollback Sistemi** | Yüksek | Orta | Mükemmel | Production güvenlik ağı. Image tag'lama + deployment history. |
+| 9 | **Build Logs** | Yüksek | Çok Düşük | Mükemmel | Build hata ayıklama. `builder.go` çıktısını dosyaya yönlendir. |
+| 10 | **Log Filtering** | Yüksek | Çok Düşük | Mükemmel | `tengiz logs --since --grep`. Docker API passthrough. |
+| 11 | **Docker Housekeeping** | Orta | Düşük | Mükemmel | Sürekli deploy disk doldurur. `docker system prune` + label filtresi. |
+| 12 | **Event Logging & Audit Trail** | Yüksek | Düşük | Mükemmel | Kim ne zaman deploy etti? `log/slog` + JSON Lines. |
+| 13 | **App Report (Detailed Status)** | Orta | Düşük | Mükemmel | `tengiz ps` çok minimal. Metadata'yı tek komutta göster. |
+| 14 | **Deploy Lock Mekanizması** | Orta | Düşük | Mükemmel | Eşzamanlı deploy çakışmasını önler. Dosya-based lock. |
+| 15 | **Pre-Deploy Hooks** | Orta | Düşük | Mükemmel | Migration/derleme deploy öncesi. `.tengiz.yaml`'da `pre_deploy`. |
+| 16 | **Git Tabanlı Deployment** | Çok Yüksek | Yüksek | Mükemmel | Core platform özelliği. Yüksek etki ama yüksek efor (SSH key, webhook sunucusu). |
+
+### P2 — Medium (Önemli farklılaştırıcılar / advanced özellikler)
+
+| # | Feature | I | E | A | Gerekçe |
+|---|---------|---|---|---|---------|
+| 17 | **Webhook ile Otomatik Deploy** | Yüksek | Orta | Mükemmel | Git deploy'un tamamlayıcısı. Hafif webhook sunucusu. |
+| 18 | **Preview Deployments** | Yüksek | Orta-Yüksek | Mükemmel | Vercel killer feature. PR bazında container + cleanup. |
+| 19 | **HTTP Basic Auth (Staging Koruması)** | Orta | Düşük | Mükemmel | Proxy middleware. Staging güvenliği. |
+| 20 | **Private Registry Authentication** | Orta | Düşük | Mükemmel | Enterprise image pull. `docker login` wrapper. |
+| 21 | **Container Registry Integration** | Orta | Düşük-Orta | Mükemmel | Build → push pipeline. `docker tag && docker push`. |
+| 22 | **Custom Docker Options** | Düşük-Orta | Düşük | Mükemmel | Power user escape hatch. Extra args slice. |
+| 23 | **Container Retention Policy** | Orta | Düşük | Mükemmel | Rollback companion. N eski container'ı sakla. |
+| 24 | **Error Pages** | Orta | Düşük | Mükemmel | Cold start sırasında kullanıcı dostu hata sayfaları. |
+| 25 | **Multi-Environment Desteği** | Yüksek | Orta | Mükemmel | Staging/prod ayrımı. Config merge. |
+| 26 | **Gelişmiş Docker Build** | Orta | Düşük-Orta | Mükemmel | Multi-arch, build cache, build args. |
+| 27 | **Nixpacks Build Sistemi** | Orta | Orta | Mükemmel | Framework desteğini 6'dan yüzlerceye çıkarır. |
+| 28 | **Secrets Management** | Orta | Orta-Yüksek | Mükemmel | Vault entegrasyonu (1Password, AWS, GCP). |
+| 29 | **REST API + OpenAPI Spec** | Yüksek | Yüksek | Orta | Programatik erişim önemli ama CLI-first felsefeye ters. |
+| 30 | **Docker Compose Import** | Orta | Orta | Mükemmel | Mevcut Compose kullanıcıları için migration yolu. |
+| 31 | **One-Click Service Templates** | Yüksek | Yüksek | Orta | 361 şablon harika ama Tengiz CLI-first modele uyarlaması eforlu. |
+| 32 | **Yönetilen Veritabanı Provisioning** | Yüksek | Çok Yüksek | Orta | Vercel Postgres/KV benzeri. Çok büyük feature. |
+| 33 | **Bildirim Sistemi** | Orta | Orta | Mükemmel | Discord/Slack/Telegram bildirimleri. |
+| 34 | **Process Scaling (Multi-Container)** | Orta | Yüksek | Orta | HA + worker scaling. Scale-to-zero ile birleşince güçlü ama kompleks. |
+
+### P3 — Low (Niche / enterprise / multi-server)
+
+| # | Feature | I | E | A | Gerekçe |
+|---|---------|---|---|---|---------|
+| 35 | **Role Tabanlı Sunucu Grupları** | Orta | Orta | Orta | Web/worker/job ayrımı. Scaling ile ilişkili. |
+| 36 | **Scheduled Tasks / Cron Jobs** | Düşük-Orta | Orta | Mükemmel | Niche ama `robfig/cron` ile eklenebilir. |
+| 37 | **Otomatik SSL/TLS (Let's Encrypt)** | Yüksek | Orta | Düşük | Önemli ama harici proxy halleder. `autocert` eklenebilir. |
+| 38 | **Gelişmiş Proxy Konfigürasyonu** | Orta | Orta | Mükemmel | Path prefix, buffering, timeout. Power user. |
+| 39 | **SSH Tabanlı Remote Deployment** | Orta | Yüksek | Orta | Multi-server. Tengiz'i single-node'dan çıkarır ama çok efor. |
+| 40 | **Server Bootstrap** | Orta | Orta | Mükemmel | `tengiz server init` + setup. Multi-server adjacent. |
+| 41 | **Redeploy** | Düşük | Düşük | Mükemmel | Hızlı iterasyon. Mevcut deploy'ın --skip-* flag'leri. |
+| 42 | **Docker Logging Konfigürasyonu** | Düşük | Düşük | Mükemmel | Log driver + rotation. |
+| 43 | **Asset Path / Asset Bridging** | Düşük | Orta | Mükemmel | Zero-downtime companion. Hash'li asset'ler. |
+| 44 | **Rolling Boot / Canary Deployment** | Düşük | Yüksek | Düşük | Multi-server only. |
+| 45 | **Output/Telemetry Loggers** | Düşük | Orta | Orta | OTel/file logger. Niche. |
+| 46 | **CLI Alias Tanımlama** | Çok Düşük | Çok Düşük | Mükemmel | Kullanıcı deneyimi iyileştirmesi. |
+
+---
+
 ## Özellikler
 
 ## Git Tabanlı Deployment (Git Push → Deploy)
