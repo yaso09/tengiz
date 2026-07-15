@@ -219,7 +219,12 @@ healthcheck:
 env:
   DATABASE_URL: postgres://localhost:5432/myapp
   API_KEY: your-secret-key
+resources:
+  cpu: "1.0"         # CPU cores (e.g., "0.5", "2")
+  memory: "256m"     # Memory limit (e.g., "128m", "1g")
 ```
+
+Resource limits are passed to Docker as `--cpus` and `--memory` flags. When omitted, containers have no resource constraints. Values follow Docker CLI conventions (e.g., `"0.5"` for half a CPU core, `"512m"` for 512 MB memory).
 
 Without a config file, Tengiz uses defaults: app name = directory name, port auto-detected, serverless enabled, 5m timeout.
 

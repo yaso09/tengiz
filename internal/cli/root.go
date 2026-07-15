@@ -99,6 +99,9 @@ serverless:
 # env:
 #   DATABASE_URL: postgres://localhost:5432/myapp
 #   API_KEY: your-secret-key
+# resources:
+#   cpu: "1.0"           # CPU cores (e.g., "0.5", "2")
+#   memory: "256m"       # memory limit (e.g., "128m", "1g")
 `, name)
 
 		if gitRepo != "" {

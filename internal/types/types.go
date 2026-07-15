@@ -15,8 +15,14 @@ type AppConfig struct {
 	Serverless  ServerlessConfig    `mapstructure:"serverless"`
 	Domains     []string            `mapstructure:"domains"`
 	HealthCheck *HealthCheckConfig  `mapstructure:"healthcheck,omitempty"`
+	Resources   *ResourceConfig     `mapstructure:"resources,omitempty" json:"resources,omitempty"`
 	Env         map[string]string   `mapstructure:"env" json:"env,omitempty"`
 	Git         *GitConfig          `mapstructure:"git,omitempty" json:"git,omitempty"`
+}
+
+type ResourceConfig struct {
+	CPU    string `mapstructure:"cpu" yaml:"cpu" json:"cpu,omitempty"`
+	Memory string `mapstructure:"memory" yaml:"memory" json:"memory,omitempty"`
 }
 
 type BuildConfig struct {

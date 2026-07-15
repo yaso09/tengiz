@@ -33,6 +33,20 @@ func envArgs(env map[string]string) []string {
 	return args
 }
 
+func resourceArgs(rc *types.ResourceConfig) []string {
+	if rc == nil || (rc.CPU == "" && rc.Memory == "") {
+		return nil
+	}
+	var args []string
+	if rc.Memory != "" {
+		args = append(args, "--memory", rc.Memory)
+	}
+	if rc.CPU != "" {
+		args = append(args, "--cpus", rc.CPU)
+	}
+	return args
+}
+
 const labelKey = "tengiz-app"
 
 type dockerRuntime struct{}
@@ -59,6 +73,7 @@ func (r *dockerRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageT
 		"--restart", "no",
 	}
 	args = append(args, envArgs(cfg.Env)...)
+	args = append(args, resourceArgs(cfg.Resources)...)
 	args = append(args, imageTag)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.CombinedOutput()
@@ -91,6 +106,8 @@ func (r *dockerRuntime) Start(ctx context.Context, name string) error {
 		}
 		args = append(args, ports...)
 		args = append(args, envs...)
+		resourceArgsFromOld := r.getResourceArgs(ctx, containerName)
+		args = append(args, resourceArgsFromOld...)
 		args = append(args, imageTag)
 		cmd := exec.CommandContext(ctx, "docker", args...)
 		out, err := cmd.CombinedOutput()
@@ -153,6 +170,41 @@ func (r *dockerRuntime) getContainerConfig(ctx context.Context, containerName st
 	}
 
 	return imageTag, ports, envs
+}
+
+func (r *dockerRuntime) getResourceArgs(ctx context.Context, containerName string) []string {
+	memCmd := exec.CommandContext(ctx, "docker", "inspect",
+		"--format", "{{.HostConfig.Memory}}", containerName)
+	memOut, err := memCmd.CombinedOutput()
+	memStr := ""
+	if err == nil {
+		memStr = strings.TrimSpace(string(memOut))
+	}
+
+	cpuCmd := exec.CommandContext(ctx, "docker", "inspect",
+		"--format", "{{.HostConfig.NanoCpus}}", containerName)
+	cpuOut, err := cpuCmd.CombinedOutput()
+	cpuStr := ""
+	if err == nil {
+		cpuStr = strings.TrimSpace(string(cpuOut))
+	}
+
+	if (memStr == "" || memStr == "0") && (cpuStr == "" || cpuStr == "0") {
+		return nil
+	}
+
+	var args []string
+	if memStr != "" && memStr != "0" {
+		args = append(args, "--memory", memStr)
+	}
+	if cpuStr != "" && cpuStr != "0" {
+		var nanocpus int64
+		if _, err := fmt.Sscanf(cpuStr, "%d", &nanocpus); err == nil && nanocpus > 0 {
+			cpus := float64(nanocpus) / 1e9
+			args = append(args, "--cpus", fmt.Sprintf("%g", cpus))
+		}
+	}
+	return args
 }
 
 func (r *dockerRuntime) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error {
@@ -345,6 +397,7 @@ func (r *dockerRuntime) CreateVersioned(ctx context.Context, cfg *types.AppConfi
 		"--restart", "no",
 	}
 	args = append(args, envArgs(cfg.Env)...)
+	args = append(args, resourceArgs(cfg.Resources)...)
 	args = append(args, imageTag)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.CombinedOutput()
