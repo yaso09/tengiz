@@ -83,6 +83,40 @@ func TestLoadWithoutResources(t *testing.T) {
 	}
 }
 
+func TestLoadWithVolumes(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `name: volapp
+port: 8080
+volumes:
+  - host_path: /data/uploads
+    container_path: /app/uploads
+  - host_path: mydbdata
+    container_path: /var/lib/data
+`
+	os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), []byte(yaml), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if len(cfg.Volumes) != 2 {
+		t.Fatalf("Volumes length = %d, want 2", len(cfg.Volumes))
+	}
+	if cfg.Volumes[0].HostPath != "/data/uploads" {
+		t.Errorf("Volumes[0].HostPath = %q, want /data/uploads", cfg.Volumes[0].HostPath)
+	}
+	if cfg.Volumes[0].ContainerPath != "/app/uploads" {
+		t.Errorf("Volumes[0].ContainerPath = %q, want /app/uploads", cfg.Volumes[0].ContainerPath)
+	}
+	if cfg.Volumes[1].HostPath != "mydbdata" {
+		t.Errorf("Volumes[1].HostPath = %q, want mydbdata", cfg.Volumes[1].HostPath)
+	}
+	if cfg.Volumes[1].ContainerPath != "/var/lib/data" {
+		t.Errorf("Volumes[1].ContainerPath = %q, want /var/lib/data", cfg.Volumes[1].ContainerPath)
+	}
+}
+
 func TestLoadNoFile(t *testing.T) {
 	dir := t.TempDir()
 	_, err := Load(dir)
