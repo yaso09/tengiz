@@ -223,6 +223,142 @@ func TestStoreListDomainsNoApp(t *testing.T) {
 	}
 }
 
+func TestStoreAddVolume(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{
+		Name:   "testapp",
+		Config: types.AppConfig{Name: "testapp"},
+	})
+
+	if err := s.AddVolume("testapp", "/data/uploads", "/app/uploads"); err != nil {
+		t.Fatalf("AddVolume: %v", err)
+	}
+	if err := s.AddVolume("testapp", "mydbdata", "/var/lib/data"); err != nil {
+		t.Fatalf("AddVolume: %v", err)
+	}
+
+	app, err := s.GetApp("testapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(app.Config.Volumes) != 2 {
+		t.Fatalf("expected 2 volumes, got %d", len(app.Config.Volumes))
+	}
+	if app.Config.Volumes[0].HostPath != "/data/uploads" {
+		t.Errorf("Volumes[0].HostPath = %q, want /data/uploads", app.Config.Volumes[0].HostPath)
+	}
+}
+
+func TestStoreAddVolumeDuplicate(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{
+		Name:   "testapp",
+		Config: types.AppConfig{Name: "testapp"},
+	})
+
+	s.AddVolume("testapp", "/data/uploads", "/app/uploads")
+	err := s.AddVolume("testapp", "/data/uploads", "/app/uploads")
+	if err == nil {
+		t.Fatal("expected error for duplicate volume host_path")
+	}
+}
+
+func TestStoreAddVolumeNoApp(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	err := s.AddVolume("nonexistent", "/data", "/data")
+	if err == nil {
+		t.Fatal("expected error for nonexistent app")
+	}
+}
+
+func TestStoreRemoveVolume(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{
+		Name: "testapp",
+		Config: types.AppConfig{
+			Name: "testapp",
+			Volumes: []types.VolumeConfig{
+				{HostPath: "/data/uploads", ContainerPath: "/app/uploads"},
+				{HostPath: "mydbdata", ContainerPath: "/var/lib/data"},
+			},
+		},
+	})
+
+	if err := s.RemoveVolume("testapp", "/data/uploads"); err != nil {
+		t.Fatalf("RemoveVolume: %v", err)
+	}
+
+	vols, err := s.ListVolumes("testapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vols) != 1 {
+		t.Fatalf("expected 1 volume, got %d", len(vols))
+	}
+	if vols[0].HostPath != "mydbdata" {
+		t.Errorf("vols[0].HostPath = %q, want mydbdata", vols[0].HostPath)
+	}
+}
+
+func TestStoreRemoveVolumeNotFound(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{
+		Name:   "testapp",
+		Config: types.AppConfig{Name: "testapp"},
+	})
+
+	err := s.RemoveVolume("testapp", "/nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent volume")
+	}
+}
+
+func TestStoreListVolumes(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{
+		Name: "testapp",
+		Config: types.AppConfig{
+			Name: "testapp",
+			Volumes: []types.VolumeConfig{
+				{HostPath: "/data/uploads", ContainerPath: "/app/uploads"},
+			},
+		},
+	})
+
+	vols, err := s.ListVolumes("testapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vols) != 1 {
+		t.Fatalf("expected 1 volume, got %d", len(vols))
+	}
+	if vols[0].HostPath != "/data/uploads" {
+		t.Errorf("vols[0].HostPath = %q, want /data/uploads", vols[0].HostPath)
+	}
+}
+
+func TestStoreListVolumesNoApp(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	_, err := s.ListVolumes("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent app")
+	}
+}
+
 func TestAddDeploymentHistory(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)
