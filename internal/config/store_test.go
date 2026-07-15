@@ -223,6 +223,112 @@ func TestStoreListDomainsNoApp(t *testing.T) {
 	}
 }
 
+func TestStoreAddVolume(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{
+		Name:   "testapp",
+		Config: types.AppConfig{Name: "testapp"},
+	})
+
+	if err := s.AddVolume("testapp", "/data/uploads", "/app/uploads", false); err != nil {
+		t.Fatalf("AddVolume: %v", err)
+	}
+	if err := s.AddVolume("testapp", "/data/config", "/etc/config", true); err != nil {
+		t.Fatalf("AddVolume: %v", err)
+	}
+
+	vols, err := s.ListVolumes("testapp")
+	if err != nil {
+		t.Fatalf("ListVolumes: %v", err)
+	}
+	if len(vols) != 2 {
+		t.Fatalf("expected 2 volumes, got %d", len(vols))
+	}
+	if vols[0].HostPath != "/data/uploads" || vols[0].ContainerPath != "/app/uploads" || vols[0].ReadOnly {
+		t.Errorf("first volume mismatch: %+v", vols[0])
+	}
+	if !vols[1].ReadOnly {
+		t.Errorf("second volume should be read-only")
+	}
+}
+
+func TestStoreRemoveVolume(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{
+		Name: "testapp",
+		Config: types.AppConfig{
+			Name: "testapp",
+			Volumes: []types.VolumeConfig{
+				{HostPath: "/data/a", ContainerPath: "/app/a"},
+				{HostPath: "/data/b", ContainerPath: "/app/b"},
+			},
+		},
+	})
+
+	// Remove first volume
+	if err := s.RemoveVolume("testapp", 0); err != nil {
+		t.Fatalf("RemoveVolume: %v", err)
+	}
+
+	vols, err := s.ListVolumes("testapp")
+	if err != nil {
+		t.Fatalf("ListVolumes: %v", err)
+	}
+	if len(vols) != 1 {
+		t.Fatalf("expected 1 volume, got %d", len(vols))
+	}
+	if vols[0].HostPath != "/data/b" {
+		t.Errorf("remaining volume HostPath = %q, want /data/b", vols[0].HostPath)
+	}
+}
+
+func TestStoreRemoveVolumeIndexOutOfRange(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{
+		Name:   "testapp",
+		Config: types.AppConfig{Name: "testapp"},
+	})
+
+	err := s.RemoveVolume("testapp", 0)
+	if err == nil {
+		t.Fatal("expected error for out-of-range index")
+	}
+}
+
+func TestStoreListVolumesNoApp(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	_, err := s.ListVolumes("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent app")
+	}
+}
+
+func TestStoreListVolumesEmpty(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{
+		Name:   "testapp",
+		Config: types.AppConfig{Name: "testapp"},
+	})
+
+	vols, err := s.ListVolumes("testapp")
+	if err != nil {
+		t.Fatalf("ListVolumes: %v", err)
+	}
+	if len(vols) != 0 {
+		t.Fatalf("expected 0 volumes, got %d", len(vols))
+	}
+}
+
 func TestAddDeploymentHistory(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)

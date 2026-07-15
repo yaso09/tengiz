@@ -225,6 +225,64 @@ func (s *Store) ListDomains(appName string) ([]string, error) {
 	return result, nil
 }
 
+func (s *Store) AddVolume(appName, hostPath, containerPath string, readOnly bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make(map[string]types.AppEntry)
+	s.readJSON("apps.json", &apps)
+	app, ok := apps[appName]
+	if !ok {
+		return fmt.Errorf("app %q not found", appName)
+	}
+	if app.Config.Volumes == nil {
+		app.Config.Volumes = make([]types.VolumeConfig, 0)
+	}
+	app.Config.Volumes = append(app.Config.Volumes, types.VolumeConfig{
+		HostPath:      hostPath,
+		ContainerPath: containerPath,
+		ReadOnly:      readOnly,
+	})
+	apps[appName] = app
+	return s.writeJSON("apps.json", apps)
+}
+
+func (s *Store) RemoveVolume(appName string, index int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make(map[string]types.AppEntry)
+	s.readJSON("apps.json", &apps)
+	app, ok := apps[appName]
+	if !ok {
+		return fmt.Errorf("app %q not found", appName)
+	}
+	if index < 0 || index >= len(app.Config.Volumes) {
+		return fmt.Errorf("volume index %d out of range (len=%d)", index, len(app.Config.Volumes))
+	}
+	app.Config.Volumes = append(app.Config.Volumes[:index], app.Config.Volumes[index+1:]...)
+	if len(app.Config.Volumes) == 0 {
+		app.Config.Volumes = nil
+	}
+	apps[appName] = app
+	return s.writeJSON("apps.json", apps)
+}
+
+func (s *Store) ListVolumes(appName string) ([]types.VolumeConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make(map[string]types.AppEntry)
+	s.readJSON("apps.json", &apps)
+	app, ok := apps[appName]
+	if !ok {
+		return nil, fmt.Errorf("app %q not found", appName)
+	}
+	result := make([]types.VolumeConfig, len(app.Config.Volumes))
+	copy(result, app.Config.Volumes)
+	return result, nil
+}
+
 func (s *Store) AddDeployment(appName string, dep types.DeploymentEntry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
