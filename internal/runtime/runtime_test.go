@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/yaso09/tengiz/internal/types"
@@ -122,6 +123,46 @@ func TestResourceArgs(t *testing.T) {
 				if got[i] != tt.expected[i] {
 					t.Fatalf("resourceArgs()[%d] = %q, want %q", i, got[i], tt.expected[i])
 				}
+			}
+		})
+	}
+}
+
+func TestVolumeArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		volumes  []types.VolumeMount
+		expected []string
+	}{
+		{
+			name:     "nil volumes",
+			volumes:  nil,
+			expected: nil,
+		},
+		{
+			name:     "empty volumes",
+			volumes:  []types.VolumeMount{},
+			expected: nil,
+		},
+		{
+			name:     "single volume",
+			volumes:  []types.VolumeMount{{HostPath: "/data", ContainerPath: "/app/data"}},
+			expected: []string{"--volume", "/data:/app/data"},
+		},
+		{
+			name:     "multiple volumes",
+			volumes: []types.VolumeMount{
+				{HostPath: "/data", ContainerPath: "/app/data"},
+				{HostPath: "/config", ContainerPath: "/etc/app", ReadOnly: true},
+			},
+			expected: []string{"--volume", "/data:/app/data", "--volume", "/config:/etc/app:ro"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := volumeArgs(tt.volumes)
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("volumeArgs(%v) = %v, want %v", tt.volumes, result, tt.expected)
 			}
 		})
 	}
