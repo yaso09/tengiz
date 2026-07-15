@@ -1,10 +1,6 @@
 name: Plan Top Feature
 
 on:
-  workflow_run:
-    workflows: ["Prioritize Features"]
-    types:
-      - completed
   workflow_dispatch:
 
 env:
@@ -12,11 +8,11 @@ env:
 
 jobs:
   plan:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,7 +45,6 @@ jobs:
         run: |
           git add docs/superpowers/plans/
           if git diff --staged --quiet; then
-            echo "No plan created"
             echo "has_changes=false" >> $GITHUB_OUTPUT
           else
             echo "has_changes=true" >> $GITHUB_OUTPUT
@@ -62,3 +57,8 @@ jobs:
           git config user.email "bot@tengiz.dev"
           git commit -m "docs: add implementation plan for top-priority feature"
           git push
+
+      - name: Trigger implement workflow
+        run: gh workflow run implement-top-feature.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

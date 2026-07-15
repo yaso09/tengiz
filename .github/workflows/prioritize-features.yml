@@ -1,10 +1,6 @@
 name: Prioritize Features
 
 on:
-  workflow_run:
-    workflows: ["Daily Feature Analysis"]
-    types:
-      - completed
   workflow_dispatch:
 
 env:
@@ -12,11 +8,11 @@ env:
 
 jobs:
   prioritize:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,7 +39,6 @@ jobs:
         run: |
           git add docs/FUTURES_FEATURES.md
           if git diff --staged --quiet; then
-            echo "No changes to prioritize"
             echo "has_changes=false" >> $GITHUB_OUTPUT
           else
             echo "has_changes=true" >> $GITHUB_OUTPUT
@@ -56,3 +51,8 @@ jobs:
           git config user.email "bot@tengiz.dev"
           git commit -m "docs: prioritize features by implementation priority"
           git push
+
+      - name: Trigger plan workflow
+        run: gh workflow run plan-top-feature.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
