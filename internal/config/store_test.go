@@ -223,6 +223,53 @@ func TestStoreListDomainsNoApp(t *testing.T) {
 	}
 }
 
+func TestVolumeCRUD(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+	appName := "testapp"
+
+	s.SaveApp(types.AppEntry{
+		Name: appName,
+		Port: 9000,
+		Config: types.AppConfig{
+			Name: appName,
+		},
+	})
+
+	mount := types.VolumeMount{HostPath: "/data", ContainerPath: "/app/data"}
+
+	if err := s.AddVolume(appName, mount); err != nil {
+		t.Fatalf("AddVolume: %v", err)
+	}
+
+	vols, err := s.ListVolumes(appName)
+	if err != nil {
+		t.Fatalf("ListVolumes: %v", err)
+	}
+	if len(vols) != 1 || vols[0].HostPath != "/data" {
+		t.Errorf("ListVolumes = %v, want [/{data /app/data false}]", vols)
+	}
+
+	if err := s.RemoveVolume(appName, "/data", "/app/data"); err != nil {
+		t.Fatalf("RemoveVolume: %v", err)
+	}
+
+	vols, _ = s.ListVolumes(appName)
+	if len(vols) != 0 {
+		t.Errorf("ListVolumes after remove = %v, want empty", vols)
+	}
+
+	err = s.RemoveVolume(appName, "/nonexistent", "/path")
+	if err == nil {
+		t.Error("RemoveVolume nonexistent: expected error, got nil")
+	}
+
+	err = s.AddVolume("nonexistent", mount)
+	if err == nil {
+		t.Error("AddVolume nonexistent app: expected error, got nil")
+	}
+}
+
 func TestAddDeploymentHistory(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)
