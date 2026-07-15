@@ -127,6 +127,76 @@ func TestResourceArgs(t *testing.T) {
 	}
 }
 
+func TestVolumeArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		volumes  []types.VolumeConfig
+		expected []string
+	}{
+		{
+			name:     "nil slice",
+			volumes:  nil,
+			expected: nil,
+		},
+		{
+			name:     "empty slice",
+			volumes:  []types.VolumeConfig{},
+			expected: nil,
+		},
+		{
+			name: "single volume",
+			volumes: []types.VolumeConfig{
+				{HostPath: "/data/uploads", ContainerPath: "/app/uploads"},
+			},
+			expected: []string{"--volume", "/data/uploads:/app/uploads"},
+		},
+		{
+			name: "multiple volumes",
+			volumes: []types.VolumeConfig{
+				{HostPath: "/data/uploads", ContainerPath: "/app/uploads"},
+				{HostPath: "mydbdata", ContainerPath: "/var/lib/data"},
+			},
+			expected: []string{
+				"--volume", "/data/uploads:/app/uploads",
+				"--volume", "mydbdata:/var/lib/data",
+			},
+		},
+		{
+			name: "named volume only",
+			volumes: []types.VolumeConfig{
+				{HostPath: "mydbdata", ContainerPath: "/var/lib/data"},
+			},
+			expected: []string{"--volume", "mydbdata:/var/lib/data"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := volumeArgs(tt.volumes)
+			if len(got) != len(tt.expected) {
+				t.Fatalf("volumeArgs() = %v (len=%d), want %v (len=%d)", got, len(got), tt.expected, len(tt.expected))
+			}
+			for i := range got {
+				if got[i] != tt.expected[i] {
+					t.Fatalf("volumeArgs()[%d] = %q, want %q", i, got[i], tt.expected[i])
+				}
+			}
+		})
+	}
+}
+
+func TestStubCreateWithVolumes(t *testing.T) {
+	var m Manager = NewStub()
+	cfg := &types.AppConfig{
+		Name: "testapp",
+		Volumes: []types.VolumeConfig{
+			{HostPath: "/data/uploads", ContainerPath: "/app/uploads"},
+		},
+	}
+	if err := m.Create(context.Background(), cfg, "test:latest", 9000); err != nil {
+		t.Fatalf("Create with volumes: %v", err)
+	}
+}
+
 func TestStubGetContainerPort(t *testing.T) {
 	m := NewStub()
 	port, err := m.GetContainerPort(context.Background(), "testapp", "v2")
