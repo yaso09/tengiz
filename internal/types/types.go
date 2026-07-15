@@ -45,12 +45,13 @@ type PortEntry struct {
 }
 
 type HealthCheckConfig struct {
-	Enabled  bool   `mapstructure:"enabled" yaml:"enabled"`
-	Endpoint string `mapstructure:"endpoint" yaml:"endpoint"`
-	Port     int    `mapstructure:"port" yaml:"port"`
-	Interval int    `mapstructure:"interval" yaml:"interval"`
-	Retries  int    `mapstructure:"retries" yaml:"retries"`
-	Timeout  int    `mapstructure:"timeout" yaml:"timeout"`
+	Enabled     bool   `mapstructure:"enabled" yaml:"enabled"`
+	Endpoint    string `mapstructure:"endpoint" yaml:"endpoint"`
+	Port        int    `mapstructure:"port" yaml:"port"`
+	Interval    int    `mapstructure:"interval" yaml:"interval"`
+	Retries     int    `mapstructure:"retries" yaml:"retries"`
+	Timeout     int    `mapstructure:"timeout" yaml:"timeout"`
+	StartPeriod int    `mapstructure:"start_period" yaml:"start_period"`
 }
 
 type DeploymentEntry struct {
@@ -69,6 +70,12 @@ const (
 	DeployRolled   DeploymentStatus = "rolled"
 )
 
+const (
+	HealthUnknown   = "unknown"
+	HealthHealthy   = "healthy"
+	HealthUnhealthy = "unhealthy"
+)
+
 type AppEntry struct {
 	Name             string            `json:"name"`
 	ImageTag         string            `json:"image_tag"`
@@ -77,4 +84,6 @@ type AppEntry struct {
 	Config           AppConfig         `json:"config"`
 	DeploymentSuffix string            `json:"deployment_suffix,omitempty"`
 	Deployments      []DeploymentEntry `json:"deployments,omitempty"`
+	RestartCount     int               `json:"restart_count,omitempty"`
+	HealthStatus     string            `json:"health_status,omitempty"`
 }
