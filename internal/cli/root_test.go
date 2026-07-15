@@ -122,6 +122,32 @@ func TestWebhookCommandRegistered(t *testing.T) {
 	}
 }
 
+func TestGitCommandsRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"git"})
+	if err != nil {
+		t.Fatal("git command not registered")
+	}
+	if cmd == nil {
+		t.Fatal("git command not found")
+	}
+	connectFound := false
+	disconnectFound := false
+	for _, sub := range cmd.Commands() {
+		if sub.Use == "connect" {
+			connectFound = true
+		}
+		if sub.Use == "disconnect" {
+			disconnectFound = true
+		}
+	}
+	if !connectFound {
+		t.Error("git:connect subcommand not registered")
+	}
+	if !disconnectFound {
+		t.Error("git:disconnect subcommand not registered")
+	}
+}
+
 func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	configCmd, _, err := rootCmd.Find([]string{"config"})
 	if err != nil {

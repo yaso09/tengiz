@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/yaso09/tengiz/internal/builder"
 	"github.com/yaso09/tengiz/internal/config"
+	"github.com/yaso09/tengiz/internal/git"
 	"github.com/yaso09/tengiz/internal/gitdeploy"
 	"github.com/yaso09/tengiz/internal/health"
 	"github.com/yaso09/tengiz/internal/idle"
@@ -48,6 +49,9 @@ func init() {
 	rootCmd.AddCommand(domainCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(webhookCmd)
+	gitCmd.AddCommand(gitConnectCmd)
+	gitCmd.AddCommand(gitDisconnectCmd)
+	rootCmd.AddCommand(gitCmd)
 }
 
 var rootCmd = &cobra.Command{
@@ -586,6 +590,54 @@ var domainListCmd = &cobra.Command{
 		for _, d := range domains {
 			fmt.Println(d)
 		}
+		return nil
+	},
+}
+
+var gitCmd = &cobra.Command{
+	Use:   "git",
+	Short: "Manage git deployment configuration",
+}
+
+var gitConnectCmd = &cobra.Command{
+	Use:   "connect",
+	Short: "Generate SSH deploy key for git auto-deploy",
+	Long:  "Generates an Ed25519 SSH key pair stored in ~/.tengiz/ssh/. Prints the public key — add it to your git provider as a deploy key.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if git.HasKey(dataDir) {
+			fmt.Println("[tengiz] SSH key already exists. Use 'git disconnect' to remove it first.")
+			return nil
+		}
+
+		pub, err := git.GenerateKey(dataDir)
+		if err != nil {
+			return fmt.Errorf("generate key: %w", err)
+		}
+
+		fmt.Println("[tengiz] SSH deploy key generated!")
+		fmt.Println()
+		fmt.Println("Add this public key to your git provider (GitHub > Settings > Deploy Keys):")
+		fmt.Println()
+		fmt.Println(pub)
+		fmt.Println()
+		fmt.Println("Or on GitHub: repo > Settings > Deploy Keys > Add deploy key")
+		fmt.Println("On GitLab:   repo > Settings > Repository > Deploy Keys")
+		return nil
+	},
+}
+
+var gitDisconnectCmd = &cobra.Command{
+	Use:   "disconnect",
+	Short: "Remove SSH deploy key for git auto-deploy",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if !git.HasKey(dataDir) {
+			fmt.Println("[tengiz] No SSH key found.")
+			return nil
+		}
+		if err := git.RemoveKey(dataDir); err != nil {
+			return fmt.Errorf("remove key: %w", err)
+		}
+		fmt.Println("[tengiz] SSH key removed.")
 		return nil
 	},
 }
