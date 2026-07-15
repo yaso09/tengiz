@@ -112,6 +112,16 @@ func TestDomainCommandsRegistered(t *testing.T) {
 	}
 }
 
+func TestWebhookCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"webhook"})
+	if err != nil {
+		t.Fatal("webhook command not registered")
+	}
+	if cmd == nil || cmd.Use != "webhook" {
+		t.Fatal("webhook command not found")
+	}
+}
+
 func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	configCmd, _, err := rootCmd.Find([]string{"config"})
 	if err != nil {

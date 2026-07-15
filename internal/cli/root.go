@@ -14,11 +14,13 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/yaso09/tengiz/internal/builder"
 	"github.com/yaso09/tengiz/internal/config"
+	"github.com/yaso09/tengiz/internal/gitdeploy"
 	"github.com/yaso09/tengiz/internal/health"
 	"github.com/yaso09/tengiz/internal/idle"
 	"github.com/yaso09/tengiz/internal/proxy"
 	"github.com/yaso09/tengiz/internal/runtime"
 	"github.com/yaso09/tengiz/internal/types"
+	"github.com/yaso09/tengiz/internal/webhook"
 )
 
 var dataDir string
@@ -45,6 +47,7 @@ func init() {
 	rootCmd.AddCommand(healthCmd)
 	rootCmd.AddCommand(domainCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(webhookCmd)
 }
 
 var rootCmd = &cobra.Command{
@@ -587,6 +590,34 @@ var domainListCmd = &cobra.Command{
 	},
 }
 
+var webhookCmd = &cobra.Command{
+	Use:   "webhook",
+	Short: "Start the git webhook server for auto-deploy",
+	Long:  "Starts an HTTP server that listens for GitHub/GitLab/Bitbucket/Gitea push events and triggers automatic deployment.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		port, _ := cmd.Flags().GetInt("port")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		store := config.NewStore(dataDir)
+		pipeline := gitdeploy.NewPipeline(dataDir, rt, store)
+
+		deployFn := webhook.DeployFunc(func(ctx context.Context, repo, branch, provider string) error {
+			return pipeline.Deploy(ctx, repo, branch, provider)
+		})
+
+		s := webhook.New(dataDir, deployFn)
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer cancel()
+
+		fmt.Printf("[tengiz] starting webhook server on :%d\n", port)
+		return s.Start(ctx, port)
+	},
+}
+
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage environment variables for an application",
@@ -672,6 +703,7 @@ func Execute() {
 	proxyCmd.Flags().StringP("app", "a", "", "route all requests to this app (bypasses hostname routing)")
 	proxyCmd.Flags().IntP("port", "p", 8080, "proxy listen port")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
+	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
