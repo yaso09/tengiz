@@ -2,6 +2,12 @@ package types
 
 import "time"
 
+type GitConfig struct {
+	Repo     string `mapstructure:"repo" json:"repo,omitempty"`
+	Branch   string `mapstructure:"branch" json:"branch,omitempty"`
+	Provider string `mapstructure:"provider" json:"provider,omitempty"`
+}
+
 type AppConfig struct {
 	Name        string              `mapstructure:"name"`
 	Port        int                 `mapstructure:"port"`
@@ -10,6 +16,7 @@ type AppConfig struct {
 	Domains     []string            `mapstructure:"domains"`
 	HealthCheck *HealthCheckConfig  `mapstructure:"healthcheck,omitempty"`
 	Env         map[string]string   `mapstructure:"env" json:"env,omitempty"`
+	Git         *GitConfig          `mapstructure:"git,omitempty" json:"git,omitempty"`
 }
 
 type BuildConfig struct {
@@ -86,4 +93,7 @@ type AppEntry struct {
 	Deployments      []DeploymentEntry `json:"deployments,omitempty"`
 	RestartCount     int               `json:"restart_count,omitempty"`
 	HealthStatus     string            `json:"health_status,omitempty"`
+	GitRepo          string            `json:"git_repo,omitempty"`
+	GitBranch        string            `json:"git_branch,omitempty"`
+	GitProvider      string            `json:"git_provider,omitempty"`
 }

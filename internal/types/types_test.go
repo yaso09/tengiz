@@ -38,3 +38,23 @@ func TestAppConfigEnvEmptyByDefault(t *testing.T) {
 		t.Fatal("expected nil Env for zero-value AppConfig")
 	}
 }
+
+func TestGitConfigFields(t *testing.T) {
+	cfg := AppConfig{
+		Name: "test-app",
+		Git: &GitConfig{
+			Repo:     "git@github.com:user/repo.git",
+			Branch:   "main",
+			Provider: "github",
+		},
+	}
+	if cfg.Git.Repo != "git@github.com:user/repo.git" {
+		t.Errorf("expected repo, got %s", cfg.Git.Repo)
+	}
+	if cfg.Git.Branch != "main" {
+		t.Errorf("expected main, got %s", cfg.Git.Branch)
+	}
+	if cfg.Git.Provider != "github" {
+		t.Errorf("expected github, got %s", cfg.Git.Provider)
+	}
+}
