@@ -80,6 +80,53 @@ func TestStubRestart(t *testing.T) {
 	}
 }
 
+func TestResourceArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		rc       *types.ResourceConfig
+		expected []string
+	}{
+		{
+			name:     "nil config",
+			rc:       nil,
+			expected: nil,
+		},
+		{
+			name:     "both empty",
+			rc:       &types.ResourceConfig{},
+			expected: nil,
+		},
+		{
+			name:     "memory only",
+			rc:       &types.ResourceConfig{Memory: "512m"},
+			expected: []string{"--memory", "512m"},
+		},
+		{
+			name:     "cpu only",
+			rc:       &types.ResourceConfig{CPU: "1.5"},
+			expected: []string{"--cpus", "1.5"},
+		},
+		{
+			name:     "both cpu and memory",
+			rc:       &types.ResourceConfig{CPU: "2", Memory: "1g"},
+			expected: []string{"--memory", "1g", "--cpus", "2"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resourceArgs(tt.rc)
+			if len(got) != len(tt.expected) {
+				t.Fatalf("resourceArgs() = %v (len=%d), want %v (len=%d)", got, len(got), tt.expected, len(tt.expected))
+			}
+			for i := range got {
+				if got[i] != tt.expected[i] {
+					t.Fatalf("resourceArgs()[%d] = %q, want %q", i, got[i], tt.expected[i])
+				}
+			}
+		})
+	}
+}
+
 func TestStubGetContainerPort(t *testing.T) {
 	m := NewStub()
 	port, err := m.GetContainerPort(context.Background(), "testapp", "v2")
