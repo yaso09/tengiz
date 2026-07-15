@@ -16,8 +16,14 @@ type AppConfig struct {
 	Domains     []string            `mapstructure:"domains"`
 	HealthCheck *HealthCheckConfig  `mapstructure:"healthcheck,omitempty"`
 	Resources   *ResourceConfig     `mapstructure:"resources,omitempty" json:"resources,omitempty"`
+	Volumes     []VolumeConfig      `mapstructure:"volumes,omitempty" json:"volumes,omitempty"`
 	Env         map[string]string   `mapstructure:"env" json:"env,omitempty"`
 	Git         *GitConfig          `mapstructure:"git,omitempty" json:"git,omitempty"`
+}
+
+type VolumeConfig struct {
+	HostPath      string `mapstructure:"host_path" yaml:"host_path" json:"host_path"`
+	ContainerPath string `mapstructure:"container_path" yaml:"container_path" json:"container_path"`
 }
 
 type ResourceConfig struct {
