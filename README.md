@@ -196,6 +196,42 @@ Show all environment variables for an application.
 |----------|-------------|
 | `app` | Application name |
 
+### `tengiz volume`
+
+Manage persistent storage volumes for applications. Volumes mount host directories into containers so data survives container restarts and scale-to-zero cycles.
+
+#### `tengiz volume add [-r] <app> <host_path>:<container_path>`
+
+Add a volume mount to an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `host_path:container_path` | Host directory and container mount path |
+
+| Flag | Description |
+|------|-------------|
+| `-r`, `--read-only` | Mount the volume as read-only |
+
+The volume is persisted in `~/.tengiz/apps.json` and applied on next deploy or cold start.
+
+#### `tengiz volume remove <app> <host_path>`
+
+Remove a volume mount from an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `host_path` | Host path of the volume to remove |
+
+#### `tengiz volume list <app>`
+
+List all volume mounts for an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+
 ## Configuration
 
 Create a `.tengiz.yaml` in your project root:
@@ -222,6 +258,12 @@ env:
 resources:
   cpu: "1.0"         # CPU cores (e.g., "0.5", "2")
   memory: "256m"     # Memory limit (e.g., "128m", "1g")
+volumes:
+  - host_path: /mnt/data
+    container_path: /app/data
+  - host_path: /mnt/config
+    container_path: /app/config
+    read_only: true
 ```
 
 Resource limits are passed to Docker as `--cpus` and `--memory` flags. When omitted, containers have no resource constraints. Values follow Docker CLI conventions (e.g., `"0.5"` for half a CPU core, `"512m"` for 512 MB memory).
