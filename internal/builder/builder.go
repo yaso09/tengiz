@@ -52,9 +52,10 @@ func generateDockerfile(d *Detection) string {
 		port = 8080
 	}
 
+	var df string
 	switch d.Framework {
 	case FrameworkNextJS:
-		return fmt.Sprintf(`FROM node:22-alpine AS builder
+		df = fmt.Sprintf(`FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
@@ -69,7 +70,7 @@ COPY --from=builder /app/package.json ./
 EXPOSE %d
 CMD ["npm", "start"]`, port)
 	case FrameworkVite:
-		return fmt.Sprintf(`FROM node:22-alpine AS builder
+		df = fmt.Sprintf(`FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
@@ -81,7 +82,7 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 EXPOSE %d
 CMD ["nginx", "-g", "daemon off;"]`, port)
 	case FrameworkGo:
-		return fmt.Sprintf(`FROM golang:1.22-alpine AS builder
+		df = fmt.Sprintf(`FROM golang:1.22-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
@@ -95,7 +96,7 @@ COPY --from=builder /app/app .
 EXPOSE %d
 CMD ["./app"]`, port)
 	case FrameworkNode:
-		return fmt.Sprintf(`FROM node:22-alpine
+		df = fmt.Sprintf(`FROM node:22-alpine
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
@@ -103,7 +104,7 @@ COPY . .
 EXPOSE %d
 CMD ["npm", "start"]`, port)
 	case FrameworkPython:
-		return fmt.Sprintf(`FROM python:3.12-slim
+		df = fmt.Sprintf(`FROM python:3.12-slim
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
@@ -111,13 +112,36 @@ COPY . .
 EXPOSE %d
 CMD ["python", "app.py"]`, port)
 	case FrameworkStatic:
-		return fmt.Sprintf(`FROM nginx:alpine
+		df = fmt.Sprintf(`FROM nginx:alpine
 COPY . /usr/share/nginx/html
 EXPOSE %d
 CMD ["nginx", "-g", "daemon off;"]`, port)
 	default:
-		return fmt.Sprintf(`FROM alpine
+		df = fmt.Sprintf(`FROM alpine
 EXPOSE %d
 CMD ["echo", "no dockerfile generated for this framework"]`, port)
 	}
+
+	if d.HealthCheck != nil && d.HealthCheck.Enabled {
+		endpoint := d.HealthCheck.Endpoint
+		if endpoint == "" {
+			endpoint = "/health"
+		}
+		interval := d.HealthCheck.Interval
+		if interval <= 0 {
+			interval = 30
+		}
+		timeout := d.HealthCheck.Timeout
+		if timeout <= 0 {
+			timeout = 5
+		}
+		retries := d.HealthCheck.Retries
+		if retries <= 0 {
+			retries = 3
+		}
+		df += fmt.Sprintf("\nHEALTHCHECK --interval=%ds --timeout=%ds --start-period=%ds --retries=%d CMD curl -f http://localhost:%d%s || exit 1\n",
+			interval, timeout, d.HealthCheck.StartPeriod, retries, port, endpoint)
+	}
+
+	return df
 }
