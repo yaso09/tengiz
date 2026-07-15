@@ -184,6 +184,20 @@ func TestVolumeCommandsRegistered(t *testing.T) {
 	}
 }
 
+func TestVolumeAddReadOnlyFlag(t *testing.T) {
+	flags := volumeAddCmd.Flags()
+	roFlag := flags.Lookup("read-only")
+	if roFlag == nil {
+		t.Fatal("--read-only flag not found on volume add command")
+	}
+	if roFlag.Shorthand != "r" {
+		t.Errorf("expected shorthand 'r', got %q", roFlag.Shorthand)
+	}
+	if roFlag.DefValue != "false" {
+		t.Errorf("expected default 'false', got %q", roFlag.DefValue)
+	}
+}
+
 func TestDeployWithVolumes(t *testing.T) {
 	dir := t.TempDir()
 	yamlContent := `

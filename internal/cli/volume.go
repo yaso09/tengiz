@@ -9,6 +9,10 @@ import (
 	"github.com/yaso09/tengiz/internal/types"
 )
 
+var (
+	volumeAddReadOnly bool
+)
+
 var volumeCmd = &cobra.Command{
 	Use:   "volume",
 	Short: "Manage persistent storage volumes",
@@ -31,6 +35,7 @@ var volumeAddCmd = &cobra.Command{
 		vol := types.VolumeConfig{
 			HostPath:      parts[0],
 			ContainerPath: parts[1],
+			ReadOnly:      volumeAddReadOnly,
 		}
 
 		store := config.NewStore(dataDir)
@@ -99,4 +104,5 @@ func init() {
 	volumeCmd.AddCommand(volumeAddCmd)
 	volumeCmd.AddCommand(volumeRemoveCmd)
 	volumeCmd.AddCommand(volumeListCmd)
+	volumeAddCmd.Flags().BoolVarP(&volumeAddReadOnly, "read-only", "r", false, "Mount volume as read-only")
 }
