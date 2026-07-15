@@ -8,6 +8,12 @@ type GitConfig struct {
 	Provider string `mapstructure:"provider" json:"provider,omitempty"`
 }
 
+type VolumeConfig struct {
+	HostPath      string `mapstructure:"host_path" yaml:"host_path" json:"host_path"`
+	ContainerPath string `mapstructure:"container_path" yaml:"container_path" json:"container_path"`
+	ReadOnly      bool   `mapstructure:"read_only" yaml:"read_only" json:"read_only,omitempty"`
+}
+
 type AppConfig struct {
 	Name        string              `mapstructure:"name"`
 	Port        int                 `mapstructure:"port"`
@@ -18,6 +24,7 @@ type AppConfig struct {
 	Resources   *ResourceConfig     `mapstructure:"resources,omitempty" json:"resources,omitempty"`
 	Env         map[string]string   `mapstructure:"env" json:"env,omitempty"`
 	Git         *GitConfig          `mapstructure:"git,omitempty" json:"git,omitempty"`
+	Volumes     []VolumeConfig      `mapstructure:"volumes,omitempty" yaml:"volumes,omitempty" json:"volumes,omitempty"`
 }
 
 type ResourceConfig struct {
