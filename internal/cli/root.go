@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -47,6 +49,10 @@ func init() {
 	domainCmd.AddCommand(domainListCmd)
 	rootCmd.AddCommand(healthCmd)
 	rootCmd.AddCommand(domainCmd)
+	volumeCmd.AddCommand(volumeAddCmd)
+	volumeCmd.AddCommand(volumeRemoveCmd)
+	volumeCmd.AddCommand(volumeListCmd)
+	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(webhookCmd)
 	gitCmd.AddCommand(gitConnectCmd)
@@ -601,6 +607,92 @@ var domainListCmd = &cobra.Command{
 		}
 		for _, d := range domains {
 			fmt.Println(d)
+		}
+		return nil
+	},
+}
+
+var volumeCmd = &cobra.Command{
+	Use:   "volume",
+	Short: "Manage persistent storage volumes for applications",
+}
+
+var volumeAddCmd = &cobra.Command{
+	Use:   "add <app> <host_path:container_path>",
+	Short: "Add a volume mount to an application",
+	Long: `Mount a host path or Docker volume into the application container.
+Format: <host_path>:<container_path>[:ro]
+
+Examples:
+  tengiz volume add myapp /data/uploads:/app/uploads
+  tengiz volume add myapp myvolume:/var/lib/data:ro`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		spec := args[1]
+		parts := strings.SplitN(spec, ":", 3)
+		if len(parts) < 2 {
+			return fmt.Errorf("invalid volume spec %q: expected host_path:container_path[:ro]", spec)
+		}
+		hostPath := parts[0]
+		containerPath := parts[1]
+		readOnly := false
+		if len(parts) == 3 && parts[2] == "ro" {
+			readOnly = true
+		}
+
+		store := config.NewStore(dataDir)
+		if err := store.AddVolume(appName, hostPath, containerPath, readOnly); err != nil {
+			return err
+		}
+		fmt.Printf("[tengiz] volume added: %s\n", spec)
+		return nil
+	},
+}
+
+var volumeRemoveCmd = &cobra.Command{
+	Use:   "remove <app> <index>",
+	Short: "Remove a volume mount from an application by index",
+	Long:  `Remove a volume mount by its index. Use 'tengiz volume list <app>' to see indices.`,
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		index, err := strconv.Atoi(args[1])
+		if err != nil {
+			return fmt.Errorf("invalid index %q: must be a number", args[1])
+		}
+
+		store := config.NewStore(dataDir)
+		if err := store.RemoveVolume(appName, index); err != nil {
+			return err
+		}
+		fmt.Printf("[tengiz] volume #%d removed from %s\n", index, appName)
+		return nil
+	},
+}
+
+var volumeListCmd = &cobra.Command{
+	Use:   "list <app>",
+	Short: "List volume mounts for an application",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		store := config.NewStore(dataDir)
+		vols, err := store.ListVolumes(appName)
+		if err != nil {
+			return err
+		}
+		if len(vols) == 0 {
+			fmt.Printf("No volumes mounted for %s.\n", appName)
+			return nil
+		}
+		fmt.Printf("%-3s %-30s %-30s %-6s\n", "#", "HOST PATH", "CONTAINER PATH", "MODE")
+		for i, v := range vols {
+			mode := "rw"
+			if v.ReadOnly {
+				mode = "ro"
+			}
+			fmt.Printf("%-3d %-30s %-30s %-6s\n", i, v.HostPath, v.ContainerPath, mode)
 		}
 		return nil
 	},
