@@ -263,3 +263,88 @@ func (s *Store) writeJSON(name string, v interface{}) error {
 	}
 	return os.WriteFile(filepath.Join(s.dataDir, name), data, 0644)
 }
+
+func (s *Store) readApps() map[string]types.AppEntry {
+	apps := make(map[string]types.AppEntry)
+	s.readJSON("apps.json", &apps)
+	return apps
+}
+
+func (s *Store) writeApps(apps map[string]types.AppEntry) error {
+	return s.writeJSON("apps.json", apps)
+}
+
+func (s *Store) getApp(name string) (*types.AppEntry, error) {
+	apps := s.readApps()
+	app, ok := apps[name]
+	if !ok {
+		return nil, fmt.Errorf("app %q not found", name)
+	}
+	return &app, nil
+}
+
+func (s *Store) saveAppLocked(name string, app types.AppEntry) error {
+	apps := s.readApps()
+	apps[name] = app
+	return s.writeApps(apps)
+}
+
+func (s *Store) ListVolumes(appName string) ([]types.VolumeConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	app, err := s.getApp(appName)
+	if err != nil {
+		return nil, err
+	}
+	if app.Volumes == nil {
+		return []types.VolumeConfig{}, nil
+	}
+	return app.Volumes, nil
+}
+
+func (s *Store) AddVolume(appName string, vol types.VolumeConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	app, err := s.getApp(appName)
+	if err != nil {
+		return err
+	}
+	app.Volumes = append(app.Volumes, vol)
+	return s.saveAppLocked(appName, *app)
+}
+
+func (s *Store) RemoveVolume(appName string, hostPath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	app, err := s.getApp(appName)
+	if err != nil {
+		return err
+	}
+	idx := -1
+	for i, v := range app.Volumes {
+		if v.HostPath == hostPath {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return fmt.Errorf("volume with host path %q not found for app %q", hostPath, appName)
+	}
+	app.Volumes = append(app.Volumes[:idx], app.Volumes[idx+1:]...)
+	return s.saveAppLocked(appName, *app)
+}
+
+func (s *Store) SetVolumes(appName string, vols []types.VolumeConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	app, err := s.getApp(appName)
+	if err != nil {
+		return err
+	}
+	app.Volumes = vols
+	return s.saveAppLocked(appName, *app)
+}

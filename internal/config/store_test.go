@@ -246,3 +246,68 @@ func TestAddDeploymentHistory(t *testing.T) {
 		t.Errorf("deployment ID = %q, want v1", deps[0].ID)
 	}
 }
+
+func TestVolumeStoreOperations(t *testing.T) {
+	dataDir := t.TempDir()
+	s := NewStore(dataDir)
+
+	app := types.AppEntry{
+		Name:     "vol-test-app",
+		Port:     9001,
+		ImageTag: "test:latest",
+		Volumes: []types.VolumeConfig{
+			{HostPath: "/data", ContainerPath: "/app/data"},
+		},
+	}
+	s.SaveApp(app)
+
+	vols, err := s.ListVolumes("vol-test-app")
+	if err != nil {
+		t.Fatalf("ListVolumes failed: %v", err)
+	}
+	if len(vols) != 1 {
+		t.Fatalf("expected 1 volume, got %d", len(vols))
+	}
+	if vols[0].HostPath != "/data" {
+		t.Errorf("expected HostPath /data, got %s", vols[0].HostPath)
+	}
+
+	newVol := types.VolumeConfig{HostPath: "/config", ContainerPath: "/app/config"}
+	if err := s.AddVolume("vol-test-app", newVol); err != nil {
+		t.Fatalf("AddVolume failed: %v", err)
+	}
+	vols, _ = s.ListVolumes("vol-test-app")
+	if len(vols) != 2 {
+		t.Fatalf("expected 2 volumes after add, got %d", len(vols))
+	}
+
+	if err := s.RemoveVolume("vol-test-app", "/config"); err != nil {
+		t.Fatalf("RemoveVolume failed: %v", err)
+	}
+	vols, _ = s.ListVolumes("vol-test-app")
+	if len(vols) != 1 {
+		t.Fatalf("expected 1 volume after remove, got %d", len(vols))
+	}
+	if vols[0].HostPath != "/data" {
+		t.Errorf("expected remaining volume HostPath /data, got %s", vols[0].HostPath)
+	}
+
+	if err := s.RemoveVolume("vol-test-app", "/nonexistent"); err == nil {
+		t.Error("expected error when removing non-existent volume, got nil")
+	}
+
+	newVols := []types.VolumeConfig{
+		{HostPath: "/newdata", ContainerPath: "/app/newdata"},
+	}
+	if err := s.SetVolumes("vol-test-app", newVols); err != nil {
+		t.Fatalf("SetVolumes failed: %v", err)
+	}
+	vols, _ = s.ListVolumes("vol-test-app")
+	if len(vols) != 1 || vols[0].HostPath != "/newdata" {
+		t.Errorf("SetVolumes didn't replace volumes correctly: %+v", vols)
+	}
+
+	if _, err := s.ListVolumes("nonexistent"); err == nil {
+		t.Error("expected error for non-existent app, got nil")
+	}
+}
