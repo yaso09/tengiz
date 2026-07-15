@@ -156,6 +156,38 @@ List all custom domains for an application.
 |----------|-------------|
 | `app` | Application name |
 
+### `tengiz volume`
+
+Manage persistent storage volumes for applications.
+
+#### `tengiz volume add <app> <host_path:container_path>[:ro]`
+
+Mount a host path or Docker volume into the application container.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `host_path:container_path` | Volume spec, optionally with `:ro` for read-only |
+
+Volume mounts are persisted in `~/.tengiz/apps.json` and applied as `--volume` flags on next deploy/start. Stateful apps (databases, uploads, caches) benefit from volumes because data survives container restarts and scale-to-zero cycles.
+
+#### `tengiz volume remove <app> <index>`
+
+Remove a volume mount by its index. Use `tengiz volume list <app>` to find the index.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `index` | Volume index (0-based, shown in list output) |
+
+#### `tengiz volume list <app>`
+
+List all volume mounts for an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+
 ### `tengiz config`
 
 Manage environment variables for an application.

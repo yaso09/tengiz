@@ -38,6 +38,7 @@ tengiz logs [-f] app  → stream logs
 tengiz stop/start/rm  → lifecycle
 tengiz config set/get/unset/show → env vars
 tengiz domain add/remove/list   → custom domains
+tengiz volume add/remove/list   → persistent storage
 ```
 
 ## Rules
