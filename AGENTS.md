@@ -16,8 +16,8 @@
 | `builder` | Framework detection (`detect.go`) + Dockerfile generation (`builder.go`). Supports: Docker, Next.js, Vite, Go, Node, Python, static. |
 | `proxy` | `httputil.ReverseProxy` with host-based routing (`appname.tengiz.local` → port 9000+) and custom domain support. Cold-starts stopped containers on demand. |
 | `idle` | Per-app timer. `Reset(name)` extends deadline. On expiry: calls `runtime.Stop()`. Default 5m timeout. |
-| `config` | Loads `.tengiz.yaml` via viper. `Store` persists apps + port allocations in `~/.tengiz/*.json`. Adds `GetEnv`/`SetEnv`/`UnsetEnv`/`ListEnv` for env var management. |
-| `types` | Shared: `AppConfig`, `AppStatus`, `AppEntry`, `PortEntry`. |
+| `config` | Loads `.tengiz.yaml` via viper. `Store` persists apps + port allocations in `~/.tengiz/*.json`. Adds `GetEnv`/`SetEnv`/`UnsetEnv`/`ListEnv` for env var management. `AddVolume`/`RemoveVolume`/`ListVolumes` for volume CRUD. |
+| `types` | Shared: `AppConfig`, `AppStatus`, `AppEntry`, `PortEntry`, `VolumeConfig`. |
 
 ## Commands
 
@@ -38,6 +38,7 @@ tengiz logs [-f] app  → stream logs
 tengiz stop/start/rm  → lifecycle
 tengiz config set/get/unset/show → env vars
 tengiz domain add/remove/list   → custom domains
+tengiz storage mount/unmount/list → persistent volumes
 ```
 
 ## Rules
@@ -52,7 +53,9 @@ tengiz domain add/remove/list   → custom domains
 - Port allocations: 9000-9999, persisted in `~/.tengiz/ports.json`
 - No config file = uses dir name as app name + defaults
 - Env vars stored in `AppEntry.Config.Env` → auto-persisted via JSON in `~/.tengiz/apps.json`
+- Volumes stored in `AppEntry.Config.Volumes` → auto-persisted via JSON in `~/.tengiz/apps.json`
 - `.tengiz.yaml` `env:` section uses `KEY: value` format (map, not list)
+- `.tengiz.yaml` `volumes:` section uses `host_path`/`container_path` struct list format
 - Proxy's `extractApp()` checks custom domains first (`p.domains` map), then falls back to subdomain split (e.g. `myapp.tengiz.local` → `myapp`)
 - Tests for `proxy` are slow (~2s each) due to TCP dial timeout on unreachable ports
 - `idle` tests are time-sensitive (use `time.Sleep` with 50ms granularity)

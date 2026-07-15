@@ -196,6 +196,41 @@ Show all environment variables for an application.
 |----------|-------------|
 | `app` | Application name |
 
+### `tengiz storage`
+
+Manage persistent storage volumes for applications. Volumes allow stateful apps (databases, file uploads) to survive container restarts under scale-to-zero.
+
+#### `tengiz storage mount <app> <host_path> <container_path>`
+
+Mount a persistent volume to an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `host_path` | Host path or Docker volume name |
+| `container_path` | Path inside the container |
+
+The volume is persisted in `~/.tengiz/apps.json` and injected as `--volume HOST_PATH:CONTAINER_PATH` on next deploy/start. Automatically restarts the app to pick up the volume.
+
+#### `tengiz storage unmount <app> <host_path>`
+
+Unmount a persistent volume from an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `host_path` | Host path or Docker volume name to unmount |
+
+Removes the volume from persistent storage and restarts the app to apply the change.
+
+#### `tengiz storage list <app>`
+
+List all persistent volumes mounted on an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+
 ## Configuration
 
 Create a `.tengiz.yaml` in your project root:
@@ -222,9 +257,14 @@ env:
 resources:
   cpu: "1.0"         # CPU cores (e.g., "0.5", "2")
   memory: "256m"     # Memory limit (e.g., "128m", "1g")
+volumes:
+  - host_path: /data/uploads
+    container_path: /app/uploads
+  - host_path: mydbdata
+    container_path: /var/lib/data
 ```
 
-Resource limits are passed to Docker as `--cpus` and `--memory` flags. When omitted, containers have no resource constraints. Values follow Docker CLI conventions (e.g., `"0.5"` for half a CPU core, `"512m"` for 512 MB memory).
+Resource limits are passed to Docker as `--cpus` and `--memory` flags. When omitted, containers have no resource constraints. Values follow Docker CLI conventions (e.g., `"0.5"` for half a CPU core, `"512m"` for 512 MB memory). Volumes are passed as `--volume` flags. Both host paths (e.g., `/data/uploads`) and named Docker volumes (e.g., `mydbdata`) are supported.
 
 Without a config file, Tengiz uses defaults: app name = directory name, port auto-detected, serverless enabled, 5m timeout.
 

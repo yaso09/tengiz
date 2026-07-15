@@ -252,6 +252,7 @@ Not: ✅ işaretli özellikler implemente edilmiştir.
 - **Source:** Dokku
 - **Description:** Volume mount işlemleri (`storage:mount <app> <host_path>:<container_path>`, `storage:unmount`, `storage:list`). Docker volume veya host path ile çalışır. Read-only mount ve volume options destekler.
 - **Why add to Tengiz:** Database, uploads gibi persistent data gerektiren uygulamalar container restart'ında veri kaybeder. Tengiz'in scale-to-zero özelliği container'ları durdurup başlattığı için volumesüz çalışan stateful app veri kaybeder. `runtime.Run()`'a `--volume` flag'leri eklenmeli.
+- **Status:** ✅ Implemented (2026-07-15)
 - **Detected:** 2026-07-14
 
 ## Process Scaling (Multi-Container)
