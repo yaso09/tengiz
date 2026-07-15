@@ -37,6 +37,7 @@ func (m *mockRTForDeploy) GetContainerPort(ctx context.Context, name string, suf
 func (m *mockRTForDeploy) List(ctx context.Context) ([]types.AppStatus, error) { return nil, nil }
 func (m *mockRTForDeploy) Logs(ctx context.Context, name string, follow bool) (io.ReadCloser, error) { return nil, nil }
 func (m *mockRTForDeploy) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
+func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
 
 func TestDeployZeroDowntimeCreatesVersionedContainer(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}

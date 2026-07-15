@@ -65,6 +65,14 @@ func TestCreateVersionedWithEnv(t *testing.T) {
 	}
 }
 
+func TestStubWaitForHealth(t *testing.T) {
+	m := NewStub()
+	hc := &types.HealthCheckConfig{Enabled: true, Endpoint: "/health", Timeout: 1}
+	if err := m.WaitForHealth(context.Background(), "testapp", hc); err != nil {
+		t.Fatalf("WaitForHealth() error = %v", err)
+	}
+}
+
 func TestStubRestart(t *testing.T) {
 	m := NewStub()
 	if err := m.Restart(context.Background(), "testapp"); err != nil {
