@@ -148,6 +148,18 @@ func TestGitCommandsRegistered(t *testing.T) {
 	}
 }
 
+func TestInitCmdGitFlags(t *testing.T) {
+	flags := initCmd.Flags()
+	repoFlag := flags.Lookup("git-repo")
+	if repoFlag == nil {
+		t.Fatal("--git-repo flag not found on init command")
+	}
+	branchFlag := flags.Lookup("git-branch")
+	if branchFlag == nil {
+		t.Fatal("--git-branch flag not found on init command")
+	}
+}
+
 func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	configCmd, _, err := rootCmd.Find([]string{"config"})
 	if err != nil {

@@ -52,6 +52,8 @@ func init() {
 	gitCmd.AddCommand(gitConnectCmd)
 	gitCmd.AddCommand(gitDisconnectCmd)
 	rootCmd.AddCommand(gitCmd)
+	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
+	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
 }
 
 var rootCmd = &cobra.Command{
@@ -76,6 +78,9 @@ var initCmd = &cobra.Command{
 			return fmt.Errorf(".tengiz.yaml already exists")
 		}
 
+		gitRepo, _ := cmd.Flags().GetString("git-repo")
+		gitBranch, _ := cmd.Flags().GetString("git-branch")
+
 		content := fmt.Sprintf(`name: %s
 # port: 3000            # container internal port (auto-detected if omitted)
 serverless:
@@ -95,6 +100,10 @@ serverless:
 #   DATABASE_URL: postgres://localhost:5432/myapp
 #   API_KEY: your-secret-key
 `, name)
+
+		if gitRepo != "" {
+			content += fmt.Sprintf("git:\n  repo: %s\n  branch: %s\n", gitRepo, gitBranch)
+		}
 
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 			return fmt.Errorf("write .tengiz.yaml: %w", err)
