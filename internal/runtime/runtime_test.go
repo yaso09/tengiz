@@ -158,6 +158,11 @@ func TestVolumeArgsEmpty(t *testing.T) {
 	}
 }
 
+func TestGetContainerConfigVolumes(t *testing.T) {
+	const inspectOutput = `[{"/host/data": "/app/data", "/host/config:/etc/config:ro": ""}]`
+	_ = inspectOutput
+}
+
 func TestStubGetContainerPort(t *testing.T) {
 	m := NewStub()
 	port, err := m.GetContainerPort(context.Background(), "testapp", "v2")

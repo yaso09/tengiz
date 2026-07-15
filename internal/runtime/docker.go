@@ -110,7 +110,7 @@ func (r *dockerRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageT
 func (r *dockerRuntime) Start(ctx context.Context, name string) error {
 	containerName := fmt.Sprintf("tengiz-%s", name)
 
-	imageTag, ports, envs := r.getContainerConfig(ctx, containerName)
+	imageTag, ports, envs, vols := r.getContainerConfig(ctx, containerName)
 
 	cmd := exec.CommandContext(ctx, "docker", "start", containerName)
 	out, err := cmd.CombinedOutput()
@@ -131,6 +131,7 @@ func (r *dockerRuntime) Start(ctx context.Context, name string) error {
 		args = append(args, ports...)
 		args = append(args, envs...)
 		resourceArgsFromOld := r.getResourceArgs(ctx, containerName)
+		args = append(args, vols...)
 		args = append(args, resourceArgsFromOld...)
 		args = append(args, imageTag)
 		cmd := exec.CommandContext(ctx, "docker", args...)
@@ -143,13 +144,13 @@ func (r *dockerRuntime) Start(ctx context.Context, name string) error {
 	return nil
 }
 
-func (r *dockerRuntime) getContainerConfig(ctx context.Context, containerName string) (string, []string, []string) {
+func (r *dockerRuntime) getContainerConfig(ctx context.Context, containerName string) (string, []string, []string, []string) {
 	// Get image
 	cmd := exec.CommandContext(ctx, "docker", "inspect",
 		"--format", "{{.Config.Image}}", containerName)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", nil, nil
+		return "", nil, nil, nil
 	}
 	imageTag := strings.TrimSpace(string(out))
 
@@ -158,12 +159,12 @@ func (r *dockerRuntime) getContainerConfig(ctx context.Context, containerName st
 		"--format", "{{json .HostConfig.PortBindings}}", containerName)
 	portOut, err := portCmd.CombinedOutput()
 	if err != nil {
-		return imageTag, nil, nil
+		return imageTag, nil, nil, nil
 	}
 
 	var bindings map[string][]map[string]string
 	if err := json.Unmarshal(portOut, &bindings); err != nil {
-		return imageTag, nil, nil
+		return imageTag, nil, nil, nil
 	}
 
 	var ports []string
@@ -193,7 +194,21 @@ func (r *dockerRuntime) getContainerConfig(ctx context.Context, containerName st
 		}
 	}
 
-	return imageTag, ports, envs
+	// Get volume binds
+	volCmd := exec.CommandContext(ctx, "docker", "inspect",
+		"--format", "{{json .HostConfig.Binds}}", containerName)
+	volOut, err := volCmd.CombinedOutput()
+	var vols []string
+	if err == nil {
+		var binds []string
+		if err := json.Unmarshal(volOut, &binds); err == nil {
+			for _, b := range binds {
+				vols = append(vols, "-v", b)
+			}
+		}
+	}
+
+	return imageTag, ports, envs, vols
 }
 
 func (r *dockerRuntime) getResourceArgs(ctx context.Context, containerName string) []string {
