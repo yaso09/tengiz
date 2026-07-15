@@ -2,6 +2,10 @@ name: Plan Top Feature
 
 on:
   workflow_dispatch:
+    inputs:
+      head_sha:
+        description: "Commit SHA from previous workflow"
+        required: false
 
 env:
   OPENAI_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
@@ -16,6 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.head_sha || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
@@ -59,6 +64,8 @@ jobs:
           git push
 
       - name: Trigger implement workflow
-        run: gh workflow run implement-top-feature.yml
+        run: |
+          SHA=$(git rev-parse HEAD)
+          gh workflow run implement-top-feature.yml -f head_sha=$SHA
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

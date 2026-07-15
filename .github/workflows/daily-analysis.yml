@@ -244,6 +244,8 @@ jobs:
           git push
 
       - name: Trigger prioritize workflow
-        run: gh workflow run prioritize-features.yml
+        run: |
+          SHA=$(git rev-parse HEAD)
+          gh workflow run prioritize-features.yml -f head_sha=$SHA
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
