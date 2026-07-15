@@ -18,7 +18,7 @@ Not: ✅ işaretli özellikler implemente edilmiştir.
 | 3 | **Custom Domain Management** ✅ | Çok Yüksek | Düşük | Mükemmel | Production domain zorunluluğu. ✅ Implemented. |
 | 4 | **Container Health Check + Auto Restart** | Çok Yüksek | Düşük-Orta | Mükemmel | Scale-to-zero'da cold start/crash yönetimi en kritik eksik. Docker health check + restart policy. cold start başarısız olursa yeniden dene, container crash yerse restart et. |
 | 5 | **Git Tabanlı Deployment** ✅ | Çok Yüksek | Yüksek | Mükemmel | Vercel alternatifinin olmazsa olmazı. `git push` → otomatik deploy. Yüksek efor ama etkisi çok büyük. SSH deploy key + webhook sunucusu. |
-| 6 | **Resource Limits (CPU/Memory)** | Yüksek | Düşük | Mükemmel | Tek makinede noisy neighbor'ı önler. Docker `--memory`/`--cpus` flag'leri. `.tengiz.yaml`'da `resources` bölümü. |
+| 6 | **Resource Limits (CPU/Memory)** ✅ | Yüksek | Düşük | Mükemmel | Tek makinede noisy neighbor'ı önler. Docker `--memory`/`--cpus` flag'leri. `.tengiz.yaml`'da `resources` bölümü. |
 | 7 | **Persistent Storage (Volume Management)** | Yüksek | Düşük-Orta | Mükemmel | Scale-to-zero stateful app'lerde veri kaybını önler. `runtime.Run()`'a `--volume` eklenir. |
 | 8 | **One-off Process Execution** | Yüksek | Düşük | Mükemmel | Migration/console/data import. `tengiz run` = `docker run --rm`. Mevcut `os/exec` yapısına çok uygun. |
 | 9 | **Build Logs** | Yüksek | Çok Düşük | Mükemmel | Build hata ayıklama olmadan hiçbir deployment aracı kullanılamaz. `builder.go` çıktısını dosyaya yönlendir. |
@@ -231,6 +231,7 @@ Not: ✅ işaretli özellikler implemente edilmiştir.
 - **Source:** Dokploy
 - **Description:** Her uygulama için CPU ve memory limiti + reservation belirleme. Docker'ın `--memory`, `--cpus`, `--memory-reservation`, `--cpuset-cpus` flag'leri ile container kaynakları sınırlanır.
 - **Why add to Tengiz:** Tek makinede çalışan bir uygulamanın tüm RAM'i tüketmesi diğer Tengiz uygulamalarını etkiler. `.tengiz.yaml`'da `resources.cpu` ve `resources.memory` alanları ile yapılandırılır. Tengiz'in `runtime.Run()` fonksiyonuna Docker CLI flag'leri olarak eklenir.
+- **Status:** ✅ Implemented (2026-07-15)
 - **Detected:** 2026-07-14
 
 ## Environment Variable Management
