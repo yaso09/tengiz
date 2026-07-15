@@ -12,6 +12,7 @@ type Manager interface {
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
+	Restart(ctx context.Context, name string) error
 	Remove(ctx context.Context, name string) error
 	RemoveBySuffix(ctx context.Context, name string, suffix string) error
 	IsActive(ctx context.Context, name string) (bool, error)
@@ -19,6 +20,7 @@ type Manager interface {
 	List(ctx context.Context) ([]types.AppStatus, error)
 	Logs(ctx context.Context, name string, follow bool) (io.ReadCloser, error)
 	WaitForReady(ctx context.Context, name string, internalPort int) error
+	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 }
 
 type stubManager struct{}
@@ -36,6 +38,10 @@ func (m *stubManager) Start(ctx context.Context, name string) error {
 }
 
 func (m *stubManager) Stop(ctx context.Context, name string) error {
+	return nil
+}
+
+func (m *stubManager) Restart(ctx context.Context, name string) error {
 	return nil
 }
 
@@ -68,5 +74,9 @@ func (m *stubManager) GetContainerPort(ctx context.Context, name string, suffix 
 }
 
 func (m *stubManager) WaitForReady(ctx context.Context, name string, internalPort int) error {
+	return nil
+}
+
+func (m *stubManager) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error {
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"os/exec"
 	"sort"
 	"strings"
@@ -152,6 +153,81 @@ func (r *dockerRuntime) getContainerConfig(ctx context.Context, containerName st
 	}
 
 	return imageTag, ports, envs
+}
+
+func (r *dockerRuntime) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error {
+	if hc == nil || !hc.Enabled {
+		return nil
+	}
+	containerName := fmt.Sprintf("tengiz-%s", name)
+	portCmd := exec.CommandContext(ctx, "docker", "inspect",
+		"--format", "{{json .NetworkSettings.Ports}}", containerName)
+	portOut, err := portCmd.CombinedOutput()
+	if err != nil {
+		return nil
+	}
+	var ports map[string][]map[string]string
+	if err := json.Unmarshal(portOut, &ports); err != nil {
+		return nil
+	}
+	var hostPort int
+	for _, bindings := range ports {
+		for _, b := range bindings {
+			if hp := b["HostPort"]; hp != "" {
+				fmt.Sscanf(hp, "%d", &hostPort)
+				break
+			}
+		}
+		if hostPort != 0 {
+			break
+		}
+	}
+	if hostPort == 0 {
+		return nil
+	}
+	endpoint := hc.Endpoint
+	if endpoint == "" {
+		endpoint = "/health"
+	}
+	timeout := hc.Timeout
+	if timeout <= 0 {
+		timeout = 5
+	}
+	retries := hc.Retries
+	if retries <= 0 {
+		retries = 3
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d%s", hostPort, endpoint)
+	client := &http.Client{Timeout: time.Duration(timeout) * time.Second}
+	var lastErr error
+	for i := 0; i <= retries; i++ {
+		resp, err := client.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+				return nil
+			}
+			lastErr = fmt.Errorf("health check returned HTTP %d", resp.StatusCode)
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("health check failed after %d retries: %w", retries, lastErr)
+}
+
+func (r *dockerRuntime) Restart(ctx context.Context, name string) error {
+	containerName := fmt.Sprintf("tengiz-%s", name)
+	cmd := exec.CommandContext(ctx, "docker", "restart", "-t", "5", containerName)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker restart: %w\n%s", err, string(out))
+	}
+	return nil
 }
 
 func (r *dockerRuntime) Stop(ctx context.Context, name string) error {

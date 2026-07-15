@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/yaso09/tengiz/internal/builder"
 	"github.com/yaso09/tengiz/internal/config"
+	"github.com/yaso09/tengiz/internal/health"
 	"github.com/yaso09/tengiz/internal/idle"
 	"github.com/yaso09/tengiz/internal/proxy"
 	"github.com/yaso09/tengiz/internal/runtime"
@@ -41,6 +42,7 @@ func init() {
 	domainCmd.AddCommand(domainAddCmd)
 	domainCmd.AddCommand(domainRemoveCmd)
 	domainCmd.AddCommand(domainListCmd)
+	rootCmd.AddCommand(healthCmd)
 	rootCmd.AddCommand(domainCmd)
 	rootCmd.AddCommand(configCmd)
 }
@@ -72,6 +74,14 @@ var initCmd = &cobra.Command{
 serverless:
   enabled: true
   idle_timeout: 5m      # scale-to-zero timeout
+# healthcheck:
+#   enabled: true
+#   endpoint: /health
+#   port: 3000
+#   interval: 30
+#   retries: 3
+#   timeout: 5
+#   start_period: 0
 # domains:
 #   - app.example.com
 # env:
@@ -272,6 +282,10 @@ var proxyCmd = &cobra.Command{
 		p.SetIdleManager(idleMgr)
 
 		store := config.NewStore(dataDir)
+
+		healthChecker := health.New(rt, store)
+		defer healthChecker.StopAll()
+
 		apps, err := store.ListApps()
 		if err == nil {
 			for _, app := range apps {
@@ -282,6 +296,7 @@ var proxyCmd = &cobra.Command{
 					p.RegisterDomain(domain, app.Name)
 					fmt.Printf("[tengiz] domain: %s -> %s\n", domain, app.Name)
 				}
+				healthChecker.Start(app.Name)
 			}
 		}
 
@@ -318,13 +333,27 @@ var psCmd = &cobra.Command{
 			return nil
 		}
 
-		fmt.Printf("%-20s %-10s %-8s\n", "NAME", "STATE", "PORT")
+		store := config.NewStore(dataDir)
+		storeApps, _ := store.ListApps()
+		healthMap := make(map[string]string, len(storeApps))
+		for _, sa := range storeApps {
+			healthMap[sa.Name] = sa.HealthStatus
+			if healthMap[sa.Name] == "" {
+				healthMap[sa.Name] = string(types.HealthUnknown)
+			}
+		}
+
+		fmt.Printf("%-20s %-10s %-8s %-10s\n", "NAME", "STATE", "PORT", "HEALTH")
 		for _, a := range apps {
 			portStr := fmt.Sprintf("%d", a.Port)
 			if a.Port == 0 {
 				portStr = "-"
 			}
-			fmt.Printf("%-20s %-10s %-8s\n", a.Name, a.State, portStr)
+			health := healthMap[a.Name]
+			if health == "" {
+				health = string(types.HealthUnknown)
+			}
+			fmt.Printf("%-20s %-10s %-8s %-10s\n", a.Name, a.State, portStr, health)
 		}
 		return nil
 	},
@@ -447,6 +476,37 @@ var devCmd = &cobra.Command{
 			}
 			return fmt.Errorf("dev server: %w", err)
 		}
+		return nil
+	},
+}
+
+var healthCmd = &cobra.Command{
+	Use:   "health <app>",
+	Short: "Check application health status",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		store := config.NewStore(dataDir)
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		app, err := store.GetApp(appName)
+		if err != nil {
+			return fmt.Errorf("app %q not found", appName)
+		}
+
+		if app.Config.HealthCheck == nil || !app.Config.HealthCheck.Enabled {
+			return fmt.Errorf("health check not configured for %q", appName)
+		}
+
+		c := health.New(rt, store)
+		if err := c.CheckOnce(cmd.Context(), appName); err != nil {
+			fmt.Printf("[tengiz] %s is UNHEALTHY: %v\n", appName, err)
+			return nil
+		}
+		fmt.Printf("[tengiz] %s is healthy\n", appName)
 		return nil
 	},
 }

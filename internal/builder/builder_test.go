@@ -3,7 +3,10 @@ package builder
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 func TestDetectNextJS(t *testing.T) {
@@ -99,6 +102,42 @@ func TestGenerateDockerfileGo(t *testing.T) {
 	df := generateDockerfile(&Detection{Framework: FrameworkGo, InternalPort: 8080})
 	if !contains(df, "FROM golang") {
 		t.Error("Go Dockerfile should contain golang image")
+	}
+}
+
+func TestGenerateDockerfileWithHealthCheck(t *testing.T) {
+	hc := &types.HealthCheckConfig{
+		Enabled:  true,
+		Endpoint: "/healthz",
+		Interval: 15,
+		Timeout:  3,
+		Retries:  2,
+	}
+	d := &Detection{
+		Framework:    FrameworkNode,
+		InternalPort: 3000,
+		HealthCheck:  hc,
+	}
+	df := generateDockerfile(d)
+	if !strings.Contains(df, "HEALTHCHECK") {
+		t.Error("generated Dockerfile missing HEALTHCHECK instruction")
+	}
+	if !strings.Contains(df, "/healthz") {
+		t.Error("generated Dockerfile missing custom endpoint")
+	}
+	if !strings.Contains(df, "--interval=15s") {
+		t.Error("generated Dockerfile missing custom interval")
+	}
+}
+
+func TestGenerateDockerfileWithoutHealthCheck(t *testing.T) {
+	d := &Detection{
+		Framework:    FrameworkGo,
+		InternalPort: 8080,
+	}
+	df := generateDockerfile(d)
+	if strings.Contains(df, "HEALTHCHECK") {
+		t.Error("generated Dockerfile should not contain HEALTHCHECK when not configured")
 	}
 }
 

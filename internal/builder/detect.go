@@ -3,6 +3,8 @@ package builder
 import (
 	"os"
 	"path/filepath"
+
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 type Framework string
@@ -22,6 +24,7 @@ type Detection struct {
 	BuildCmd     string
 	OutputDir    string
 	InternalPort int
+	HealthCheck  *types.HealthCheckConfig
 }
 
 func Detect(dir string) (*Detection, error) {

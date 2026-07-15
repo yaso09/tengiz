@@ -215,6 +215,7 @@ healthcheck:
   interval: 10
   retries: 3
   timeout: 5
+  start_period: 0
 env:
   DATABASE_URL: postgres://localhost:5432/myapp
   API_KEY: your-secret-key
