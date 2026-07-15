@@ -128,6 +128,34 @@ func TestResourceArgs(t *testing.T) {
 	}
 }
 
+func TestCreateWithVolumes(t *testing.T) {
+	mgr := NewStub()
+	cfg := &types.AppConfig{
+		Name: "test-app",
+		Volumes: []types.VolumeConfig{
+			{HostPath: "/host/data", ContainerPath: "/container/data"},
+		},
+	}
+	err := mgr.Create(context.Background(), cfg, "test-image:latest", 9000)
+	if err != nil {
+		t.Errorf("Create with volumes failed: %v", err)
+	}
+}
+
+func TestCreateVersionedWithVolumes(t *testing.T) {
+	mgr := NewStub()
+	cfg := &types.AppConfig{
+		Name: "test-app",
+		Volumes: []types.VolumeConfig{
+			{HostPath: "/host/data", ContainerPath: "/container/data"},
+		},
+	}
+	err := mgr.CreateVersioned(context.Background(), cfg, "test-image:latest", 9000, "v2")
+	if err != nil {
+		t.Errorf("CreateVersioned with volumes failed: %v", err)
+	}
+}
+
 func TestVolumeArgs(t *testing.T) {
 	tests := []struct {
 		name   string

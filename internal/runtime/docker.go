@@ -89,6 +89,7 @@ func (r *dockerRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageT
 	}
 	args = append(args, envArgs(cfg.Env)...)
 	args = append(args, resourceArgs(cfg.Resources)...)
+	args = append(args, volumeArgs(cfg.Volumes)...)
 	args = append(args, imageTag)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.CombinedOutput()
@@ -413,6 +414,7 @@ func (r *dockerRuntime) CreateVersioned(ctx context.Context, cfg *types.AppConfi
 	}
 	args = append(args, envArgs(cfg.Env)...)
 	args = append(args, resourceArgs(cfg.Resources)...)
+	args = append(args, volumeArgs(cfg.Volumes)...)
 	args = append(args, imageTag)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.CombinedOutput()
