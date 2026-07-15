@@ -187,6 +187,7 @@ Not: ✅ işaretli özellikler implemente edilmiştir.
 - **Source:** Coolify
 - **Description:** Health check yapılandırması (path, port, interval, timeout, retries, start_period). `ServerCheckJob` ile container'lar sürekli izlenir, gerektiğinde restart.
 - **Why add to Tengiz:** Scale-to-zero mimarisinde sağlıklı çalışma kritik. Cold start başarısız olursa yeniden dene, container crash yerse restart et. `.tengiz.yaml`'a `healthcheck` bölümü eklenebilir.
+- **Status:** ✅ Implemented (2026-07-15)
 - **Detected:** 2026-07-14
 
 ## Bildirim Sistemi (Multi-Channel Notifications)
