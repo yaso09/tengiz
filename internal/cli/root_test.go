@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -72,6 +73,22 @@ func TestHealthCmdUnknownApp(t *testing.T) {
 	err := rootCmd.Execute()
 	if err == nil {
 		t.Error("expected error for unknown app")
+	}
+}
+
+func TestPsHeaderContainsHealth(t *testing.T) {
+	// If no apps deployed, ps just prints "No applications deployed."
+	// We verify that when apps exist, the HEALTH column is shown.
+	// For the structure check, just verify the psCmd uses proper format
+	rootCmd.SetArgs([]string{"ps"})
+	output := captureOutput(func() {
+		rootCmd.Execute()
+	})
+	if strings.Contains(output, "No applications deployed") {
+		t.Skip("no apps deployed, cannot verify HEALTH column")
+	}
+	if !strings.Contains(output, "HEALTH") {
+		t.Errorf("ps output missing HEALTH column header, got: %s", output)
 	}
 }
 

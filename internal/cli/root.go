@@ -325,13 +325,27 @@ var psCmd = &cobra.Command{
 			return nil
 		}
 
-		fmt.Printf("%-20s %-10s %-8s\n", "NAME", "STATE", "PORT")
+		store := config.NewStore(dataDir)
+		storeApps, _ := store.ListApps()
+		healthMap := make(map[string]string, len(storeApps))
+		for _, sa := range storeApps {
+			healthMap[sa.Name] = sa.HealthStatus
+			if healthMap[sa.Name] == "" {
+				healthMap[sa.Name] = string(types.HealthUnknown)
+			}
+		}
+
+		fmt.Printf("%-20s %-10s %-8s %-10s\n", "NAME", "STATE", "PORT", "HEALTH")
 		for _, a := range apps {
 			portStr := fmt.Sprintf("%d", a.Port)
 			if a.Port == 0 {
 				portStr = "-"
 			}
-			fmt.Printf("%-20s %-10s %-8s\n", a.Name, a.State, portStr)
+			health := healthMap[a.Name]
+			if health == "" {
+				health = string(types.HealthUnknown)
+			}
+			fmt.Printf("%-20s %-10s %-8s %-10s\n", a.Name, a.State, portStr, health)
 		}
 		return nil
 	},
