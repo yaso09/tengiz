@@ -1,0 +1,190 @@
+package gitdeploy
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/yaso09/tengiz/internal/builder"
+	"github.com/yaso09/tengiz/internal/config"
+	"github.com/yaso09/tengiz/internal/git"
+	"github.com/yaso09/tengiz/internal/proxy"
+	"github.com/yaso09/tengiz/internal/runtime"
+	"github.com/yaso09/tengiz/internal/types"
+)
+
+type Pipeline struct {
+	dataDir string
+	b       *builder.Builder
+	rt      runtime.Manager
+	store   *config.Store
+}
+
+func NewPipeline(dataDir string, rt runtime.Manager, store *config.Store) *Pipeline {
+	return &Pipeline{
+		dataDir: dataDir,
+		b:       builder.New(dataDir),
+		rt:      rt,
+		store:   store,
+	}
+}
+
+func extractAppName(repo string) string {
+	name := strings.TrimSuffix(repo, ".git")
+	if idx := strings.LastIndex(name, "/"); idx >= 0 {
+		name = name[idx+1:]
+	}
+	return name
+}
+
+func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string) error {
+	appName := extractAppName(repoURL)
+
+	log.Printf("[tengiz] git deploy: %s (%s/%s)", appName, provider, branch)
+
+	cloneDir, err := os.MkdirTemp("", fmt.Sprintf("tengiz-%s-*", appName))
+	if err != nil {
+		return fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(cloneDir)
+
+	keyPath := ""
+	if git.HasKey(p.dataDir) {
+		keyPath = git.KeyPath(p.dataDir)
+	}
+	if err := git.Clone(ctx, repoURL, branch, cloneDir, keyPath); err != nil {
+		return fmt.Errorf("clone: %w", err)
+	}
+
+	existingApp, lookupErr := p.store.GetApp(appName)
+
+	detection, err := builder.Detect(cloneDir)
+	if err != nil {
+		return fmt.Errorf("detect: %w", err)
+	}
+	log.Printf("[tengiz] detected: %s (port %d)", detection.Framework, detection.InternalPort)
+
+	cfg := &types.AppConfig{
+		Name: appName,
+		Port: detection.InternalPort,
+		Serverless: types.ServerlessConfig{
+			Enabled:     true,
+			IdleTimeout: 5 * time.Minute,
+		},
+		Git: &types.GitConfig{
+			Repo:     repoURL,
+			Branch:   branch,
+			Provider: provider,
+		},
+	}
+
+	if lookupErr == nil {
+		cfg.Env = existingApp.Config.Env
+		cfg.Domains = existingApp.Domains
+		cfg.HealthCheck = existingApp.Config.HealthCheck
+		cfg.Serverless = existingApp.Config.Serverless
+		if existingApp.Config.Port != 0 {
+			cfg.Port = existingApp.Config.Port
+		}
+	}
+
+	imageTag, err := p.b.Build(ctx, cloneDir, appName, detection)
+	if err != nil {
+		return fmt.Errorf("build: %w", err)
+	}
+	log.Printf("[tengiz] built image: %s", imageTag)
+
+	if lookupErr != nil {
+		port, err := p.store.AllocatePort(appName)
+		if err != nil {
+			return fmt.Errorf("port: %w", err)
+		}
+
+		if err := p.rt.Create(ctx, cfg, imageTag, port); err != nil {
+			p.store.FreePort(port)
+			return fmt.Errorf("create: %w", err)
+		}
+		log.Printf("[tengiz] running on port %d", port)
+
+		p.store.SaveApp(types.AppEntry{
+			Name:        appName,
+			ImageTag:    imageTag,
+			Port:        port,
+			Domains:     cfg.Domains,
+			Config:      *cfg,
+			GitRepo:     repoURL,
+			GitBranch:   branch,
+			GitProvider: provider,
+		})
+
+		if err := proxy.RegisterRouteWithProxy(appName, port); err != nil {
+			log.Printf("[tengiz] proxy not available: %v", err)
+		}
+
+		log.Printf("[tengiz] deployed: %s via git push", appName)
+		return nil
+	}
+
+	deploymentID := fmt.Sprintf("%d", time.Now().Unix())
+	newPort, err := p.store.AllocatePort(appName)
+	if err != nil {
+		return fmt.Errorf("port allocation: %w", err)
+	}
+
+	if err := p.rt.CreateVersioned(ctx, cfg, imageTag, newPort, deploymentID); err != nil {
+		p.store.FreePort(newPort)
+		return fmt.Errorf("create versioned: %w", err)
+	}
+	log.Printf("[tengiz] new container starting on port %d", newPort)
+
+	if err := p.rt.WaitForReady(ctx, fmt.Sprintf("%s-%s", appName, deploymentID), cfg.Port); err != nil {
+		log.Printf("[tengiz] warning: new container may not be ready: %v", err)
+	}
+
+	if err := proxy.RegisterRouteWithProxy(appName, newPort); err != nil {
+		log.Printf("[tengiz] proxy not available: %v", err)
+	}
+
+	if existingApp.DeploymentSuffix != "" {
+		p.rt.RemoveBySuffix(ctx, appName, existingApp.DeploymentSuffix)
+	} else {
+		p.rt.Remove(ctx, appName)
+	}
+	p.store.FreePort(existingApp.Port)
+
+	p.store.AddDeployment(appName, types.DeploymentEntry{
+		ID:        deploymentID,
+		ImageTag:  imageTag,
+		Port:      newPort,
+		CreatedAt: time.Now(),
+		Status:    string(types.DeployActive),
+	})
+
+	if existingApp.DeploymentSuffix != "" {
+		p.store.AddDeployment(appName, types.DeploymentEntry{
+			ID:        existingApp.DeploymentSuffix,
+			ImageTag:  existingApp.ImageTag,
+			Port:      existingApp.Port,
+			CreatedAt: time.Now(),
+			Status:    string(types.DeployPrevious),
+		})
+	}
+
+	p.store.SaveApp(types.AppEntry{
+		Name:             appName,
+		ImageTag:         imageTag,
+		Port:             newPort,
+		Domains:          cfg.Domains,
+		Config:           *cfg,
+		DeploymentSuffix: deploymentID,
+		GitRepo:          repoURL,
+		GitBranch:        branch,
+		GitProvider:      provider,
+	})
+
+	log.Printf("[tengiz] deployed (zero-downtime) via git push: %s", appName)
+	return nil
+}
