@@ -154,6 +154,16 @@ func (r *dockerRuntime) getContainerConfig(ctx context.Context, containerName st
 	return imageTag, ports, envs
 }
 
+func (r *dockerRuntime) Restart(ctx context.Context, name string) error {
+	containerName := fmt.Sprintf("tengiz-%s", name)
+	cmd := exec.CommandContext(ctx, "docker", "restart", "-t", "5", containerName)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker restart: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
 func (r *dockerRuntime) Stop(ctx context.Context, name string) error {
 	containerName := fmt.Sprintf("tengiz-%s", name)
 	cmd := exec.CommandContext(ctx, "docker", "stop", "-t", "5", containerName)

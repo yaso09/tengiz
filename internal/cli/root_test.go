@@ -29,6 +29,7 @@ func (m *mockRTForDeploy) CreateVersioned(ctx context.Context, cfg *types.AppCon
 
 func (m *mockRTForDeploy) Start(ctx context.Context, name string) error { m.started.Add(1); return nil }
 func (m *mockRTForDeploy) Stop(ctx context.Context, name string) error { m.stopped.Add(1); return nil }
+func (m *mockRTForDeploy) Restart(ctx context.Context, name string) error { return nil }
 func (m *mockRTForDeploy) Remove(ctx context.Context, name string) error { m.removed.Add(1); return nil }
 func (m *mockRTForDeploy) RemoveBySuffix(ctx context.Context, name string, suffix string) error { m.removed.Add(1); return nil }
 func (m *mockRTForDeploy) IsActive(ctx context.Context, name string) (bool, error) { return true, nil }

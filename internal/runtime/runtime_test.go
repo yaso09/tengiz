@@ -65,6 +65,13 @@ func TestCreateVersionedWithEnv(t *testing.T) {
 	}
 }
 
+func TestStubRestart(t *testing.T) {
+	m := NewStub()
+	if err := m.Restart(context.Background(), "testapp"); err != nil {
+		t.Fatalf("Restart() error = %v", err)
+	}
+}
+
 func TestStubGetContainerPort(t *testing.T) {
 	m := NewStub()
 	port, err := m.GetContainerPort(context.Background(), "testapp", "v2")
