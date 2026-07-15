@@ -39,6 +39,48 @@ func TestAppConfigEnvEmptyByDefault(t *testing.T) {
 	}
 }
 
+func TestVolumeMountValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		mount   VolumeMount
+		wantErr bool
+	}{
+		{
+			name:    "valid host path mount",
+			mount:   VolumeMount{HostPath: "/data", ContainerPath: "/app/data"},
+			wantErr: false,
+		},
+		{
+			name:    "valid relative host path",
+			mount:   VolumeMount{HostPath: "./data", ContainerPath: "/app/data"},
+			wantErr: false,
+		},
+		{
+			name:    "empty container path",
+			mount:   VolumeMount{HostPath: "/data", ContainerPath: ""},
+			wantErr: true,
+		},
+		{
+			name:    "empty host path",
+			mount:   VolumeMount{HostPath: "", ContainerPath: "/data"},
+			wantErr: true,
+		},
+		{
+			name:    "readonly mount",
+			mount:   VolumeMount{HostPath: "/data", ContainerPath: "/data", ReadOnly: true},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.mount.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr = %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestGitConfigFields(t *testing.T) {
 	cfg := AppConfig{
 		Name: "test-app",

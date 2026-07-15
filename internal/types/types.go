@@ -1,11 +1,72 @@
 package types
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 type GitConfig struct {
 	Repo     string `mapstructure:"repo" json:"repo,omitempty"`
 	Branch   string `mapstructure:"branch" json:"branch,omitempty"`
 	Provider string `mapstructure:"provider" json:"provider,omitempty"`
+}
+
+type VolumeMount struct {
+	HostPath      string `mapstructure:"host_path" json:"host_path"`
+	ContainerPath string `mapstructure:"container_path" json:"container_path"`
+	ReadOnly      bool   `mapstructure:"read_only" json:"read_only,omitempty"`
+}
+
+func (v VolumeMount) Validate() error {
+	if v.HostPath == "" {
+		return fmt.Errorf("host_path is required")
+	}
+	if v.ContainerPath == "" {
+		return fmt.Errorf("container_path is required")
+	}
+	return nil
+}
+
+func (v VolumeMount) DockerArg() string {
+	arg := fmt.Sprintf("%s:%s", v.HostPath, v.ContainerPath)
+	if v.ReadOnly {
+		arg += ":ro"
+	}
+	return arg
+}
+
+func ParseVolumeSpec(spec string) (VolumeMount, error) {
+	parts := strings.Split(spec, ":")
+	var hostPath, containerPath string
+	readOnly := false
+	switch len(parts) {
+	case 2:
+		hostPath = parts[0]
+		containerPath = parts[1]
+	case 3:
+		hostPath = parts[0]
+		containerPath = parts[1]
+		if parts[2] == "ro" {
+			readOnly = true
+		} else if parts[2] != "rw" {
+			return VolumeMount{}, fmt.Errorf("invalid mode %q (expected ro or rw)", parts[2])
+		}
+	default:
+		return VolumeMount{}, fmt.Errorf("invalid volume spec %q (expected host:container or host:container:mode)", spec)
+	}
+	if hostPath == "" || containerPath == "" {
+		return VolumeMount{}, fmt.Errorf("host_path and container_path must not be empty")
+	}
+	return VolumeMount{HostPath: hostPath, ContainerPath: containerPath, ReadOnly: readOnly}, nil
+}
+
+func ParseVolumeSpecSimple(spec string) (hostPath, containerPath string, err error) {
+	parts := strings.Split(spec, ":")
+	if len(parts) < 2 {
+		return "", "", fmt.Errorf("invalid volume spec %q (expected host:container)", spec)
+	}
+	return parts[0], parts[1], nil
 }
 
 type AppConfig struct {
@@ -18,6 +79,7 @@ type AppConfig struct {
 	Resources   *ResourceConfig     `mapstructure:"resources,omitempty" json:"resources,omitempty"`
 	Env         map[string]string   `mapstructure:"env" json:"env,omitempty"`
 	Git         *GitConfig          `mapstructure:"git,omitempty" json:"git,omitempty"`
+	Volumes     []VolumeMount       `mapstructure:"volumes,omitempty" json:"volumes,omitempty"`
 }
 
 type ResourceConfig struct {
@@ -102,4 +164,5 @@ type AppEntry struct {
 	GitRepo          string            `json:"git_repo,omitempty"`
 	GitBranch        string            `json:"git_branch,omitempty"`
 	GitProvider      string            `json:"git_provider,omitempty"`
+	Volumes          []VolumeMount     `json:"volumes,omitempty"`
 }
