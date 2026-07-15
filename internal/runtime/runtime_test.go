@@ -127,6 +127,60 @@ func TestResourceArgs(t *testing.T) {
 	}
 }
 
+func TestVolumeArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		volumes  []types.VolumeConfig
+		expected []string
+	}{
+		{
+			name:     "nil slice",
+			volumes:  nil,
+			expected: nil,
+		},
+		{
+			name:     "empty slice",
+			volumes:  []types.VolumeConfig{},
+			expected: nil,
+		},
+		{
+			name: "single volume",
+			volumes: []types.VolumeConfig{
+				{HostPath: "/data/uploads", ContainerPath: "/app/uploads"},
+			},
+			expected: []string{"--volume", "/data/uploads:/app/uploads"},
+		},
+		{
+			name: "readonly volume",
+			volumes: []types.VolumeConfig{
+				{HostPath: "/data/config", ContainerPath: "/etc/config", ReadOnly: true},
+			},
+			expected: []string{"--volume", "/data/config:/etc/config:ro"},
+		},
+		{
+			name: "multiple volumes",
+			volumes: []types.VolumeConfig{
+				{HostPath: "/data/db", ContainerPath: "/var/lib/data"},
+				{HostPath: "/data/uploads", ContainerPath: "/app/uploads", ReadOnly: true},
+			},
+			expected: []string{"--volume", "/data/db:/var/lib/data", "--volume", "/data/uploads:/app/uploads:ro"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := volumeArgs(tt.volumes)
+			if len(got) != len(tt.expected) {
+				t.Fatalf("volumeArgs() = %v (len=%d), want %v (len=%d)", got, len(got), tt.expected, len(tt.expected))
+			}
+			for i := range got {
+				if got[i] != tt.expected[i] {
+					t.Fatalf("volumeArgs()[%d] = %q, want %q", i, got[i], tt.expected[i])
+				}
+			}
+		})
+	}
+}
+
 func TestStubGetContainerPort(t *testing.T) {
 	m := NewStub()
 	port, err := m.GetContainerPort(context.Background(), "testapp", "v2")

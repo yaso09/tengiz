@@ -33,6 +33,21 @@ func envArgs(env map[string]string) []string {
 	return args
 }
 
+func volumeArgs(volumes []types.VolumeConfig) []string {
+	if len(volumes) == 0 {
+		return nil
+	}
+	var args []string
+	for _, v := range volumes {
+		spec := fmt.Sprintf("%s:%s", v.HostPath, v.ContainerPath)
+		if v.ReadOnly {
+			spec += ":ro"
+		}
+		args = append(args, "--volume", spec)
+	}
+	return args
+}
+
 func resourceArgs(rc *types.ResourceConfig) []string {
 	if rc == nil || (rc.CPU == "" && rc.Memory == "") {
 		return nil
@@ -74,6 +89,7 @@ func (r *dockerRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageT
 	}
 	args = append(args, envArgs(cfg.Env)...)
 	args = append(args, resourceArgs(cfg.Resources)...)
+	args = append(args, volumeArgs(cfg.Volumes)...)
 	args = append(args, imageTag)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.CombinedOutput()
@@ -108,6 +124,8 @@ func (r *dockerRuntime) Start(ctx context.Context, name string) error {
 		args = append(args, envs...)
 		resourceArgsFromOld := r.getResourceArgs(ctx, containerName)
 		args = append(args, resourceArgsFromOld...)
+		volumeArgsFromOld := r.getVolumeArgs(ctx, containerName)
+		args = append(args, volumeArgsFromOld...)
 		args = append(args, imageTag)
 		cmd := exec.CommandContext(ctx, "docker", args...)
 		out, err := cmd.CombinedOutput()
@@ -203,6 +221,37 @@ func (r *dockerRuntime) getResourceArgs(ctx context.Context, containerName strin
 			cpus := float64(nanocpus) / 1e9
 			args = append(args, "--cpus", fmt.Sprintf("%g", cpus))
 		}
+	}
+	return args
+}
+
+func (r *dockerRuntime) getVolumeArgs(ctx context.Context, containerName string) []string {
+	mountsCmd := exec.CommandContext(ctx, "docker", "inspect",
+		"--format", "{{json .Mounts}}", containerName)
+	mountsOut, err := mountsCmd.CombinedOutput()
+	if err != nil {
+		return nil
+	}
+	var mounts []struct {
+		Type        string `json:"Type"`
+		Source      string `json:"Source"`
+		Destination string `json:"Destination"`
+		Mode        string `json:"Mode"`
+		RW          bool   `json:"RW"`
+	}
+	if err := json.Unmarshal(mountsOut, &mounts); err != nil {
+		return nil
+	}
+	var args []string
+	for _, m := range mounts {
+		if m.Type != "bind" && m.Type != "volume" {
+			continue
+		}
+		spec := fmt.Sprintf("%s:%s", m.Source, m.Destination)
+		if !m.RW {
+			spec += ":ro"
+		}
+		args = append(args, "--volume", spec)
 	}
 	return args
 }
@@ -398,6 +447,7 @@ func (r *dockerRuntime) CreateVersioned(ctx context.Context, cfg *types.AppConfi
 	}
 	args = append(args, envArgs(cfg.Env)...)
 	args = append(args, resourceArgs(cfg.Resources)...)
+	args = append(args, volumeArgs(cfg.Volumes)...)
 	args = append(args, imageTag)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.CombinedOutput()
