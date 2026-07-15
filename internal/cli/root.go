@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -24,7 +25,7 @@ import (
 	"github.com/yaso09/tengiz/internal/webhook"
 )
 
-var dataDir string
+	var dataDir string
 
 func init() {
 	home, _ := os.UserHomeDir()
@@ -52,6 +53,10 @@ func init() {
 	gitCmd.AddCommand(gitConnectCmd)
 	gitCmd.AddCommand(gitDisconnectCmd)
 	rootCmd.AddCommand(gitCmd)
+	volumeCmd.AddCommand(volumeAddCmd)
+	volumeCmd.AddCommand(volumeRemoveCmd)
+	volumeCmd.AddCommand(volumeListCmd)
+	rootCmd.AddCommand(volumeCmd)
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
 }
@@ -601,6 +606,80 @@ var domainListCmd = &cobra.Command{
 		}
 		for _, d := range domains {
 			fmt.Println(d)
+		}
+		return nil
+	},
+}
+
+var volumeCmd = &cobra.Command{
+	Use:   "volume",
+	Short: "Manage persistent storage volumes",
+}
+
+var volumeAddCmd = &cobra.Command{
+	Use:   "add <app> <host_path>:<container_path>",
+	Short: "Mount a volume to an app",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		mount := args[1]
+		parts := strings.SplitN(mount, ":", 3)
+		if len(parts) < 2 {
+			return fmt.Errorf("invalid mount format: use host_path:container_path[:ro]")
+		}
+		hostPath := parts[0]
+		containerPath := parts[1]
+		readOnly := len(parts) == 3 && parts[2] == "ro"
+
+		store := config.NewStore(dataDir)
+		vol := types.VolumeConfig{
+			HostPath:      hostPath,
+			ContainerPath: containerPath,
+			ReadOnly:      readOnly,
+		}
+		if err := store.AddVolume(appName, vol); err != nil {
+			return err
+		}
+		fmt.Printf("[tengiz] mounted %s:%s for %s\n", hostPath, containerPath, appName)
+		return nil
+	},
+}
+
+var volumeRemoveCmd = &cobra.Command{
+	Use:   "remove <app> <host_path>",
+	Short: "Unmount a volume from an app",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		store := config.NewStore(dataDir)
+		if err := store.RemoveVolume(args[0], args[1]); err != nil {
+			return err
+		}
+		fmt.Printf("[tengiz] removed volume %s from %s\n", args[1], args[0])
+		return nil
+	},
+}
+
+var volumeListCmd = &cobra.Command{
+	Use:   "list <app>",
+	Short: "List mounted volumes for an app",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		store := config.NewStore(dataDir)
+		vols, err := store.ListVolumes(args[0])
+		if err != nil {
+			return err
+		}
+		if len(vols) == 0 {
+			fmt.Printf("No volumes mounted for %s.\n", args[0])
+			return nil
+		}
+		fmt.Printf("Volumes for %s:\n", args[0])
+		for _, v := range vols {
+			ro := ""
+			if v.ReadOnly {
+				ro = " (read-only)"
+			}
+			fmt.Printf("  %s:%s%s\n", v.HostPath, v.ContainerPath, ro)
 		}
 		return nil
 	},

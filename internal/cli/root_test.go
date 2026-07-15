@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/yaso09/tengiz/internal/config"
 	"github.com/yaso09/tengiz/internal/types"
 )
 
@@ -157,6 +158,64 @@ func TestInitCmdGitFlags(t *testing.T) {
 	branchFlag := flags.Lookup("git-branch")
 	if branchFlag == nil {
 		t.Fatal("--git-branch flag not found on init command")
+	}
+}
+
+func TestVolumeAddCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	dataDir = tmpDir
+
+	store := config.NewStore(dataDir)
+	err := store.SaveApp(types.AppEntry{
+		Name: "testapp",
+		Config: types.AppConfig{
+			Name: "testapp",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rootCmd.SetArgs([]string{"volume", "add", "testapp", "/host/data:/app/data"})
+	err = rootCmd.Execute()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vols, err := store.ListVolumes("testapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vols) != 1 {
+		t.Fatalf("expected 1 volume, got %d", len(vols))
+	}
+	if vols[0].HostPath != "/host/data" {
+		t.Fatalf("expected host path /host/data, got %s", vols[0].HostPath)
+	}
+	if vols[0].ContainerPath != "/app/data" {
+		t.Fatalf("expected container path /app/data, got %s", vols[0].ContainerPath)
+	}
+}
+
+func TestVolumeAddWithReadOnly(t *testing.T) {
+	tmpDir := t.TempDir()
+	dataDir = tmpDir
+
+	store := config.NewStore(dataDir)
+	store.SaveApp(types.AppEntry{Name: "testapp", Config: types.AppConfig{Name: "testapp"}})
+
+	rootCmd.SetArgs([]string{"volume", "add", "testapp", "/host/config:/etc/config:ro"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vols, _ := store.ListVolumes("testapp")
+	if len(vols) != 1 {
+		t.Fatalf("expected 1 volume, got %d", len(vols))
+	}
+	if !vols[0].ReadOnly {
+		t.Fatal("expected volume to be read-only")
 	}
 }
 
