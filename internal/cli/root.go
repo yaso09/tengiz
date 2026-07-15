@@ -99,6 +99,10 @@ serverless:
 #   retries: 3
 #   timeout: 5
 #   start_period: 0
+# volumes:
+#   - host_path: /data/myapp
+#     container_path: /app/data
+#     read_only: false
 # domains:
 #   - app.example.com
 # env:
