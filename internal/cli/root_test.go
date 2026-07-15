@@ -1,14 +1,27 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"os"
 	"sync/atomic"
 	"testing"
 
-	"github.com/yaso09/tengiz/internal/runtime"
 	"github.com/yaso09/tengiz/internal/types"
 )
+
+func captureOutput(fn func()) string {
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	fn()
+	w.Close()
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	os.Stdout = old
+	return buf.String()
+}
 
 type mockRTForDeploy struct {
 	created atomic.Int32
@@ -40,9 +53,25 @@ func (m *mockRTForDeploy) WaitForReady(ctx context.Context, name string, interna
 func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
 
 func TestDeployZeroDowntimeCreatesVersionedContainer(t *testing.T) {
-	var m runtime.Manager = &mockRTForDeploy{}
+	var m interface{} = &mockRTForDeploy{}
 	if m == nil {
 		t.Fatal("mock does not implement Manager")
+	}
+}
+
+func TestHealthCmdNoApp(t *testing.T) {
+	rootCmd.SetArgs([]string{"health"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Error("expected error for missing app name")
+	}
+}
+
+func TestHealthCmdUnknownApp(t *testing.T) {
+	rootCmd.SetArgs([]string{"health", "nonexistent"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Error("expected error for unknown app")
 	}
 }
 
