@@ -49,6 +49,10 @@ func init() {
 	rootCmd.AddCommand(domainCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(webhookCmd)
+	storageCmd.AddCommand(storageMountCmd)
+	storageCmd.AddCommand(storageUnmountCmd)
+	storageCmd.AddCommand(storageListCmd)
+	rootCmd.AddCommand(storageCmd)
 	gitCmd.AddCommand(gitConnectCmd)
 	gitCmd.AddCommand(gitDisconnectCmd)
 	rootCmd.AddCommand(gitCmd)
@@ -679,6 +683,82 @@ var webhookCmd = &cobra.Command{
 
 		fmt.Printf("[tengiz] starting webhook server on :%d\n", port)
 		return s.Start(ctx, port)
+	},
+}
+
+var storageCmd = &cobra.Command{
+	Use:   "storage",
+	Short: "Manage persistent storage volumes for applications",
+}
+
+var storageMountCmd = &cobra.Command{
+	Use:   "mount <app> <host_path>:<container_path>",
+	Short: "Mount a host directory or Docker volume into an application",
+	Long: `Mount a host path or Docker volume into the application container.
+Examples:
+  tengiz storage mount myapp /data:/app/data
+  tengiz storage mount myapp ./uploads:/app/uploads:ro`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		spec := args[1]
+		mount, err := types.ParseVolumeSpec(spec)
+		if err != nil {
+			return fmt.Errorf("invalid volume spec: %w", err)
+		}
+		store := config.NewStore(dataDir)
+		if err := store.AddVolume(appName, mount); err != nil {
+			return err
+		}
+		fmt.Printf("[tengiz] mounted %s:%s for %s\n", mount.HostPath, mount.ContainerPath, appName)
+		return nil
+	},
+}
+
+var storageUnmountCmd = &cobra.Command{
+	Use:   "unmount <app> <host_path>:<container_path>",
+	Short: "Remove a volume mount from an application",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		spec := args[1]
+		hostPath, containerPath, err := types.ParseVolumeSpecSimple(spec)
+		if err != nil {
+			return fmt.Errorf("invalid volume spec: %w", err)
+		}
+		store := config.NewStore(dataDir)
+		if err := store.RemoveVolume(appName, hostPath, containerPath); err != nil {
+			return err
+		}
+		fmt.Printf("[tengiz] unmounted %s:%s for %s\n", hostPath, containerPath, appName)
+		return nil
+	},
+}
+
+var storageListCmd = &cobra.Command{
+	Use:   "list <app>",
+	Short: "List volume mounts for an application",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		store := config.NewStore(dataDir)
+		vols, err := store.ListVolumes(appName)
+		if err != nil {
+			return err
+		}
+		if len(vols) == 0 {
+			fmt.Printf("No volumes mounted for %s.\n", appName)
+			return nil
+		}
+		fmt.Printf("%-30s %-30s %s\n", "HOST PATH", "CONTAINER PATH", "MODE")
+		for _, v := range vols {
+			mode := "rw"
+			if v.ReadOnly {
+				mode = "ro"
+			}
+			fmt.Printf("%-30s %-30s %s\n", v.HostPath, v.ContainerPath, mode)
+		}
+		return nil
 	},
 }
 

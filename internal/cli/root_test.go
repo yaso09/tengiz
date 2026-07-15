@@ -160,6 +160,40 @@ func TestInitCmdGitFlags(t *testing.T) {
 	}
 }
 
+func TestStorageCLICommandsRegistered(t *testing.T) {
+	storageCmd, _, err := rootCmd.Find([]string{"storage"})
+	if err != nil {
+		t.Fatalf("storage command not found: %v", err)
+	}
+	if storageCmd == nil {
+		t.Fatal("storage command not registered")
+	}
+
+	mountCmd, _, err := rootCmd.Find([]string{"storage", "mount"})
+	if err != nil {
+		t.Fatalf("storage mount command not found: %v", err)
+	}
+	if mountCmd == nil {
+		t.Fatal("storage mount command not registered")
+	}
+
+	unmountCmd, _, err := rootCmd.Find([]string{"storage", "unmount"})
+	if err != nil {
+		t.Fatalf("storage unmount command not found: %v", err)
+	}
+	if unmountCmd == nil {
+		t.Fatal("storage unmount command not registered")
+	}
+
+	listCmd, _, err := rootCmd.Find([]string{"storage", "list"})
+	if err != nil {
+		t.Fatalf("storage list command not found: %v", err)
+	}
+	if listCmd == nil {
+		t.Fatal("storage list command not registered")
+	}
+}
+
 func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	configCmd, _, err := rootCmd.Find([]string{"config"})
 	if err != nil {
