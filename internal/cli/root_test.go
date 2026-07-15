@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/yaso09/tengiz/internal/config"
 	"github.com/yaso09/tengiz/internal/types"
 )
 
@@ -157,6 +158,106 @@ func TestInitCmdGitFlags(t *testing.T) {
 	branchFlag := flags.Lookup("git-branch")
 	if branchFlag == nil {
 		t.Fatal("--git-branch flag not found on init command")
+	}
+}
+
+func TestStorageMountCmd(t *testing.T) {
+	dir := t.TempDir()
+	dataDir = dir
+
+	store := config.NewStore(dir)
+	store.SaveApp(types.AppEntry{
+		Name: "testapp",
+		Config: types.AppConfig{Name: "testapp"},
+	})
+
+	rootCmd.SetArgs([]string{"storage", "mount", "testapp", "/data/uploads", "/app/uploads"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("storage mount error: %v", err)
+	}
+
+	vols, _ := store.ListVolumes("testapp")
+	if len(vols) != 1 {
+		t.Fatalf("expected 1 volume, got %d", len(vols))
+	}
+	if vols[0].HostPath != "/data/uploads" {
+		t.Errorf("HostPath = %q, want /data/uploads", vols[0].HostPath)
+	}
+}
+
+func TestStorageUnmountCmd(t *testing.T) {
+	dir := t.TempDir()
+	dataDir = dir
+
+	store := config.NewStore(dir)
+	store.SaveApp(types.AppEntry{
+		Name: "testapp",
+		Config: types.AppConfig{
+			Name: "testapp",
+			Volumes: []types.VolumeConfig{
+				{HostPath: "/data/uploads", ContainerPath: "/app/uploads"},
+			},
+		},
+	})
+
+	rootCmd.SetArgs([]string{"storage", "unmount", "testapp", "/data/uploads"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("storage unmount error: %v", err)
+	}
+
+	vols, _ := store.ListVolumes("testapp")
+	if len(vols) != 0 {
+		t.Fatalf("expected 0 volumes, got %d", len(vols))
+	}
+}
+
+func TestStorageListCmd(t *testing.T) {
+	dir := t.TempDir()
+	dataDir = dir
+
+	store := config.NewStore(dir)
+	store.SaveApp(types.AppEntry{
+		Name: "testapp",
+		Config: types.AppConfig{
+			Name: "testapp",
+			Volumes: []types.VolumeConfig{
+				{HostPath: "/data/uploads", ContainerPath: "/app/uploads"},
+			},
+		},
+	})
+
+	output := captureOutput(func() {
+		rootCmd.SetArgs([]string{"storage", "list", "testapp"})
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("storage list error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "/data/uploads") {
+		t.Errorf("output should contain /data/uploads, got: %s", output)
+	}
+	if !strings.Contains(output, "/app/uploads") {
+		t.Errorf("output should contain /app/uploads, got: %s", output)
+	}
+}
+
+func TestStorageCommandsRegistered(t *testing.T) {
+	storageCmd, _, err := rootCmd.Find([]string{"storage"})
+	if err != nil {
+		t.Fatalf("storage command not found: %v", err)
+	}
+
+	expected := map[string]bool{"mount": false, "unmount": false, "list": false}
+	for _, sub := range storageCmd.Commands() {
+		if _, ok := expected[sub.Name()]; ok {
+			expected[sub.Name()] = true
+		}
+	}
+
+	for name, found := range expected {
+		if !found {
+			t.Fatalf("storage subcommand %q not found", name)
+		}
 	}
 }
 

@@ -48,6 +48,10 @@ func init() {
 	rootCmd.AddCommand(healthCmd)
 	rootCmd.AddCommand(domainCmd)
 	rootCmd.AddCommand(configCmd)
+	storageCmd.AddCommand(storageMountCmd)
+	storageCmd.AddCommand(storageUnmountCmd)
+	storageCmd.AddCommand(storageListCmd)
+	rootCmd.AddCommand(storageCmd)
 	rootCmd.AddCommand(webhookCmd)
 	gitCmd.AddCommand(gitConnectCmd)
 	gitCmd.AddCommand(gitDisconnectCmd)
@@ -679,6 +683,90 @@ var webhookCmd = &cobra.Command{
 
 		fmt.Printf("[tengiz] starting webhook server on :%d\n", port)
 		return s.Start(ctx, port)
+	},
+}
+
+var storageCmd = &cobra.Command{
+	Use:   "storage",
+	Short: "Manage persistent storage volumes for applications",
+}
+
+var storageMountCmd = &cobra.Command{
+	Use:   "mount <app> <host_path> <container_path>",
+	Short: "Mount a persistent volume to an application",
+	Args:  cobra.ExactArgs(3),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName, hostPath, containerPath := args[0], args[1], args[2]
+		store := config.NewStore(dataDir)
+
+		if err := store.AddVolume(appName, hostPath, containerPath); err != nil {
+			return err
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			fmt.Printf("[tengiz] volume added to store, but Docker not available: %v\n", err)
+			return nil
+		}
+
+		if err := rt.Restart(cmd.Context(), appName); err != nil {
+			fmt.Printf("[tengiz] warning: failed to restart app (restart manually to pick up volume): %v\n", err)
+		}
+
+		fmt.Printf("[tengiz] volume mounted: %s -> %s on %s\n", hostPath, containerPath, appName)
+		return nil
+	},
+}
+
+var storageUnmountCmd = &cobra.Command{
+	Use:   "unmount <app> <host_path>",
+	Short: "Unmount a persistent volume from an application",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName, hostPath := args[0], args[1]
+		store := config.NewStore(dataDir)
+
+		if err := store.RemoveVolume(appName, hostPath); err != nil {
+			return err
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			fmt.Printf("[tengiz] volume removed from store, but Docker not available: %v\n", err)
+			return nil
+		}
+
+		if err := rt.Restart(cmd.Context(), appName); err != nil {
+			fmt.Printf("[tengiz] warning: failed to restart app (restart manually to pick up change): %v\n", err)
+		}
+
+		fmt.Printf("[tengiz] volume unmounted: %s from %s\n", hostPath, appName)
+		return nil
+	},
+}
+
+var storageListCmd = &cobra.Command{
+	Use:   "list <app>",
+	Short: "List persistent volumes mounted on an application",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		store := config.NewStore(dataDir)
+
+		vols, err := store.ListVolumes(appName)
+		if err != nil {
+			return err
+		}
+		if len(vols) == 0 {
+			fmt.Printf("No volumes mounted on %s.\n", appName)
+			return nil
+		}
+
+		fmt.Printf("%-30s %-30s\n", "HOST PATH / VOLUME NAME", "CONTAINER PATH")
+		for _, v := range vols {
+			fmt.Printf("%-30s %-30s\n", v.HostPath, v.ContainerPath)
+		}
+		return nil
 	},
 }
 
