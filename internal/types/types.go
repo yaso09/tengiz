@@ -2,6 +2,12 @@ package types
 
 import "time"
 
+type VolumeConfig struct {
+	HostPath      string `mapstructure:"host_path" json:"host_path"`
+	ContainerPath string `mapstructure:"container_path" json:"container_path"`
+	ReadOnly      bool   `mapstructure:"read_only,omitempty" json:"read_only,omitempty"`
+}
+
 type GitConfig struct {
 	Repo     string `mapstructure:"repo" json:"repo,omitempty"`
 	Branch   string `mapstructure:"branch" json:"branch,omitempty"`
@@ -17,6 +23,7 @@ type AppConfig struct {
 	HealthCheck *HealthCheckConfig  `mapstructure:"healthcheck,omitempty"`
 	Resources   *ResourceConfig     `mapstructure:"resources,omitempty" json:"resources,omitempty"`
 	Env         map[string]string   `mapstructure:"env" json:"env,omitempty"`
+	Volumes     []VolumeConfig      `mapstructure:"volumes,omitempty" json:"volumes,omitempty"`
 	Git         *GitConfig          `mapstructure:"git,omitempty" json:"git,omitempty"`
 }
 
@@ -95,6 +102,7 @@ type AppEntry struct {
 	Port             int               `json:"port"`
 	Domains          []string          `json:"domains"`
 	Config           AppConfig         `json:"config"`
+	Volumes          []VolumeConfig    `json:"volumes,omitempty"`
 	DeploymentSuffix string            `json:"deployment_suffix,omitempty"`
 	Deployments      []DeploymentEntry `json:"deployments,omitempty"`
 	RestartCount     int               `json:"restart_count,omitempty"`

@@ -17,6 +17,21 @@ import (
 	"github.com/yaso09/tengiz/internal/types"
 )
 
+func volumeArgs(volumes []types.VolumeConfig) []string {
+	if len(volumes) == 0 {
+		return nil
+	}
+	args := make([]string, 0, len(volumes)*2)
+	for _, v := range volumes {
+		spec := fmt.Sprintf("%s:%s", v.HostPath, v.ContainerPath)
+		if v.ReadOnly {
+			spec += ":ro"
+		}
+		args = append(args, "-v", spec)
+	}
+	return args
+}
+
 func envArgs(env map[string]string) []string {
 	if len(env) == 0 {
 		return nil

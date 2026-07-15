@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/yaso09/tengiz/internal/types"
@@ -122,6 +123,52 @@ func TestResourceArgs(t *testing.T) {
 				if got[i] != tt.expected[i] {
 					t.Fatalf("resourceArgs()[%d] = %q, want %q", i, got[i], tt.expected[i])
 				}
+			}
+		})
+	}
+}
+
+func TestVolumeArgs(t *testing.T) {
+	tests := []struct {
+		name   string
+		vols   []types.VolumeConfig
+		expect []string
+	}{
+		{
+			name:   "nil volumes",
+			vols:   nil,
+			expect: nil,
+		},
+		{
+			name:   "empty volumes",
+			vols:   []types.VolumeConfig{},
+			expect: nil,
+		},
+		{
+			name:   "single volume",
+			vols:   []types.VolumeConfig{{HostPath: "/data", ContainerPath: "/app/data"}},
+			expect: []string{"-v", "/data:/app/data"},
+		},
+		{
+			name:   "multiple volumes",
+			vols: []types.VolumeConfig{
+				{HostPath: "/data", ContainerPath: "/app/data"},
+				{HostPath: "/config", ContainerPath: "/app/config"},
+			},
+			expect: []string{"-v", "/data:/app/data", "-v", "/config:/app/config"},
+		},
+		{
+			name:   "read-only volume",
+			vols:   []types.VolumeConfig{{HostPath: "/readonly", ContainerPath: "/app/ro", ReadOnly: true}},
+			expect: []string{"-v", "/readonly:/app/ro:ro"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := volumeArgs(tt.vols)
+			if !reflect.DeepEqual(got, tt.expect) {
+				t.Errorf("volumeArgs(%v) = %v, want %v", tt.vols, got, tt.expect)
 			}
 		})
 	}
