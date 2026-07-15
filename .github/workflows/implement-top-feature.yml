@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.head_sha || '' }}
+          ref: ${{ github.event.inputs.head_sha || github.sha }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Go

@@ -1,6 +1,8 @@
 name: Plan Top Feature
 
 on:
+  schedule:
+    - cron: "0 * * * *"
   workflow_dispatch:
     inputs:
       head_sha:
@@ -20,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.head_sha || '' }}
+          ref: ${{ github.event.inputs.head_sha || github.sha }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
