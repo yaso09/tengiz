@@ -74,6 +74,14 @@ var initCmd = &cobra.Command{
 serverless:
   enabled: true
   idle_timeout: 5m      # scale-to-zero timeout
+# healthcheck:
+#   enabled: true
+#   endpoint: /health
+#   port: 3000
+#   interval: 30
+#   retries: 3
+#   timeout: 5
+#   start_period: 0
 # domains:
 #   - app.example.com
 # env:
