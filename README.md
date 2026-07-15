@@ -237,6 +237,75 @@ Without a config file, Tengiz uses defaults: app name = directory name, port aut
 
 When no Dockerfile exists, Tengiz auto-generates one with a multi-stage build optimized for each framework.
 
+## Git Auto-Deploy
+
+Tengiz supports automatic deployment on `git push` via webhooks.
+
+### Setup
+
+1. **Generate a deploy key:**
+
+   ```bash
+   tengiz git connect
+   ```
+
+   This creates an Ed25519 SSH key pair in `~/.tengiz/ssh/` and prints the public key.
+
+2. **Add the public key to your git provider:**
+   - **GitHub:** Repository → Settings → Deploy Keys → Add deploy key
+   - **GitLab:** Repository → Settings → Repository → Deploy Keys
+   - **Bitbucket:** Repository → Settings → Access keys → Add key
+
+3. **Link an app to a git repository (init or config):**
+
+   ```bash
+   # During init:
+   tengiz init myapp --git-repo git@github.com:user/myapp.git
+
+   # Or manually in .tengiz.yaml:
+   # git:
+   #   repo: git@github.com:user/myapp.git
+   #   branch: main
+   ```
+
+4. **Start the webhook server:**
+
+   ```bash
+   tengiz webhook
+   # Listens on :9090 by default; use --port to change
+   ```
+
+5. **Configure the webhook URL in your git provider:**
+
+   ```
+   URL: http://your-server:9090/webhook
+   Content type: application/json
+   Events: Push events
+   ```
+
+   - GitHub: Repository → Settings → Webhooks → Add webhook
+   - GitLab: Repository → Settings → Webhooks
+   - Bitbucket: Repository → Settings → Webhooks
+   - Gitea: Repository → Settings → Webhooks
+
+### How It Works
+
+1. A `git push` triggers a POST request to the webhook server
+2. Tengiz clones the repository to a temporary directory
+3. Framework is auto-detected (Next.js, Go, Node, Python, etc.)
+4. Docker image is built
+5. Container is deployed with zero-downtime (blue/green)
+6. Old container is stopped and removed
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `tengiz git connect` | Generate an SSH deploy key |
+| `tengiz git disconnect` | Remove the SSH deploy key |
+| `tengiz webhook` | Start the webhook server |
+| `tengiz init --git-repo URL` | Create config with git repo |
+
 ## Architecture
 
 ```

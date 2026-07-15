@@ -112,6 +112,54 @@ func TestDomainCommandsRegistered(t *testing.T) {
 	}
 }
 
+func TestWebhookCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"webhook"})
+	if err != nil {
+		t.Fatal("webhook command not registered")
+	}
+	if cmd == nil || cmd.Use != "webhook" {
+		t.Fatal("webhook command not found")
+	}
+}
+
+func TestGitCommandsRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"git"})
+	if err != nil {
+		t.Fatal("git command not registered")
+	}
+	if cmd == nil {
+		t.Fatal("git command not found")
+	}
+	connectFound := false
+	disconnectFound := false
+	for _, sub := range cmd.Commands() {
+		if sub.Use == "connect" {
+			connectFound = true
+		}
+		if sub.Use == "disconnect" {
+			disconnectFound = true
+		}
+	}
+	if !connectFound {
+		t.Error("git:connect subcommand not registered")
+	}
+	if !disconnectFound {
+		t.Error("git:disconnect subcommand not registered")
+	}
+}
+
+func TestInitCmdGitFlags(t *testing.T) {
+	flags := initCmd.Flags()
+	repoFlag := flags.Lookup("git-repo")
+	if repoFlag == nil {
+		t.Fatal("--git-repo flag not found on init command")
+	}
+	branchFlag := flags.Lookup("git-branch")
+	if branchFlag == nil {
+		t.Fatal("--git-branch flag not found on init command")
+	}
+}
+
 func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	configCmd, _, err := rootCmd.Find([]string{"config"})
 	if err != nil {

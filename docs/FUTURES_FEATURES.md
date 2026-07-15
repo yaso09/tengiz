@@ -17,7 +17,7 @@ Not: ✅ işaretli özellikler implemente edilmiştir.
 | 2 | **Environment Variable Management** ✅ | Çok Yüksek | Düşük | Mükemmel | Her uygulama env var gerektirir. ✅ Implemented. |
 | 3 | **Custom Domain Management** ✅ | Çok Yüksek | Düşük | Mükemmel | Production domain zorunluluğu. ✅ Implemented. |
 | 4 | **Container Health Check + Auto Restart** | Çok Yüksek | Düşük-Orta | Mükemmel | Scale-to-zero'da cold start/crash yönetimi en kritik eksik. Docker health check + restart policy. cold start başarısız olursa yeniden dene, container crash yerse restart et. |
-| 5 | **Git Tabanlı Deployment** | Çok Yüksek | Yüksek | Mükemmel | Vercel alternatifinin olmazsa olmazı. `git push` → otomatik deploy. Yüksek efor ama etkisi çok büyük. SSH deploy key + webhook sunucusu. |
+| 5 | **Git Tabanlı Deployment** ✅ | Çok Yüksek | Yüksek | Mükemmel | Vercel alternatifinin olmazsa olmazı. `git push` → otomatik deploy. Yüksek efor ama etkisi çok büyük. SSH deploy key + webhook sunucusu. |
 | 6 | **Resource Limits (CPU/Memory)** | Yüksek | Düşük | Mükemmel | Tek makinede noisy neighbor'ı önler. Docker `--memory`/`--cpus` flag'leri. `.tengiz.yaml`'da `resources` bölümü. |
 | 7 | **Persistent Storage (Volume Management)** | Yüksek | Düşük-Orta | Mükemmel | Scale-to-zero stateful app'lerde veri kaybını önler. `runtime.Run()`'a `--volume` eklenir. |
 | 8 | **One-off Process Execution** | Yüksek | Düşük | Mükemmel | Migration/console/data import. `tengiz run` = `docker run --rm`. Mevcut `os/exec` yapısına çok uygun. |
@@ -151,6 +151,7 @@ Not: ✅ işaretli özellikler implemente edilmiştir.
 - **Source:** Coolify
 - **Description:** GitHub/GitLab/Bitbucket/Gitea entegrasyonu. Her `git push` otomatik deployment tetikler. SSH deploy key, GitHub App ve GitLab App ile kimlik doğrulaması.
 - **Why add to Tengiz:** Vercel alternatifinin olmazsa olmazı. Şu an `tengiz deploy .` manuel çalıştırılıyor. Otomatik push-to-deploy iş akışını hızlandırır ve gerçek Vercel/Heroku deneyimine yaklaştırır.
+- **Status:** ✅ Implemented (2026-07-15)
 - **Detected:** 2026-07-14
 
 ## Otomatik SSL/TLS Sertifikaları (Let's Encrypt)

@@ -14,11 +14,14 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/yaso09/tengiz/internal/builder"
 	"github.com/yaso09/tengiz/internal/config"
+	"github.com/yaso09/tengiz/internal/git"
+	"github.com/yaso09/tengiz/internal/gitdeploy"
 	"github.com/yaso09/tengiz/internal/health"
 	"github.com/yaso09/tengiz/internal/idle"
 	"github.com/yaso09/tengiz/internal/proxy"
 	"github.com/yaso09/tengiz/internal/runtime"
 	"github.com/yaso09/tengiz/internal/types"
+	"github.com/yaso09/tengiz/internal/webhook"
 )
 
 var dataDir string
@@ -45,6 +48,12 @@ func init() {
 	rootCmd.AddCommand(healthCmd)
 	rootCmd.AddCommand(domainCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(webhookCmd)
+	gitCmd.AddCommand(gitConnectCmd)
+	gitCmd.AddCommand(gitDisconnectCmd)
+	rootCmd.AddCommand(gitCmd)
+	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
+	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
 }
 
 var rootCmd = &cobra.Command{
@@ -69,6 +78,9 @@ var initCmd = &cobra.Command{
 			return fmt.Errorf(".tengiz.yaml already exists")
 		}
 
+		gitRepo, _ := cmd.Flags().GetString("git-repo")
+		gitBranch, _ := cmd.Flags().GetString("git-branch")
+
 		content := fmt.Sprintf(`name: %s
 # port: 3000            # container internal port (auto-detected if omitted)
 serverless:
@@ -88,6 +100,10 @@ serverless:
 #   DATABASE_URL: postgres://localhost:5432/myapp
 #   API_KEY: your-secret-key
 `, name)
+
+		if gitRepo != "" {
+			content += fmt.Sprintf("git:\n  repo: %s\n  branch: %s\n", gitRepo, gitBranch)
+		}
 
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 			return fmt.Errorf("write .tengiz.yaml: %w", err)
@@ -587,6 +603,82 @@ var domainListCmd = &cobra.Command{
 	},
 }
 
+var gitCmd = &cobra.Command{
+	Use:   "git",
+	Short: "Manage git deployment configuration",
+}
+
+var gitConnectCmd = &cobra.Command{
+	Use:   "connect",
+	Short: "Generate SSH deploy key for git auto-deploy",
+	Long:  "Generates an Ed25519 SSH key pair stored in ~/.tengiz/ssh/. Prints the public key — add it to your git provider as a deploy key.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if git.HasKey(dataDir) {
+			fmt.Println("[tengiz] SSH key already exists. Use 'git disconnect' to remove it first.")
+			return nil
+		}
+
+		pub, err := git.GenerateKey(dataDir)
+		if err != nil {
+			return fmt.Errorf("generate key: %w", err)
+		}
+
+		fmt.Println("[tengiz] SSH deploy key generated!")
+		fmt.Println()
+		fmt.Println("Add this public key to your git provider (GitHub > Settings > Deploy Keys):")
+		fmt.Println()
+		fmt.Println(pub)
+		fmt.Println()
+		fmt.Println("Or on GitHub: repo > Settings > Deploy Keys > Add deploy key")
+		fmt.Println("On GitLab:   repo > Settings > Repository > Deploy Keys")
+		return nil
+	},
+}
+
+var gitDisconnectCmd = &cobra.Command{
+	Use:   "disconnect",
+	Short: "Remove SSH deploy key for git auto-deploy",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if !git.HasKey(dataDir) {
+			fmt.Println("[tengiz] No SSH key found.")
+			return nil
+		}
+		if err := git.RemoveKey(dataDir); err != nil {
+			return fmt.Errorf("remove key: %w", err)
+		}
+		fmt.Println("[tengiz] SSH key removed.")
+		return nil
+	},
+}
+
+var webhookCmd = &cobra.Command{
+	Use:   "webhook",
+	Short: "Start the git webhook server for auto-deploy",
+	Long:  "Starts an HTTP server that listens for GitHub/GitLab/Bitbucket/Gitea push events and triggers automatic deployment.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		port, _ := cmd.Flags().GetInt("port")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		store := config.NewStore(dataDir)
+		pipeline := gitdeploy.NewPipeline(dataDir, rt, store)
+
+		deployFn := webhook.DeployFunc(func(ctx context.Context, repo, branch, provider string) error {
+			return pipeline.Deploy(ctx, repo, branch, provider)
+		})
+
+		s := webhook.New(dataDir, deployFn)
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer cancel()
+
+		fmt.Printf("[tengiz] starting webhook server on :%d\n", port)
+		return s.Start(ctx, port)
+	},
+}
+
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage environment variables for an application",
@@ -672,6 +764,7 @@ func Execute() {
 	proxyCmd.Flags().StringP("app", "a", "", "route all requests to this app (bypasses hostname routing)")
 	proxyCmd.Flags().IntP("port", "p", 8080, "proxy listen port")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
+	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
