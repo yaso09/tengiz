@@ -39,6 +39,46 @@ func TestAppConfigEnvEmptyByDefault(t *testing.T) {
 	}
 }
 
+func TestVolumeConfigMarshal(t *testing.T) {
+	v := VolumeConfig{
+		HostPath:      "/data/uploads",
+		ContainerPath: "/app/uploads",
+		ReadOnly:      true,
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var got VolumeConfig
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if got.HostPath != "/data/uploads" {
+		t.Errorf("HostPath = %q, want /data/uploads", got.HostPath)
+	}
+	if got.ContainerPath != "/app/uploads" {
+		t.Errorf("ContainerPath = %q, want /app/uploads", got.ContainerPath)
+	}
+	if !got.ReadOnly {
+		t.Errorf("ReadOnly = false, want true")
+	}
+}
+
+func TestAppConfigVolumesField(t *testing.T) {
+	cfg := AppConfig{
+		Name: "testapp",
+		Volumes: []VolumeConfig{
+			{HostPath: "/data/db", ContainerPath: "/var/lib/data"},
+		},
+	}
+	if len(cfg.Volumes) != 1 {
+		t.Fatalf("Volumes length = %d, want 1", len(cfg.Volumes))
+	}
+	if cfg.Volumes[0].HostPath != "/data/db" {
+		t.Errorf("HostPath = %q, want /data/db", cfg.Volumes[0].HostPath)
+	}
+}
+
 func TestGitConfigFields(t *testing.T) {
 	cfg := AppConfig{
 		Name: "test-app",
