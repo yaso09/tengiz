@@ -5,10 +5,12 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/yaso09/tengiz/internal/config"
 	"github.com/yaso09/tengiz/internal/types"
 )
 
@@ -179,6 +181,30 @@ func TestVolumeCommandsRegistered(t *testing.T) {
 		if !subMap[name] {
 			t.Errorf("expected subcommand %q under volume, not found", name)
 		}
+	}
+}
+
+func TestDeployWithVolumes(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := `
+name: volume-app
+volumes:
+  - host_path: /data
+    container_path: /app/data
+`
+	if err := os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("config.Load failed: %v", err)
+	}
+	if len(cfg.Volumes) != 1 {
+		t.Fatalf("expected 1 volume, got %d", len(cfg.Volumes))
+	}
+	if cfg.Volumes[0].HostPath != "/data" {
+		t.Errorf("expected HostPath /data, got %s", cfg.Volumes[0].HostPath)
 	}
 }
 
