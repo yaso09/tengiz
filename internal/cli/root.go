@@ -106,6 +106,12 @@ serverless:
 # resources:
 #   cpu: "1.0"           # CPU cores (e.g., "0.5", "2")
 #   memory: "256m"       # memory limit (e.g., "128m", "1g")
+# volumes:
+#   - host_path: /data/myapp
+#     container_path: /app/data
+#   - host_path: ./uploads
+#     container_path: /app/uploads
+#     read_only: true
 `, name)
 
 		if gitRepo != "" {
