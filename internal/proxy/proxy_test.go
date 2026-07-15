@@ -26,6 +26,8 @@ func (m *mockRuntime) CreateVersioned(ctx context.Context, cfg *types.AppConfig,
 func (m *mockRuntime) RemoveBySuffix(ctx context.Context, name string, suffix string) error { return nil }
 func (m *mockRuntime) GetContainerPort(ctx context.Context, name string, suffix string) (int, error) { return 0, nil }
 func (m *mockRuntime) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
+func (m *mockRuntime) Restart(ctx context.Context, name string) error { return nil }
+func (m *mockRuntime) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
 
 func TestExtractApp(t *testing.T) {
 	p := New(nil, 8080)
