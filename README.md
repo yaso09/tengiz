@@ -10,6 +10,7 @@
 - **On-demand reverse proxy** — Route traffic by hostname (`myapp.tengiz.local:8080`). Admin API (`127.0.0.1:9099`) for dynamic route management.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
+- **Persistent storage volumes** — Mount host directories or Docker volumes (`tengiz storage mount/unmount/list`) with read-only support. Survives container stop/start cycles.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
 
@@ -196,9 +197,41 @@ Show all environment variables for an application.
 |----------|-------------|
 | `app` | Application name |
 
-## Configuration
+### `tengiz storage`
 
-Create a `.tengiz.yaml` in your project root:
+Manage persistent storage volumes for applications.
+
+#### `tengiz storage mount <app> <host_path>:<container_path>[:ro]`
+
+Mount a host directory or Docker volume into an application container.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `host_path:container_path` | Volume spec, e.g. `/data:/app/data`. Append `:ro` for read-only. |
+
+#### `tengiz storage unmount <app> <host_path>:<container_path>`
+
+Remove a volume mount from an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `host_path:container_path` | Volume spec to remove |
+
+#### `tengiz storage list <app>`
+
+List all volume mounts for an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+
+Mounts are persisted in `~/.tengiz/apps.json` and injected as `--volume host:container` flags on next deploy or start.
+
+### `tengiz config`
+
+Manage environment variables for an application.
 
 ```yaml
 name: my-app
@@ -222,9 +255,17 @@ env:
 resources:
   cpu: "1.0"         # CPU cores (e.g., "0.5", "2")
   memory: "256m"     # Memory limit (e.g., "128m", "1g")
+volumes:
+  - host_path: /data/myapp
+    container_path: /app/data
+  - host_path: ./uploads
+    container_path: /app/uploads
+    read_only: true
 ```
 
 Resource limits are passed to Docker as `--cpus` and `--memory` flags. When omitted, containers have no resource constraints. Values follow Docker CLI conventions (e.g., `"0.5"` for half a CPU core, `"512m"` for 512 MB memory).
+
+Volumes are passed to Docker as `--volume` flags. Use `tengiz storage mount` / `unmount` / `list` to manage volumes at runtime, or define them statically in `.tengiz.yaml`. Read-only mounts append `:ro` to the Docker volume spec.
 
 Without a config file, Tengiz uses defaults: app name = directory name, port auto-detected, serverless enabled, 5m timeout.
 

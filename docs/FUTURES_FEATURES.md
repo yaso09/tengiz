@@ -19,7 +19,7 @@ Not: ✅ işaretli özellikler implemente edilmiştir.
 | 4 | **Container Health Check + Auto Restart** | Çok Yüksek | Düşük-Orta | Mükemmel | Scale-to-zero'da cold start/crash yönetimi en kritik eksik. Docker health check + restart policy. cold start başarısız olursa yeniden dene, container crash yerse restart et. |
 | 5 | **Git Tabanlı Deployment** ✅ | Çok Yüksek | Yüksek | Mükemmel | Vercel alternatifinin olmazsa olmazı. `git push` → otomatik deploy. Yüksek efor ama etkisi çok büyük. SSH deploy key + webhook sunucusu. |
 | 6 | **Resource Limits (CPU/Memory)** ✅ | Yüksek | Düşük | Mükemmel | Tek makinede noisy neighbor'ı önler. Docker `--memory`/`--cpus` flag'leri. `.tengiz.yaml`'da `resources` bölümü. |
-| 7 | **Persistent Storage (Volume Management)** | Yüksek | Düşük-Orta | Mükemmel | Scale-to-zero stateful app'lerde veri kaybını önler. `runtime.Run()`'a `--volume` eklenir. |
+| 7 | **Persistent Storage (Volume Management)** ✅ | Yüksek | Düşük-Orta | Mükemmel | Scale-to-zero stateful app'lerde veri kaybını önler. `runtime.Run()`'a `--volume` eklenir. |
 | 8 | **One-off Process Execution** | Yüksek | Düşük | Mükemmel | Migration/console/data import. `tengiz run` = `docker run --rm`. Mevcut `os/exec` yapısına çok uygun. |
 | 9 | **Build Logs** | Yüksek | Çok Düşük | Mükemmel | Build hata ayıklama olmadan hiçbir deployment aracı kullanılamaz. `builder.go` çıktısını dosyaya yönlendir. |
 | 10 | **Log Filtering** | Yüksek | Çok Düşük | Mükemmel | Production debugging için `--since`, `--grep`, `--tail` filtreleme kritik. Docker API passthrough. |
@@ -252,6 +252,7 @@ Not: ✅ işaretli özellikler implemente edilmiştir.
 - **Source:** Dokku
 - **Description:** Volume mount işlemleri (`storage:mount <app> <host_path>:<container_path>`, `storage:unmount`, `storage:list`). Docker volume veya host path ile çalışır. Read-only mount ve volume options destekler.
 - **Why add to Tengiz:** Database, uploads gibi persistent data gerektiren uygulamalar container restart'ında veri kaybeder. Tengiz'in scale-to-zero özelliği container'ları durdurup başlattığı için volumesüz çalışan stateful app veri kaybeder. `runtime.Run()`'a `--volume` flag'leri eklenmeli.
+- **Status:** ✅ Implemented (2026-07-15)
 - **Detected:** 2026-07-14
 
 ## Process Scaling (Multi-Container)
