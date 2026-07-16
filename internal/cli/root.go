@@ -169,18 +169,27 @@ var deployCmd = &cobra.Command{
 		deploymentID := fmt.Sprintf("%d", time.Now().Unix())
 
 		b := builder.New(dataDir)
-		imageTag, err := b.Build(context.Background(), projectRoot, cfg.Name, detection, deploymentID)
+		store := config.NewStore(dataDir)
+		imageTag, buildLog, err := b.Build(context.Background(), projectRoot, cfg.Name, detection, deploymentID)
 		if err != nil {
+			fmt.Fprint(os.Stderr, buildLog)
 			return fmt.Errorf("build: %w", err)
 		}
 		fmt.Printf("[tengiz] built image: %s\n", imageTag)
+
+		if buildLog != "" {
+			if saveErr := store.SaveBuildLog(cfg.Name, deploymentID, buildLog); saveErr != nil {
+				log.Printf("[tengiz] warning: failed to save build log: %v", saveErr)
+			}
+			if pruneErr := store.PruneBuildLogs(cfg.Name, 5); pruneErr != nil {
+				log.Printf("[tengiz] warning: failed to prune build logs: %v", pruneErr)
+			}
+		}
 
 		rt, err := runtime.NewDocker()
 		if err != nil {
 			return fmt.Errorf("docker: %w", err)
 		}
-
-		store := config.NewStore(dataDir)
 
 		// Check if this app already exists (previous deploy)
 		existingApp, lookupErr := store.GetApp(cfg.Name)
