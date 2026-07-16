@@ -9,6 +9,7 @@ import (
 
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
+	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
@@ -30,6 +31,10 @@ func NewStub() Manager {
 }
 
 func (m *stubManager) Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error {
+	return nil
+}
+
+func (m *stubManager) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error {
 	return nil
 }
 

@@ -16,6 +16,7 @@ type mockRuntime struct {
 }
 
 func (m *mockRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
+func (m *mockRuntime) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRuntime) Start(ctx context.Context, name string) error { m.active = true; return nil }
 func (m *mockRuntime) Stop(ctx context.Context, name string) error { m.active = false; return nil }
 func (m *mockRuntime) Remove(ctx context.Context, name string) error { return nil }
