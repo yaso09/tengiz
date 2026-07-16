@@ -3,6 +3,8 @@ package types
 import (
 	"encoding/json"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestAppConfigEnvSerialization(t *testing.T) {
@@ -36,6 +38,45 @@ func TestAppConfigEnvEmptyByDefault(t *testing.T) {
 	cfg := AppConfig{Name: "noenv"}
 	if cfg.Env != nil {
 		t.Fatal("expected nil Env for zero-value AppConfig")
+	}
+}
+
+func TestVolumeMountJSON(t *testing.T) {
+	vm := VolumeMount{
+		HostPath:      "/data/uploads",
+		ContainerPath: "/app/uploads",
+		ReadOnly:      "true",
+	}
+	data, err := json.Marshal(vm)
+	if err != nil {
+		t.Fatalf("Marshal VolumeMount: %v", err)
+	}
+	var got VolumeMount
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal VolumeMount: %v", err)
+	}
+	if got.HostPath != vm.HostPath || got.ContainerPath != vm.ContainerPath || got.ReadOnly != vm.ReadOnly {
+		t.Errorf("round-trip: %+v -> %+v", vm, got)
+	}
+}
+
+func TestAppConfigVolumesYAML(t *testing.T) {
+	y := `
+name: test
+volumes:
+  - host_path: /data
+    container_path: /app/data
+    read_only: "true"
+`
+	var cfg AppConfig
+	if err := yaml.Unmarshal([]byte(y), &cfg); err != nil {
+		t.Fatalf("Unmarshal AppConfig with volumes: %v", err)
+	}
+	if len(cfg.Volumes) != 1 {
+		t.Fatalf("expected 1 volume, got %d", len(cfg.Volumes))
+	}
+	if cfg.Volumes[0].HostPath != "/data" {
+		t.Errorf("host_path = %q, want /data", cfg.Volumes[0].HostPath)
 	}
 }
 

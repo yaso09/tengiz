@@ -2,6 +2,12 @@ package types
 
 import "time"
 
+type VolumeMount struct {
+	HostPath      string `mapstructure:"host_path" yaml:"host_path" json:"host_path"`
+	ContainerPath string `mapstructure:"container_path" yaml:"container_path" json:"container_path"`
+	ReadOnly      string `mapstructure:"read_only" yaml:"read_only" json:"read_only,omitempty"`
+}
+
 type GitConfig struct {
 	Repo     string `mapstructure:"repo" json:"repo,omitempty"`
 	Branch   string `mapstructure:"branch" json:"branch,omitempty"`
@@ -17,6 +23,7 @@ type AppConfig struct {
 	HealthCheck *HealthCheckConfig  `mapstructure:"healthcheck,omitempty"`
 	Resources   *ResourceConfig     `mapstructure:"resources,omitempty" json:"resources,omitempty"`
 	Env         map[string]string   `mapstructure:"env" json:"env,omitempty"`
+	Volumes     []VolumeMount       `mapstructure:"volumes,omitempty" json:"volumes,omitempty"`
 	Git         *GitConfig          `mapstructure:"git,omitempty" json:"git,omitempty"`
 }
 
