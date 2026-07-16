@@ -498,7 +498,7 @@ go test ./... -v -count=1
 ```
 tengiz/
 ├── main.go                  # Entry point
-├── installer/               # TUI installer (Python/Textual)
+├── installer/               # TUI installer (Python/Textual, UV-managed)
 │   ├── app.py               #   Textual app
 │   ├── gh.py                #   GitHub API client
 │   └── requirements.txt     #   Dependencies
@@ -521,8 +521,12 @@ A Textual-based TUI installer for downloading and installing Tengiz binaries:
 
 ```bash
 cd installer
-pip install -r requirements.txt
-python -m installer
+# Install in development mode with UV (Recommended)
+uv pip install -e .
+# Or with pip
+pip install -e .
+# Then run the installer (command available in current environment)
+tengiz-installer
 ```
 
 Lists both stable releases (from GitHub Releases) and per-commit builds (from CI artifacts). Auto-detects OS/arch and lets you download + install with one click.
