@@ -86,7 +86,7 @@ List all deployed applications and their status.
 
 Output: `NAME`, `STATE` (running/stopped), `PORT`.
 
-### `tengiz logs [-f] [--tail N] [--since timestamp] [--grep pattern] <app>`
+### `tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] <app>`
 
 Show application logs.
 
@@ -94,8 +94,9 @@ Show application logs.
 |------|-------------|
 | `-f`, `--follow` | Stream logs in real time |
 | `--tail N` | Show only last N lines (0 = all) |
-| `--since` | Show logs since timestamp (e.g. `2024-01-01T00:00:00Z` or `5m`) |
-| `--grep` | Filter logs with a case-sensitive pattern |
+| `--since` | Show logs since timestamp (e.g. `5m`, `2h`, `2024-01-01T00:00:00Z`) |
+| `--until` | Show logs before timestamp (e.g. `5m`, `2h`, `2024-01-01T00:00:00Z`) |
+| `--grep` | Filter logs with a case-sensitive pattern (client-side) |
 
 | Argument | Description |
 |----------|-------------|
