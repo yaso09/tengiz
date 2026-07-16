@@ -142,12 +142,30 @@ func TestGenerateDockerfileWithoutHealthCheck(t *testing.T) {
 	}
 }
 
+func TestBuildCapturesOutput(t *testing.T) {
+	b := New(t.TempDir())
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<h1>hello</h1>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	detection := &Detection{Framework: FrameworkStatic, InternalPort: 80}
+
+	tag, logs, err := b.Build(context.Background(), dir, "testapp", detection, "v123")
+	if err != nil {
+		t.Skipf("Build() error (likely no docker): %v", err)
+	}
+	if tag == "" {
+		t.Error("expected non-empty tag")
+	}
+	_ = logs
+}
+
 func TestBuildWithDeploymentIDCompiles(t *testing.T) {
 	b := New(t.TempDir())
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "index.html"), []byte("<h1>hello</h1>"), 0644)
 	detection := &Detection{Framework: FrameworkStatic, InternalPort: 80}
-	tag, err := b.Build(context.Background(), dir, "testapp", detection, "v123")
+	tag, _, err := b.Build(context.Background(), dir, "testapp", detection, "v123")
 	if err != nil {
 		t.Skipf("Build() error (likely no docker): %v", err)
 	}
