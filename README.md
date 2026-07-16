@@ -156,6 +156,40 @@ List all custom domains for an application.
 |----------|-------------|
 | `app` | Application name |
 
+### `tengiz volume`
+
+Manage persistent storage volumes for applications. Volumes allow stateful apps (databases, uploads, caches) to survive container restarts and scale-to-zero cycles.
+
+#### `tengiz volume add <app> <host_path>:<container_path>`
+
+Add a volume mount to an application. The host path can be an absolute host directory or a Docker volume name.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `host_path>:<container_path>` | Volume spec (e.g. `/data:/app/data` or `mydata:/var/lib/data`) |
+
+| Flag | Description |
+|------|-------------|
+| `--read-only` | Mount the volume as read-only |
+
+#### `tengiz volume rm <app> <host_path>`
+
+Remove a volume mount from an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `host_path` | Host path or volume name to remove |
+
+#### `tengiz volume ls [app]`
+
+List volume mounts. If an app name is given, shows that app's volumes. Otherwise, lists all volumes across all apps.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name (optional) |
+
 ### `tengiz config`
 
 Manage environment variables for an application.
@@ -219,6 +253,11 @@ healthcheck:
 env:
   DATABASE_URL: postgres://localhost:5432/myapp
   API_KEY: your-secret-key
+volumes:
+  - host_path: /data/uploads
+    container_path: /app/uploads
+  - host_path: my-named-volume
+    container_path: /var/lib/data
 resources:
   cpu: "1.0"         # CPU cores (e.g., "0.5", "2")
   memory: "256m"     # Memory limit (e.g., "128m", "1g")

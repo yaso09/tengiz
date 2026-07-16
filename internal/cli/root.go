@@ -105,6 +105,12 @@ serverless:
 # env:
 #   DATABASE_URL: postgres://localhost:5432/myapp
 #   API_KEY: your-secret-key
+# volumes:
+#   - host_path: /data/uploads
+#     container_path: /app/uploads
+#   - host_path: my-named-volume
+#     container_path: /var/lib/data
+#     read_only: "true"
 # resources:
 #   cpu: "1.0"           # CPU cores (e.g., "0.5", "2")
 #   memory: "256m"       # memory limit (e.g., "128m", "1g")

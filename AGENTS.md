@@ -38,6 +38,7 @@ tengiz logs [-f] app  → stream logs
 tengiz stop/start/rm  → lifecycle
 tengiz config set/get/unset/show → env vars
 tengiz domain add/remove/list   → custom domains
+tengiz volume add/rm/ls         → persistent storage volumes
 ```
 
 ## Rules
@@ -54,5 +55,6 @@ tengiz domain add/remove/list   → custom domains
 - Env vars stored in `AppEntry.Config.Env` → auto-persisted via JSON in `~/.tengiz/apps.json`
 - `.tengiz.yaml` `env:` section uses `KEY: value` format (map, not list)
 - Proxy's `extractApp()` checks custom domains first (`p.domains` map), then falls back to subdomain split (e.g. `myapp.tengiz.local` → `myapp`)
+- Volume mounts stored in `AppEntry.Config.Volumes` → auto-persisted via JSON, passed as `-v` flags to Docker
 - Tests for `proxy` are slow (~2s each) due to TCP dial timeout on unreachable ports
 - `idle` tests are time-sensitive (use `time.Sleep` with 50ms granularity)
