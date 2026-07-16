@@ -142,6 +142,22 @@ func (s *Store) ListEnv(appName string) (map[string]string, error) {
 	return result, nil
 }
 
+func (s *Store) ListVolumes() (map[string][]types.VolumeMount, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make(map[string]types.AppEntry)
+	s.readJSON("apps.json", &apps)
+
+	result := make(map[string][]types.VolumeMount)
+	for _, app := range apps {
+		if len(app.Config.Volumes) > 0 {
+			result[app.Name] = app.Config.Volumes
+		}
+	}
+	return result, nil
+}
+
 func (s *Store) GetApp(name string) (*types.AppEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

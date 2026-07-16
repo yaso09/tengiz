@@ -223,6 +223,39 @@ func TestStoreListDomainsNoApp(t *testing.T) {
 	}
 }
 
+func TestListVolumes(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{
+		Name: "app1",
+		Config: types.AppConfig{
+			Volumes: []types.VolumeMount{
+				{HostPath: "/data", ContainerPath: "/app/data"},
+			},
+		},
+	})
+	s.SaveApp(types.AppEntry{
+		Name:   "app2",
+		Config: types.AppConfig{},
+	})
+
+	vols, err := s.ListVolumes()
+	if err != nil {
+		t.Fatalf("ListVolumes: %v", err)
+	}
+	if len(vols) != 1 {
+		t.Fatalf("expected 1 app with volumes, got %d", len(vols))
+	}
+	app1Vols, ok := vols["app1"]
+	if !ok {
+		t.Fatal("app1 not in volume list")
+	}
+	if len(app1Vols) != 1 || app1Vols[0].HostPath != "/data" {
+		t.Errorf("app1 volumes: %+v", app1Vols)
+	}
+}
+
 func TestAddDeploymentHistory(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)
