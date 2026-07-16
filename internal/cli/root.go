@@ -57,6 +57,7 @@ func init() {
 	volumeCmd.AddCommand(volumeRemoveCmd)
 	volumeCmd.AddCommand(volumeListCmd)
 	rootCmd.AddCommand(volumeCmd)
+	rootCmd.AddCommand(runCmd)
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
 }
@@ -765,6 +766,84 @@ var webhookCmd = &cobra.Command{
 	},
 }
 
+var runCmd = &cobra.Command{
+	Use:   "run <app> [-- command args...]",
+	Short: "Run a one-off command in a temporary container",
+	Long: `Executes a command inside a temporary container based on the deployed app's image.
+The container is automatically removed after the command exits.
+Useful for database migrations, console access, data import, etc.
+
+Examples:
+  tengiz run myapp -- python manage.py migrate
+  tengiz run myapp -- rails console
+  tengiz run --build myapp -- npm run seed`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		cmdArgs := args[1:]
+
+		store := config.NewStore(dataDir)
+		app, err := store.GetApp(appName)
+		if err != nil {
+			return fmt.Errorf("app %q not found: %w", appName, err)
+		}
+
+		imageTag := app.ImageTag
+
+		rebuild, _ := cmd.Flags().GetBool("build")
+		if rebuild {
+			projectRoot, err := config.FindProjectRoot(".")
+			if err != nil {
+				abs, _ := filepath.Abs(".")
+				projectRoot = abs
+			}
+			cfg, err := config.Load(projectRoot)
+			if err != nil {
+				cfg = &types.AppConfig{Name: appName}
+			}
+			detection, err := builder.Detect(projectRoot)
+			if err != nil {
+				return fmt.Errorf("detect: %w", err)
+			}
+			if cfg.Port == 0 {
+				cfg.Port = detection.InternalPort
+			}
+			b := builder.New(dataDir)
+			imageTag, err = b.Build(context.Background(), projectRoot, cfg.Name, detection)
+			if err != nil {
+				return fmt.Errorf("build: %w", err)
+			}
+		}
+
+		extraEnv, _ := cmd.Flags().GetStringArray("env")
+		env := make(map[string]string)
+		for k, v := range app.Config.Env {
+			env[k] = v
+		}
+		for _, e := range extraEnv {
+			parts := strings.SplitN(e, "=", 2)
+			if len(parts) != 2 {
+				return fmt.Errorf("invalid env format %q, use KEY=VALUE", e)
+			}
+			env[parts[0]] = parts[1]
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		exitCode, err := rt.RunOnce(context.Background(), imageTag, cmdArgs, env)
+		if err != nil {
+			return err
+		}
+		if exitCode != 0 {
+			return fmt.Errorf("command exited with code %d", exitCode)
+		}
+		return nil
+	},
+}
+
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage environment variables for an application",
@@ -851,6 +930,8 @@ func Execute() {
 	proxyCmd.Flags().IntP("port", "p", 8080, "proxy listen port")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
+	runCmd.Flags().Bool("build", false, "rebuild the image before running")
+	runCmd.Flags().StringArray("env", nil, "set environment variables (KEY=VALUE, repeatable)")
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

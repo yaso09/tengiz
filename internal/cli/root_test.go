@@ -161,6 +161,16 @@ func TestInitCmdGitFlags(t *testing.T) {
 	}
 }
 
+func TestRunCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"run"})
+	if err != nil {
+		t.Fatal("run command not found")
+	}
+	if cmd == nil {
+		t.Fatal("run command is nil")
+	}
+}
+
 func TestVolumeAddCommand(t *testing.T) {
 	tmpDir := t.TempDir()
 	dataDir = tmpDir
