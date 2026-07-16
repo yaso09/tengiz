@@ -59,6 +59,7 @@ func init() {
 	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
+	rootCmd.AddCommand(runCmd)
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
@@ -876,6 +877,43 @@ Use --tail N to show only the last N lines of the latest build log.`,
 		fmt.Printf("Build logs for %s:\n", appName)
 		for _, id := range ids {
 			fmt.Printf("  %s\n", id)
+		}
+		return nil
+	},
+}
+
+var runCmd = &cobra.Command{
+	Use:   "run <app> <command> [args...]",
+	Short: "Run a one-off command in the app's container",
+	Long: `Run a one-off command in a temporary container built from the app's image.
+
+The container is created with the same environment variables, volumes, and
+resource limits as the deployed app, runs the specified command, and is
+automatically removed on exit.
+
+Examples:
+  tengiz run myapp python manage.py migrate
+  tengiz run myapp -- python manage.py shell
+  tengiz run myapp node -e "console.log('hello')"`,
+	Args: cobra.MinimumNArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		command := args[1:]
+
+		store := config.NewStore(dataDir)
+		app, err := store.GetApp(appName)
+		if err != nil {
+			return fmt.Errorf("app %q not found: %w", appName, err)
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		fmt.Printf("[tengiz] running in %s: %s\n", appName, strings.Join(command, " "))
+		if err := rt.RunOnce(cmd.Context(), &app.Config, app.ImageTag, command); err != nil {
+			return err
 		}
 		return nil
 	},
