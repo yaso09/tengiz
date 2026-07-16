@@ -1,5 +1,12 @@
 # Tengiz
 
+[![CI](https://github.com/yaso09/tengiz/actions/workflows/ci.yml/badge.svg)](https://github.com/yaso09/tengiz/actions/workflows/ci.yml)
+[![Daily Analysis](https://github.com/yaso09/tengiz/actions/workflows/daily-analysis.yml/badge.svg)](https://github.com/yaso09/tengiz/actions/workflows/daily-analysis.yml)
+[![Prioritize Features](https://github.com/yaso09/tengiz/actions/workflows/prioritize-features.yml/badge.svg)](https://github.com/yaso09/tengiz/actions/workflows/prioritize-features.yml)
+[![Plan Top Feature](https://github.com/yaso09/tengiz/actions/workflows/plan-top-feature.yml/badge.svg)](https://github.com/yaso09/tengiz/actions/workflows/plan-top-feature.yml)
+[![Implement Top Feature](https://github.com/yaso09/tengiz/actions/workflows/implement-top-feature.yml/badge.svg)](https://github.com/yaso09/tengiz/actions/workflows/implement-top-feature.yml)
+[![Bug Detection](https://github.com/yaso09/tengiz/actions/workflows/bug-detection.yml/badge.svg)](https://github.com/yaso09/tengiz/actions/workflows/bug-detection.yml)
+
 **Tengiz** is an open-source Vercel alternative written in Go. It deploys any application using Docker containers with automatic scale-to-zero — containers start on demand and stop when idle, so a single server can host hundreds of apps.
 
 ## Features
@@ -534,8 +541,12 @@ tengiz/
 │   ├── runtime/             # Docker container lifecycle (via CLI)
 │   └── types/               # Shared types
 ├── .github/workflows/
-│   ├── ci.yml               # CI pipeline
-│   └── daily-analysis.yml   # Daily competitor analysis
+│   ├── ci.yml                  # CI pipeline
+│   ├── daily-analysis.yml      # Daily competitor analysis
+│   ├── prioritize-features.yml # Prioritize feature backlog
+│   ├── plan-top-feature.yml    # Plan implementation for top feature
+│   ├── implement-top-feature.yml # Execute top feature plan
+│   └── bug-detection.yml       # Hourly bug detection via OpenCode
 ```
 
 ## License
