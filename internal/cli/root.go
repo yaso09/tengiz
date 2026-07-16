@@ -213,6 +213,10 @@ var deployCmd = &cobra.Command{
 				Status:    string(types.DeployActive),
 			})
 
+			if err := rt.KeepLastNImages(context.Background(), cfg.Name, 5); err != nil {
+				log.Printf("[tengiz] warning: image cleanup: %v", err)
+			}
+
 			if err := proxy.RegisterRouteWithProxy(cfg.Name, port); err != nil {
 				log.Printf("[tengiz] proxy not available (route will be registered on proxy start): %v", err)
 			}
@@ -291,6 +295,10 @@ var deployCmd = &cobra.Command{
 			Config:           *cfg,
 			DeploymentSuffix: deploymentID,
 		})
+
+		if err := rt.KeepLastNImages(context.Background(), cfg.Name, 5); err != nil {
+			log.Printf("[tengiz] warning: image cleanup: %v", err)
+		}
 
 		fmt.Printf("[tengiz] deployed (zero-downtime): %s at http://%s.tengiz.local:%d\n",
 			cfg.Name, cfg.Name, newPort)
