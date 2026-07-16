@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/yaso09/tengiz/internal/config"
 	"github.com/yaso09/tengiz/internal/types"
 )
@@ -265,6 +266,46 @@ func TestBuildLogsCmdRegistration(t *testing.T) {
 	}
 	if cmd == nil || cmd.Name() != "build-logs" {
 		t.Fatal("build-logs command not found")
+	}
+}
+
+func TestLogsCmdWithFlags(t *testing.T) {
+	var called bool
+
+	originalRunE := logsCmd.RunE
+	defer func() { logsCmd.RunE = originalRunE }()
+	logsCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		follow, _ := cmd.Flags().GetBool("follow")
+		tail, _ := cmd.Flags().GetInt("tail")
+		since, _ := cmd.Flags().GetString("since")
+		grep, _ := cmd.Flags().GetString("grep")
+
+		if args[0] != "testapp" {
+			t.Errorf("app name = %q, want %q", args[0], "testapp")
+		}
+		if follow {
+			t.Error("follow = true, want false")
+		}
+		if tail != 50 {
+			t.Errorf("tail = %d, want 50", tail)
+		}
+		if since != "5m" {
+			t.Errorf("since = %q, want %q", since, "5m")
+		}
+		if grep != "error" {
+			t.Errorf("grep = %q, want %q", grep, "error")
+		}
+		called = true
+		return nil
+	}
+
+	rootCmd.SetArgs([]string{"logs", "testapp", "--tail", "50", "--since", "5m", "--grep", "error"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !called {
+		t.Fatal("logsCmd.RunE was not called")
 	}
 }
 

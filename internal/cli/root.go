@@ -61,6 +61,10 @@ func init() {
 	rootCmd.AddCommand(buildLogsCmd)
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
+	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
+	logsCmd.Flags().Int("tail", 0, "show only last N lines of logs (0 = all)")
+	logsCmd.Flags().String("since", "", "show logs since timestamp (e.g. 2024-01-01T00:00:00Z or 5m)")
+	logsCmd.Flags().String("grep", "", "filter logs with a case-sensitive pattern")
 }
 
 var rootCmd = &cobra.Command{
@@ -1027,10 +1031,6 @@ func getwd() string {
 func Execute() {
 	proxyCmd.Flags().StringP("app", "a", "", "route all requests to this app (bypasses hostname routing)")
 	proxyCmd.Flags().IntP("port", "p", 8080, "proxy listen port")
-	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
-	logsCmd.Flags().Int("tail", 0, "show only last N lines of logs (0 = all)")
-	logsCmd.Flags().String("since", "", "show logs since timestamp (e.g. 2024-01-01T00:00:00Z or 5m)")
-	logsCmd.Flags().String("grep", "", "filter logs with a case-sensitive pattern")
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	buildLogsCmd.Flags().Int("tail", 0, "show only last N lines of the latest build log")
 	if err := rootCmd.Execute(); err != nil {
