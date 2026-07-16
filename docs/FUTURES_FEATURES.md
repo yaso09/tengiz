@@ -14,7 +14,7 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 | 1 | **Rollback Sistemi** ✅ | Çok Yüksek | Orta | Mükemmel | Production güvenlik ağı. Deploy sonrası hata durumunda anında dönüş imkanı olmadan üretim kullanımı riskli. Image tag'lama + deployment history ile yapılır. Mevcut deploy pipeline'a eklenir.<br>**Status:** ✅ Implemented (2026-07-16) |
 | 2 | **Build Logs** ✅ | Çok Yüksek | Çok Düşük | Mükemmel | Build hata ayıklama olmadan hiçbir deployment aracı kullanılamaz. `builder.go` çıktısını dosyaya yönlendir, `tengiz build-logs <app>` ile görüntüle. Çok düşük efor, çok yüksek etki.<br>**Status:** ✅ Implemented (2026-07-16) |
 | 3 | **Log Filtering** ✅ | Çok Yüksek | Çok Düşük | Mükemmel | Production debugging için `--since`, `--grep`, `--tail` filtreleme kritik. Docker log API'sine passthrough, mevcut `tengiz logs` komutuna flag ekleme.<br>**Status:** ✅ Implemented (2026-07-16) |
-| 4 | **One-off Process Execution** ⬜ | Yüksek | Düşük | Mükemmel | Migration/console/data import olmadan uygulama yönetimi eksik kalır. `tengiz run <cmd>` = `docker run --rm`. Mevcut `os/exec` yapısına çok uygun. |
+| 4 | **One-off Process Execution** ✅ | Yüksek | Düşük | Mükemmel | Migration/console/data import olmadan uygulama yönetimi eksik kalır. `tengiz run <cmd>` = `docker run --rm`. Mevcut `os/exec` yapısına çok uygun.<br>**Status:** ✅ Implemented (2026-07-16) |
 | 5 | **Multi-Environment Desteği** ⬜ | Yüksek | Orta | Mükemmel | Development/staging/production ayrımı olmadan gerçek platform kurulamaz. `.tengiz.yaml` → `.tengiz.{env}.yaml` merge, `--env staging` flag'i. |
 | 6 | **Webhook ile Otomatik Deploy** ⬜ | Yüksek | Orta | Mükemmel | Git tabanlı deployment'ın tamamlayıcısı. Webhook sunucusu push event'lerini alır, deploy tetikler. `tengiz webhook` komutu ile hafif bir HTTP sunucusu. |
 | 7 | **Preview Deployments** ⬜ | Yüksek | Orta-Yüksek | Mükemmel | Vercel'in en sevilen özelliği — PR bazında geçici ortam + otomatik cleanup. Container isimleri `tengiz-pr-<app>-<pr_id>`. PR kapanınca otomatik sil. |
@@ -350,6 +350,7 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Source:** Dokku
 - **Description:** App image'ından geçici container başlatıp komut çalıştırma (`dokku run <cmd>`). Exit'te container otomatik temizlenir. Detached mod, log görüntüleme, stop gibi alt komutlar.
 - **Why add to Tengiz:** Database migration (`tengiz run -- python manage.py migrate`), Rails console, data import gibi işlemler için kritik. Bu olmadan kullanıcılar deploy sonrası migration'ları manuel Docker komutlarıyla yapmak zorunda.
+- **Status:** ✅ Implemented (2026-07-16)
 - **Detected:** 2026-07-14
 
 ## Custom Docker Options
