@@ -127,6 +127,67 @@ func TestResourceArgs(t *testing.T) {
 	}
 }
 
+func TestVolumeArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		volumes  []types.VolumeBinding
+		expected []string
+	}{
+		{
+			name:     "nil volumes",
+			volumes:  nil,
+			expected: nil,
+		},
+		{
+			name:     "empty volumes",
+			volumes:  []types.VolumeBinding{},
+			expected: nil,
+		},
+		{
+			name: "host path mount",
+			volumes: []types.VolumeBinding{
+				{HostPath: "/data/db", ContainerPath: "/var/lib/mysql"},
+			},
+			expected: []string{"-v", "/data/db:/var/lib/mysql"},
+		},
+		{
+			name: "named volume mount",
+			volumes: []types.VolumeBinding{
+				{HostPath: "myvolume", ContainerPath: "/data"},
+			},
+			expected: []string{"-v", "myvolume:/data"},
+		},
+		{
+			name: "read-only mount",
+			volumes: []types.VolumeBinding{
+				{HostPath: "/host", ContainerPath: "/container", ReadOnly: true},
+			},
+			expected: []string{"-v", "/host:/container:ro"},
+		},
+		{
+			name: "multiple volumes",
+			volumes: []types.VolumeBinding{
+				{HostPath: "/vol1", ContainerPath: "/c1"},
+				{HostPath: "vol2", ContainerPath: "/c2", ReadOnly: true},
+			},
+			expected: []string{"-v", "/vol1:/c1", "-v", "vol2:/c2:ro"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := volumeArgs(tt.volumes)
+			if len(got) != len(tt.expected) {
+				t.Fatalf("volumeArgs() = %v (len=%d), want %v (len=%d)", got, len(got), tt.expected, len(tt.expected))
+			}
+			for i := range got {
+				if got[i] != tt.expected[i] {
+					t.Fatalf("volumeArgs()[%d] = %q, want %q", i, got[i], tt.expected[i])
+				}
+			}
+		})
+	}
+}
+
 func TestStubGetContainerPort(t *testing.T) {
 	m := NewStub()
 	port, err := m.GetContainerPort(context.Background(), "testapp", "v2")

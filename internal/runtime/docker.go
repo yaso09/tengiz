@@ -33,6 +33,21 @@ func envArgs(env map[string]string) []string {
 	return args
 }
 
+func volumeArgs(volumes []types.VolumeBinding) []string {
+	if len(volumes) == 0 {
+		return nil
+	}
+	var args []string
+	for _, v := range volumes {
+		spec := fmt.Sprintf("%s:%s", v.HostPath, v.ContainerPath)
+		if v.ReadOnly {
+			spec += ":ro"
+		}
+		args = append(args, "-v", spec)
+	}
+	return args
+}
+
 func resourceArgs(rc *types.ResourceConfig) []string {
 	if rc == nil || (rc.CPU == "" && rc.Memory == "") {
 		return nil
@@ -74,6 +89,7 @@ func (r *dockerRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageT
 	}
 	args = append(args, envArgs(cfg.Env)...)
 	args = append(args, resourceArgs(cfg.Resources)...)
+	args = append(args, volumeArgs(cfg.Volumes)...)
 	args = append(args, imageTag)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.CombinedOutput()
@@ -398,6 +414,7 @@ func (r *dockerRuntime) CreateVersioned(ctx context.Context, cfg *types.AppConfi
 	}
 	args = append(args, envArgs(cfg.Env)...)
 	args = append(args, resourceArgs(cfg.Resources)...)
+	args = append(args, volumeArgs(cfg.Volumes)...)
 	args = append(args, imageTag)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.CombinedOutput()
