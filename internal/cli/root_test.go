@@ -339,6 +339,32 @@ func TestLogsCmdFlagParsing(t *testing.T) {
 	}
 }
 
+func TestRunCmdRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"run"})
+	if err != nil {
+		t.Fatal("run command not registered")
+	}
+	if cmd == nil || cmd.Name() != "run" {
+		t.Fatal("run command not found")
+	}
+}
+
+func TestRunCmdRejectsLessThanTwoArgs(t *testing.T) {
+	rootCmd.SetArgs([]string{"run", "myapp"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Error("expected error for missing command")
+	}
+}
+
+func TestRunCmdFlagInteractiveRegistered(t *testing.T) {
+	cmd, _, _ := rootCmd.Find([]string{"run"})
+	flag := cmd.Flags().Lookup("interactive")
+	if flag == nil {
+		t.Fatal("--interactive flag not found on run command")
+	}
+}
+
 func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	configCmd, _, err := rootCmd.Find([]string{"config"})
 	if err != nil {
