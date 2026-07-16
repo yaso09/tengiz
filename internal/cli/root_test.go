@@ -160,6 +160,26 @@ func TestInitCmdGitFlags(t *testing.T) {
 	}
 }
 
+func TestVolumeCommandsRegistered(t *testing.T) {
+	volumeCmd, _, err := rootCmd.Find([]string{"volume"})
+	if err != nil {
+		t.Fatalf("volume command not found: %v", err)
+	}
+
+	expected := map[string]bool{"add": false, "rm": false, "ls": false}
+	for _, sub := range volumeCmd.Commands() {
+		if _, ok := expected[sub.Name()]; ok {
+			expected[sub.Name()] = true
+		}
+	}
+
+	for name, found := range expected {
+		if !found {
+			t.Fatalf("volume subcommand %q not found", name)
+		}
+	}
+}
+
 func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	configCmd, _, err := rootCmd.Find([]string{"config"})
 	if err != nil {

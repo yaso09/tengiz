@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -48,6 +49,11 @@ func init() {
 	rootCmd.AddCommand(healthCmd)
 	rootCmd.AddCommand(domainCmd)
 	rootCmd.AddCommand(configCmd)
+	volumeAddCmd.Flags().Bool("read-only", false, "Mount the volume as read-only")
+	volumeCmd.AddCommand(volumeAddCmd)
+	volumeCmd.AddCommand(volumeRmCmd)
+	volumeCmd.AddCommand(volumeLsCmd)
+	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(webhookCmd)
 	gitCmd.AddCommand(gitConnectCmd)
 	gitCmd.AddCommand(gitDisconnectCmd)
@@ -601,6 +607,132 @@ var domainListCmd = &cobra.Command{
 		}
 		for _, d := range domains {
 			fmt.Println(d)
+		}
+		return nil
+	},
+}
+
+var volumeCmd = &cobra.Command{
+	Use:   "volume",
+	Short: "Manage persistent storage volumes",
+}
+
+var volumeAddCmd = &cobra.Command{
+	Use:   "add <app> <host_path>:<container_path>",
+	Short: "Add a volume mount to an app",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		spec := args[1]
+		parts := strings.SplitN(spec, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid volume spec %q: use <host_path>:<container_path>", spec)
+		}
+		hostPath, containerPath := parts[0], parts[1]
+
+		readOnly, _ := cmd.Flags().GetBool("read-only")
+
+		store := config.NewStore(dataDir)
+		app, err := store.GetApp(appName)
+		if err != nil {
+			return fmt.Errorf("app %q not found", appName)
+		}
+
+		for _, v := range app.Config.Volumes {
+			if v.HostPath == hostPath && v.ContainerPath == containerPath {
+				return fmt.Errorf("volume %s:%s already mounted on app %q", hostPath, containerPath, appName)
+			}
+		}
+
+		ro := ""
+		if readOnly {
+			ro = "true"
+		}
+
+		app.Config.Volumes = append(app.Config.Volumes, types.VolumeMount{
+			HostPath:      hostPath,
+			ContainerPath: containerPath,
+			ReadOnly:      ro,
+		})
+
+		return store.SaveApp(*app)
+	},
+}
+
+var volumeRmCmd = &cobra.Command{
+	Use:   "rm <app> <host_path>",
+	Short: "Remove a volume mount from an app",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		hostPath := args[1]
+
+		store := config.NewStore(dataDir)
+		app, err := store.GetApp(appName)
+		if err != nil {
+			return fmt.Errorf("app %q not found", appName)
+		}
+
+		found := false
+		for i, v := range app.Config.Volumes {
+			if v.HostPath == hostPath {
+				app.Config.Volumes = append(app.Config.Volumes[:i], app.Config.Volumes[i+1:]...)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("volume %q not found on app %q", hostPath, appName)
+		}
+
+		return store.SaveApp(*app)
+	},
+}
+
+var volumeLsCmd = &cobra.Command{
+	Use:   "ls [app]",
+	Short: "List volume mounts",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		store := config.NewStore(dataDir)
+
+		if len(args) == 1 {
+			app, err := store.GetApp(args[0])
+			if err != nil {
+				return fmt.Errorf("app %q not found", args[0])
+			}
+			if len(app.Config.Volumes) == 0 {
+				fmt.Printf("No volumes mounted on %q\n", args[0])
+				return nil
+			}
+			fmt.Printf("Volumes for %q:\n", args[0])
+			for _, v := range app.Config.Volumes {
+				ro := ""
+				if v.ReadOnly == "true" {
+					ro = " (ro)"
+				}
+				fmt.Printf("  %s -> %s%s\n", v.HostPath, v.ContainerPath, ro)
+			}
+			return nil
+		}
+
+		vols, err := store.ListVolumes()
+		if err != nil {
+			return fmt.Errorf("list volumes: %w", err)
+		}
+		if len(vols) == 0 {
+			fmt.Println("No volumes mounted")
+			return nil
+		}
+		for appName, mounts := range vols {
+			fmt.Printf("%s:\n", appName)
+			for _, v := range mounts {
+				ro := ""
+				if v.ReadOnly == "true" {
+					ro = " (ro)"
+				}
+				fmt.Printf("  %s -> %s%s\n", v.HostPath, v.ContainerPath, ro)
+			}
 		}
 		return nil
 	},
