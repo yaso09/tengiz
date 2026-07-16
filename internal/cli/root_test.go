@@ -208,6 +208,24 @@ func TestVolumeCommands(t *testing.T) {
 	}
 }
 
+func TestDeployLoadsStoredVolumes(t *testing.T) {
+	dir := t.TempDir()
+	s := config.NewStore(dir)
+	s.SaveApp(types.AppEntry{Name: "volapp"})
+	s.AddVolume("volapp", "/host/data", "/container/data", false)
+
+	app, err := s.GetApp("volapp")
+	if err != nil {
+		t.Fatalf("GetApp error: %v", err)
+	}
+	if len(app.Config.Volumes) != 1 {
+		t.Fatalf("got %d volumes, want 1", len(app.Config.Volumes))
+	}
+	if app.Config.Volumes[0].HostPath != "/host/data" {
+		t.Errorf("volume HostPath = %q, want /host/data", app.Config.Volumes[0].HostPath)
+	}
+}
+
 func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	configCmd, _, err := rootCmd.Find([]string{"config"})
 	if err != nil {

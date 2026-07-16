@@ -175,6 +175,11 @@ var deployCmd = &cobra.Command{
 
 		store := config.NewStore(dataDir)
 
+		// Load stored volumes into config
+		if storedVols, err := store.ListVolumes(cfg.Name); err == nil && len(storedVols) > 0 {
+			cfg.Volumes = append(cfg.Volumes, storedVols...)
+		}
+
 		// Check if this app already exists (previous deploy)
 		existingApp, lookupErr := store.GetApp(cfg.Name)
 
