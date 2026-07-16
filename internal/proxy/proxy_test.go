@@ -16,6 +16,7 @@ type mockRuntime struct {
 }
 
 func (m *mockRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
+func (m *mockRuntime) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRuntime) Start(ctx context.Context, name string) error { m.active = true; return nil }
 func (m *mockRuntime) Stop(ctx context.Context, name string) error { m.active = false; return nil }
 func (m *mockRuntime) Remove(ctx context.Context, name string) error { return nil }
@@ -28,6 +29,8 @@ func (m *mockRuntime) GetContainerPort(ctx context.Context, name string, suffix 
 func (m *mockRuntime) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
 func (m *mockRuntime) Restart(ctx context.Context, name string) error { return nil }
 func (m *mockRuntime) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
+func (m *mockRuntime) RemoveImage(ctx context.Context, imageTag string) error { return nil }
+func (m *mockRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 
 func TestExtractApp(t *testing.T) {
 	p := New(nil, 8080)

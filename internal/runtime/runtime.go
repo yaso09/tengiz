@@ -9,7 +9,10 @@ import (
 
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
+	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
+	RemoveImage(ctx context.Context, imageTag string) error
+	KeepLastNImages(ctx context.Context, appName string, n int) error
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
@@ -30,6 +33,10 @@ func NewStub() Manager {
 }
 
 func (m *stubManager) Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error {
+	return nil
+}
+
+func (m *stubManager) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error {
 	return nil
 }
 
@@ -78,5 +85,13 @@ func (m *stubManager) WaitForReady(ctx context.Context, name string, internalPor
 }
 
 func (m *stubManager) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error {
+	return nil
+}
+
+func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
+	return nil
+}
+
+func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
 	return nil
 }

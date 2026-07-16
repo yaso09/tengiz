@@ -91,7 +91,8 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		}
 	}
 
-	imageTag, err := p.b.Build(ctx, cloneDir, appName, detection)
+	deploymentID := fmt.Sprintf("%d", time.Now().Unix())
+	imageTag, err := p.b.Build(ctx, cloneDir, appName, detection, deploymentID)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
 	}
@@ -109,6 +110,14 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		}
 		log.Printf("[tengiz] running on port %d", port)
 
+		p.store.AddDeployment(appName, types.DeploymentEntry{
+			ID:        deploymentID,
+			ImageTag:  imageTag,
+			Port:      port,
+			CreatedAt: time.Now(),
+			Status:    string(types.DeployActive),
+		})
+
 		p.store.SaveApp(types.AppEntry{
 			Name:        appName,
 			ImageTag:    imageTag,
@@ -124,11 +133,16 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 			log.Printf("[tengiz] proxy not available: %v", err)
 		}
 
+		if err := p.rt.KeepLastNImages(ctx, appName, 5); err != nil {
+			log.Printf("[tengiz] warning: image cleanup: %v", err)
+		}
+
 		log.Printf("[tengiz] deployed: %s via git push", appName)
 		return nil
 	}
 
-	deploymentID := fmt.Sprintf("%d", time.Now().Unix())
+	// Zero-downtime deploy path: generate a fresh deployment ID for this new deploy
+	deploymentID = fmt.Sprintf("%d", time.Now().Unix())
 	newPort, err := p.store.AllocatePort(appName)
 	if err != nil {
 		return fmt.Errorf("port allocation: %w", err)
@@ -184,6 +198,10 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		GitBranch:        branch,
 		GitProvider:      provider,
 	})
+
+	if err := p.rt.KeepLastNImages(ctx, appName, 5); err != nil {
+		log.Printf("[tengiz] warning: image cleanup: %v", err)
+	}
 
 	log.Printf("[tengiz] deployed (zero-downtime) via git push: %s", appName)
 	return nil

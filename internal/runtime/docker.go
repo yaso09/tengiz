@@ -107,6 +107,32 @@ func (r *dockerRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageT
 	return nil
 }
 
+func (r *dockerRuntime) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error {
+	internalPort := cfg.Port
+	if internalPort == 0 {
+		internalPort = 8080
+	}
+	containerName := fmt.Sprintf("tengiz-%s", cfg.Name)
+
+	args := []string{
+		"run", "-d",
+		"--name", containerName,
+		"--label", fmt.Sprintf("%s=%s", labelKey, cfg.Name),
+		"-p", fmt.Sprintf("127.0.0.1:%d:%d", port, internalPort),
+		"--restart", "no",
+	}
+	args = append(args, envArgs(cfg.Env)...)
+	args = append(args, resourceArgs(cfg.Resources)...)
+	args = append(args, volumeArgs(cfg.Volumes)...)
+	args = append(args, imageTag)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker create from image: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
 func (r *dockerRuntime) Start(ctx context.Context, name string) error {
 	containerName := fmt.Sprintf("tengiz-%s", name)
 

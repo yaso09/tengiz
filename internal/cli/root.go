@@ -57,6 +57,7 @@ func init() {
 	volumeCmd.AddCommand(volumeRemoveCmd)
 	volumeCmd.AddCommand(volumeListCmd)
 	rootCmd.AddCommand(volumeCmd)
+	rootCmd.AddCommand(rollbackCmd)
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
 }
@@ -165,8 +166,10 @@ var deployCmd = &cobra.Command{
 			cfg.Port = detection.InternalPort
 		}
 
+		deploymentID := fmt.Sprintf("%d", time.Now().Unix())
+
 		b := builder.New(dataDir)
-		imageTag, err := b.Build(context.Background(), projectRoot, cfg.Name, detection)
+		imageTag, err := b.Build(context.Background(), projectRoot, cfg.Name, detection, deploymentID)
 		if err != nil {
 			return fmt.Errorf("build: %w", err)
 		}
@@ -202,6 +205,18 @@ var deployCmd = &cobra.Command{
 				Config:   *cfg,
 			})
 
+			store.AddDeployment(cfg.Name, types.DeploymentEntry{
+				ID:        deploymentID,
+				ImageTag:  imageTag,
+				Port:      port,
+				CreatedAt: time.Now(),
+				Status:    string(types.DeployActive),
+			})
+
+			if err := rt.KeepLastNImages(context.Background(), cfg.Name, 5); err != nil {
+				log.Printf("[tengiz] warning: image cleanup: %v", err)
+			}
+
 			if err := proxy.RegisterRouteWithProxy(cfg.Name, port); err != nil {
 				log.Printf("[tengiz] proxy not available (route will be registered on proxy start): %v", err)
 			}
@@ -212,7 +227,6 @@ var deployCmd = &cobra.Command{
 		}
 
 		// Zero-downtime deploy: blue/green
-		deploymentID := fmt.Sprintf("%d", time.Now().Unix())
 
 		// Allocate a second port for the new container
 		newPort, err := store.AllocatePort(cfg.Name)
@@ -281,6 +295,10 @@ var deployCmd = &cobra.Command{
 			Config:           *cfg,
 			DeploymentSuffix: deploymentID,
 		})
+
+		if err := rt.KeepLastNImages(context.Background(), cfg.Name, 5); err != nil {
+			log.Printf("[tengiz] warning: image cleanup: %v", err)
+		}
 
 		fmt.Printf("[tengiz] deployed (zero-downtime): %s at http://%s.tengiz.local:%d\n",
 			cfg.Name, cfg.Name, newPort)
@@ -685,6 +703,80 @@ var volumeListCmd = &cobra.Command{
 			}
 			fmt.Printf("  %s:%s%s\n", v.HostPath, v.ContainerPath, ro)
 		}
+		return nil
+	},
+}
+
+var rollbackCmd = &cobra.Command{
+	Use:   "rollback <app>",
+	Short: "Rollback to the previous deployment",
+	Long:  "Reverses the most recent deployment. The previous active container is started and the current one is stopped.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		store := config.NewStore(dataDir)
+
+		app, err := store.GetApp(appName)
+		if err != nil {
+			return fmt.Errorf("app %q not found: %w", appName, err)
+		}
+
+		prevDep, err := store.GetPreviousDeployment(appName)
+		if err != nil {
+			return fmt.Errorf("no previous deployment found: %w", err)
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		newPort, err := store.AllocatePort(appName)
+		if err != nil {
+			return fmt.Errorf("port allocation: %w", err)
+		}
+
+		if err := rt.CreateFromImage(cmd.Context(), &app.Config, prevDep.ImageTag, newPort); err != nil {
+			store.FreePort(newPort)
+			return fmt.Errorf("create rollback container: %w", err)
+		}
+
+		if err := rt.WaitForReady(cmd.Context(), appName, app.Config.Port); err != nil {
+			log.Printf("[tengiz] warning: rollback container may not be ready: %v", err)
+		}
+
+		if err := proxy.RegisterRouteWithProxy(appName, newPort); err != nil {
+			log.Printf("[tengiz] proxy not available: %v", err)
+		}
+
+		if app.DeploymentSuffix != "" {
+			if err := rt.RemoveBySuffix(cmd.Context(), appName, app.DeploymentSuffix); err != nil {
+				log.Printf("[tengiz] warning: failed to remove current container: %v", err)
+			}
+		} else {
+			if err := rt.Remove(cmd.Context(), appName); err != nil {
+				log.Printf("[tengiz] warning: failed to remove current container: %v", err)
+			}
+		}
+
+		store.FreePort(app.Port)
+
+		if app.DeploymentSuffix != "" {
+			store.UpdateDeploymentStatus(appName, app.DeploymentSuffix, string(types.DeployRolled))
+		}
+
+		store.UpdateDeploymentStatus(appName, prevDep.ID, string(types.DeployActive))
+
+		store.SaveApp(types.AppEntry{
+			Name:             app.Name,
+			ImageTag:         prevDep.ImageTag,
+			Port:             newPort,
+			Domains:          app.Domains,
+			Config:           app.Config,
+			DeploymentSuffix: prevDep.ID,
+		})
+
+		fmt.Printf("[tengiz] rolled back %s to deployment %s (port %d)\n", appName, prevDep.ID, newPort)
 		return nil
 	},
 }

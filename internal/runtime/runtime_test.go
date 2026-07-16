@@ -163,6 +163,15 @@ func TestGetContainerConfigVolumes(t *testing.T) {
 	_ = inspectOutput
 }
 
+func TestStubCreateFromImage(t *testing.T) {
+	m := NewStub()
+	cfg := &types.AppConfig{Name: "testapp", Port: 3000}
+	err := m.CreateFromImage(context.Background(), cfg, "tengiz-apps/testapp:v1", 9001)
+	if err != nil {
+		t.Fatalf("CreateFromImage() error = %v", err)
+	}
+}
+
 func TestStubGetContainerPort(t *testing.T) {
 	m := NewStub()
 	port, err := m.GetContainerPort(context.Background(), "testapp", "v2")

@@ -11,7 +11,7 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 
 | # | Feature | I | E | A | Gerekçe |
 |---|---------|---|---|---|---------|
-| 1 | **Rollback Sistemi** ⬜ | Çok Yüksek | Orta | Mükemmel | Production güvenlik ağı. Deploy sonrası hata durumunda anında dönüş imkanı olmadan üretim kullanımı riskli. Image tag'lama + deployment history ile yapılır. Mevcut deploy pipeline'a eklenir. |
+| 1 | **Rollback Sistemi** ✅ | Çok Yüksek | Orta | Mükemmel | Production güvenlik ağı. Deploy sonrası hata durumunda anında dönüş imkanı olmadan üretim kullanımı riskli. Image tag'lama + deployment history ile yapılır. Mevcut deploy pipeline'a eklenir.<br>**Status:** ✅ Implemented (2026-07-16) |
 | 2 | **Build Logs** ⬜ | Çok Yüksek | Çok Düşük | Mükemmel | Build hata ayıklama olmadan hiçbir deployment aracı kullanılamaz. `builder.go` çıktısını dosyaya yönlendir, `tengiz build-logs <app>` ile görüntüle. Çok düşük efor, çok yüksek etki. |
 | 3 | **Log Filtering** ⬜ | Çok Yüksek | Çok Düşük | Mükemmel | Production debugging için `--since`, `--grep`, `--tail` filtreleme kritik. Docker log API'sine passthrough, mevcut `tengiz logs` komutuna flag ekleme. |
 | 4 | **One-off Process Execution** ⬜ | Yüksek | Düşük | Mükemmel | Migration/console/data import olmadan uygulama yönetimi eksik kalır. `tengiz run <cmd>` = `docker run --rm`. Mevcut `os/exec` yapısına çok uygun. |

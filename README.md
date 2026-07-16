@@ -122,6 +122,14 @@ Remove an application completely — stops the container, deletes it, and cleans
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz rollback <app>`
+
+Rollback to the previous deployment. The previous active container is started on a new port, the proxy route is updated, and the current container is stopped and removed. Deployment statuses are updated in the deployment history.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name (required) |
+
 ### `tengiz domain`
 
 Manage custom domains for applications.

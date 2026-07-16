@@ -1,6 +1,7 @@
 package builder
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -138,6 +139,21 @@ func TestGenerateDockerfileWithoutHealthCheck(t *testing.T) {
 	df := generateDockerfile(d)
 	if strings.Contains(df, "HEALTHCHECK") {
 		t.Error("generated Dockerfile should not contain HEALTHCHECK when not configured")
+	}
+}
+
+func TestBuildWithDeploymentIDCompiles(t *testing.T) {
+	b := New(t.TempDir())
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "index.html"), []byte("<h1>hello</h1>"), 0644)
+	detection := &Detection{Framework: FrameworkStatic, InternalPort: 80}
+	tag, err := b.Build(context.Background(), dir, "testapp", detection, "v123")
+	if err != nil {
+		t.Skipf("Build() error (likely no docker): %v", err)
+	}
+	expected := "tengiz-apps/testapp:v123"
+	if tag != expected {
+		t.Errorf("tag = %q, want %q", tag, expected)
 	}
 }
 

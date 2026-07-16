@@ -12,12 +12,12 @@
 
 | Package | Responsibility |
 |---------|---------------|
-| `runtime.Manager` | Interface for container lifecycle. `NewDocker()` = exec-based impl, `NewStub()` = test mock. |
+| `runtime.Manager` | Interface for container lifecycle. `NewDocker()` = exec-based impl, `NewStub()` = test mock. Also: `CreateFromImage`, `RemoveImage`, `KeepLastNImages` for rollback + image cleanup. |
 | `builder` | Framework detection (`detect.go`) + Dockerfile generation (`builder.go`). Supports: Docker, Next.js, Vite, Go, Node, Python, static. |
 | `proxy` | `httputil.ReverseProxy` with host-based routing (`appname.tengiz.local` → port 9000+) and custom domain support. Cold-starts stopped containers on demand. |
 | `idle` | Per-app timer. `Reset(name)` extends deadline. On expiry: calls `runtime.Stop()`. Default 5m timeout. |
 | `config` | Loads `.tengiz.yaml` via viper. `Store` persists apps + port allocations in `~/.tengiz/*.json`. Adds `GetEnv`/`SetEnv`/`UnsetEnv`/`ListEnv` for env var management. |
-| `types` | Shared: `AppConfig`, `AppStatus`, `AppEntry`, `PortEntry`. |
+| `types` | Shared: `AppConfig`, `AppStatus`, `AppEntry`, `PortEntry`, `DeploymentEntry`, `DeploymentStatus`. |
 
 ## Commands
 
@@ -39,6 +39,7 @@ tengiz stop/start/rm  → lifecycle
 tengiz config set/get/unset/show → env vars
 tengiz domain add/remove/list   → custom domains
 tengiz volume add/remove/list   → persistent storage volumes
+tengiz rollback <app>           → rollback to previous deployment
 ```
 
 ## Rules
