@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -428,27 +430,27 @@ func (r *dockerRuntime) List(ctx context.Context) ([]types.AppStatus, error) {
 	return apps, nil
 }
 
-func logsArgs(containerName string, follow bool, tail int, since string, grep string) []string {
+func buildLogArgs(containerName string, opts LogOptions) []string {
 	args := []string{"logs"}
-	if follow {
+	if opts.Follow {
 		args = append(args, "-f")
 	}
-	if tail > 0 {
-		args = append(args, "--tail", fmt.Sprintf("%d", tail))
+	if opts.Tail > 0 {
+		args = append(args, "--tail", strconv.Itoa(opts.Tail))
 	}
-	if since != "" {
-		args = append(args, "--since", since)
+	if opts.Since != "" {
+		args = append(args, "--since", opts.Since)
 	}
-	if grep != "" {
-		args = append(args, "--grep", grep)
+	if opts.Until != "" {
+		args = append(args, "--until", opts.Until)
 	}
 	args = append(args, containerName)
 	return args
 }
 
-func (r *dockerRuntime) Logs(ctx context.Context, name string, follow bool, tail int, since string, grep string) (io.ReadCloser, error) {
+func (r *dockerRuntime) Logs(ctx context.Context, name string, opts LogOptions) (io.ReadCloser, error) {
 	containerName := fmt.Sprintf("tengiz-%s", name)
-	args := logsArgs(containerName, follow, tail, since, grep)
+	args := buildLogArgs(containerName, opts)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -456,6 +458,9 @@ func (r *dockerRuntime) Logs(ctx context.Context, name string, follow bool, tail
 	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
+	}
+	if opts.Grep != "" {
+		return newGrepReader(stdout, opts.Grep), nil
 	}
 	return stdout, nil
 }
@@ -600,4 +605,40 @@ func sanitizeContainerName(name string) string {
 		}
 	}
 	return strings.Trim(buf.String(), "-_")
+}
+
+type grepReader struct {
+	reader  io.ReadCloser
+	scanner *bufio.Scanner
+	pattern string
+	buf     []byte
+}
+
+func newGrepReader(r io.ReadCloser, pattern string) *grepReader {
+	return &grepReader{
+		reader:  r,
+		scanner: bufio.NewScanner(r),
+		pattern: pattern,
+	}
+}
+
+func (g *grepReader) Read(p []byte) (int, error) {
+	for g.scanner.Scan() {
+		line := g.scanner.Bytes()
+		if strings.Contains(string(line), g.pattern) {
+			g.buf = append(g.buf, line...)
+			g.buf = append(g.buf, '\n')
+			n := copy(p, g.buf)
+			g.buf = g.buf[n:]
+			return n, nil
+		}
+	}
+	if err := g.scanner.Err(); err != nil {
+		return 0, err
+	}
+	return 0, io.EOF
+}
+
+func (g *grepReader) Close() error {
+	return g.reader.Close()
 }
