@@ -455,7 +455,14 @@ func buildRunArgs(cfg *types.AppConfig, imageTag string, cmd []string, opts RunO
 		args = append(args, "-it")
 	}
 	args = append(args, "--label", fmt.Sprintf("%s=%s", labelKey, cfg.Name))
-	args = append(args, envArgs(cfg.Env)...)
+	mergedEnv := make(map[string]string, len(cfg.Env)+len(opts.ExtraEnv))
+	for k, v := range cfg.Env {
+		mergedEnv[k] = v
+	}
+	for k, v := range opts.ExtraEnv {
+		mergedEnv[k] = v
+	}
+	args = append(args, envArgs(mergedEnv)...)
 	args = append(args, resourceArgs(cfg.Resources)...)
 	args = append(args, volumeArgs(cfg.Volumes)...)
 	args = append(args, imageTag)

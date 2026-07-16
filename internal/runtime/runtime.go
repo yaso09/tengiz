@@ -17,6 +17,7 @@ type LogOptions struct {
 
 type RunOptions struct {
 	Interactive bool
+	ExtraEnv    map[string]string
 }
 
 type Manager interface {

@@ -61,6 +61,7 @@ func init() {
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
+	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
@@ -920,8 +921,19 @@ Examples:
 
 		fmt.Printf("[tengiz] running: %s (%s)\n", strings.Join(command, " "), imageTag)
 
+		extraEnv := make(map[string]string)
+		envFlags, _ := cmd.Flags().GetStringArray("env")
+		for _, e := range envFlags {
+			parts := strings.SplitN(e, "=", 2)
+			if len(parts) != 2 {
+				return fmt.Errorf("invalid env format %q, use KEY=VALUE", e)
+			}
+			extraEnv[parts[0]] = parts[1]
+		}
+
 		opts := runtime.RunOptions{
 			Interactive: interactive,
+			ExtraEnv:    extraEnv,
 		}
 
 		if err := rt.Run(cmd.Context(), &app.Config, imageTag, command, opts); err != nil {

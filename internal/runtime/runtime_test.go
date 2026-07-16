@@ -256,6 +256,23 @@ func TestStubRunInteractive(t *testing.T) {
 	}
 }
 
+func TestRunArgsWithExtraEnv(t *testing.T) {
+	cfg := &types.AppConfig{
+		Name: "myapp",
+		Env:  map[string]string{"BASE_URL": "http://localhost"},
+	}
+	opts := RunOptions{
+		ExtraEnv: map[string]string{"MIGRATION_STEP": "001", "FORCE": "true"},
+	}
+	args := buildRunArgs(cfg, "tengiz-apps/myapp:v1", []string{"python", "migrate.py"}, opts)
+	got := strings.Join(args, " ")
+	for _, want := range []string{"-e BASE_URL=http://localhost", "-e MIGRATION_STEP=001", "-e FORCE=true"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("buildRunArgs() missing %q in %q", want, got)
+		}
+	}
+}
+
 func TestRunArgs(t *testing.T) {
 	tests := []struct {
 		name     string
