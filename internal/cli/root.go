@@ -643,6 +643,12 @@ var volumeAddCmd = &cobra.Command{
 			mode = "ro"
 		}
 		fmt.Printf("[tengiz] volume mounted: %s:%s (%s)\n", hostPath, containerPath, mode)
+
+		// Notify proxy to pick up new volume config (restart container)
+		if err := proxy.RegisterRouteWithProxy(appName, 0); err != nil {
+			fmt.Printf("[tengiz] volume saved, but proxy not running: %v\n", err)
+			fmt.Printf("[tengiz] run 'tengiz redeploy %s' to apply volume changes\n", appName)
+		}
 		return nil
 	},
 }
@@ -660,6 +666,12 @@ var volumeRemoveCmd = &cobra.Command{
 			return err
 		}
 		fmt.Printf("[tengiz] volume unmounted: %s from %s\n", containerPath, appName)
+
+		// Notify proxy of volume change
+		if err := proxy.RegisterRouteWithProxy(appName, 0); err != nil {
+			fmt.Printf("[tengiz] volume saved, but proxy not running: %v\n", err)
+			fmt.Printf("[tengiz] run 'tengiz redeploy %s' to apply volume changes\n", appName)
+		}
 		return nil
 	},
 }
