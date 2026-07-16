@@ -59,6 +59,8 @@ func init() {
 	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
+	rootCmd.AddCommand(runCmd)
+	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
@@ -877,6 +879,55 @@ Use --tail N to show only the last N lines of the latest build log.`,
 		for _, id := range ids {
 			fmt.Printf("  %s\n", id)
 		}
+		return nil
+	},
+}
+
+var runCmd = &cobra.Command{
+	Use:   "run <app> [--] <command> [args...]",
+	Short: "Run a one-off command in a temporary container",
+	Long: `Run a one-off command inside a temporary container created from the
+app's deployed image. The container is automatically removed on exit.
+
+Useful for database migrations, console access, and data import tasks.
+
+Examples:
+  tengiz run myapp -- python manage.py migrate
+  tengiz run myapp -- rails console
+  tengiz run -i myapp -- bash`,
+	Args: cobra.MinimumNArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		command := args[1:]
+		interactive, _ := cmd.Flags().GetBool("interactive")
+
+		store := config.NewStore(dataDir)
+
+		app, err := store.GetApp(appName)
+		if err != nil {
+			return fmt.Errorf("app %q not found: %w", appName, err)
+		}
+
+		imageTag := app.ImageTag
+		if imageTag == "" {
+			return fmt.Errorf("app %q has no image tag — deploy it first", appName)
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		fmt.Printf("[tengiz] running: %s (%s)\n", strings.Join(command, " "), imageTag)
+
+		opts := runtime.RunOptions{
+			Interactive: interactive,
+		}
+
+		if err := rt.Run(cmd.Context(), &app.Config, imageTag, command, opts); err != nil {
+			return fmt.Errorf("run: %w", err)
+		}
+
 		return nil
 	},
 }
