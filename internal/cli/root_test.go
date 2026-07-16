@@ -53,6 +53,7 @@ func (m *mockRTForDeploy) List(ctx context.Context) ([]types.AppStatus, error) {
 func (m *mockRTForDeploy) Logs(ctx context.Context, name string, follow bool) (io.ReadCloser, error) { return nil, nil }
 func (m *mockRTForDeploy) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
 func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
+func (m *mockRTForDeploy) RunOnce(ctx context.Context, imageTag string, cmdArgs []string, env map[string]string) (int, error) { return 0, nil }
 
 func TestDeployZeroDowntimeCreatesVersionedContainer(t *testing.T) {
 	var m interface{} = &mockRTForDeploy{}
