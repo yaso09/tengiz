@@ -58,6 +58,8 @@ func init() {
 	volumeCmd.AddCommand(volumeListCmd)
 	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(runCmd)
+	runCmd.Flags().Bool("build", false, "rebuild the image before running")
+	runCmd.Flags().StringArray("env", nil, "set environment variables (KEY=VALUE, repeatable)")
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
 }
@@ -930,8 +932,6 @@ func Execute() {
 	proxyCmd.Flags().IntP("port", "p", 8080, "proxy listen port")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
-	runCmd.Flags().Bool("build", false, "rebuild the image before running")
-	runCmd.Flags().StringArray("env", nil, "set environment variables (KEY=VALUE, repeatable)")
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
