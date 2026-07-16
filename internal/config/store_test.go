@@ -223,6 +223,47 @@ func TestStoreListDomainsNoApp(t *testing.T) {
 	}
 }
 
+func TestCheckVolumeInUse(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{
+		Name: "app1",
+		Config: types.AppConfig{
+			Volumes: []types.VolumeMount{
+				{HostPath: "/shared-data", ContainerPath: "/data"},
+			},
+		},
+	})
+	s.SaveApp(types.AppEntry{
+		Name: "app2",
+		Config: types.AppConfig{
+			Volumes: []types.VolumeMount{
+				{HostPath: "/other-data", ContainerPath: "/data"},
+			},
+		},
+	})
+
+	app, inUse, err := s.CheckVolumeInUse("/shared-data")
+	if err != nil {
+		t.Fatalf("CheckVolumeInUse: %v", err)
+	}
+	if !inUse {
+		t.Fatal("expected /shared-data to be in use")
+	}
+	if app != "app1" {
+		t.Errorf("expected app1, got %s", app)
+	}
+
+	_, inUse, err = s.CheckVolumeInUse("/nonexistent")
+	if err != nil {
+		t.Fatalf("CheckVolumeInUse nonexistent: %v", err)
+	}
+	if inUse {
+		t.Fatal("expected /nonexistent not to be in use")
+	}
+}
+
 func TestListVolumes(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)

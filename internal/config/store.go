@@ -142,6 +142,21 @@ func (s *Store) ListEnv(appName string) (map[string]string, error) {
 	return result, nil
 }
 
+func (s *Store) CheckVolumeInUse(hostPath string) (string, bool, error) {
+	vols, err := s.ListVolumes()
+	if err != nil {
+		return "", false, err
+	}
+	for appName, mounts := range vols {
+		for _, m := range mounts {
+			if m.HostPath == hostPath {
+				return appName, true, nil
+			}
+		}
+	}
+	return "", false, nil
+}
+
 func (s *Store) ListVolumes() (map[string][]types.VolumeMount, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
