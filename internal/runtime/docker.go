@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -446,6 +447,44 @@ func buildLogArgs(containerName string, opts LogOptions) []string {
 	}
 	args = append(args, containerName)
 	return args
+}
+
+func buildRunArgs(cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) []string {
+	args := []string{"run", "--rm"}
+	if opts.Interactive {
+		args = append(args, "-it")
+	}
+	args = append(args, "--label", fmt.Sprintf("%s=%s", labelKey, cfg.Name))
+	mergedEnv := make(map[string]string, len(cfg.Env)+len(opts.ExtraEnv))
+	for k, v := range cfg.Env {
+		mergedEnv[k] = v
+	}
+	for k, v := range opts.ExtraEnv {
+		mergedEnv[k] = v
+	}
+	args = append(args, envArgs(mergedEnv)...)
+	args = append(args, resourceArgs(cfg.Resources)...)
+	args = append(args, volumeArgs(cfg.Volumes)...)
+	args = append(args, imageTag)
+	args = append(args, cmd...)
+	return args
+}
+
+func (r *dockerRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
+	args := buildRunArgs(cfg, imageTag, cmd, opts)
+	dcmd := exec.CommandContext(ctx, "docker", args...)
+	dcmd.Stdout = os.Stdout
+	dcmd.Stderr = os.Stderr
+	if opts.Interactive {
+		dcmd.Stdin = os.Stdin
+	}
+	if err := dcmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("docker run: %w", err)
+	}
+	return nil
 }
 
 func (r *dockerRuntime) Logs(ctx context.Context, name string, opts LogOptions) (io.ReadCloser, error) {

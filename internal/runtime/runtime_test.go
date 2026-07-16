@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/yaso09/tengiz/internal/types"
@@ -234,5 +235,102 @@ func TestStubGetContainerPort(t *testing.T) {
 	}
 	if port != 0 {
 		t.Errorf("port = %d, want 0", port)
+	}
+}
+
+func TestStubRun(t *testing.T) {
+	m := NewStub()
+	cfg := &types.AppConfig{Name: "testapp"}
+	err := m.Run(context.Background(), cfg, "tengiz-apps/testapp:latest", []string{"echo", "hello"}, RunOptions{})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+}
+
+func TestStubRunInteractive(t *testing.T) {
+	m := NewStub()
+	cfg := &types.AppConfig{Name: "testapp", Env: map[string]string{"FOO": "bar"}}
+	err := m.Run(context.Background(), cfg, "tengiz-apps/testapp:v1", []string{"bash"}, RunOptions{Interactive: true})
+	if err != nil {
+		t.Fatalf("Run(interactive) error = %v", err)
+	}
+}
+
+func TestRunArgsWithExtraEnv(t *testing.T) {
+	cfg := &types.AppConfig{
+		Name: "myapp",
+		Env:  map[string]string{"BASE_URL": "http://localhost"},
+	}
+	opts := RunOptions{
+		ExtraEnv: map[string]string{"MIGRATION_STEP": "001", "FORCE": "true"},
+	}
+	args := buildRunArgs(cfg, "tengiz-apps/myapp:v1", []string{"python", "migrate.py"}, opts)
+	got := strings.Join(args, " ")
+	for _, want := range []string{"-e BASE_URL=http://localhost", "-e MIGRATION_STEP=001", "-e FORCE=true"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("buildRunArgs() missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestRunArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      *types.AppConfig
+		imageTag string
+		cmd      []string
+		opts     RunOptions
+		expected string
+	}{
+		{
+			name:     "simple command",
+			cfg:      &types.AppConfig{Name: "myapp"},
+			imageTag: "tengiz-apps/myapp:latest",
+			cmd:      []string{"echo", "hello"},
+			opts:     RunOptions{},
+			expected: "run --rm --label tengiz-app=myapp tengiz-apps/myapp:latest echo hello",
+		},
+		{
+			name: "interactive with env",
+			cfg:  &types.AppConfig{Name: "myapp", Env: map[string]string{"DATABASE_URL": "postgres://localhost:5432/db"}},
+			imageTag: "tengiz-apps/myapp:v1",
+			cmd:      []string{"bash"},
+			opts:     RunOptions{Interactive: true},
+			expected: "run --rm -it --label tengiz-app=myapp -e DATABASE_URL=postgres://localhost:5432/db tengiz-apps/myapp:v1 bash",
+		},
+		{
+			name: "with volumes",
+			cfg: &types.AppConfig{
+				Name: "myapp",
+				Volumes: []types.VolumeConfig{
+					{HostPath: "/data", ContainerPath: "/app/data"},
+				},
+			},
+			imageTag: "tengiz-apps/myapp:latest",
+			cmd:      []string{"ls", "/app/data"},
+			opts:     RunOptions{},
+			expected: "-v /data:/app/data",
+		},
+		{
+			name: "with resources",
+			cfg: &types.AppConfig{
+				Name:      "myapp",
+				Resources: &types.ResourceConfig{Memory: "512m", CPU: "1.0"},
+			},
+			imageTag: "tengiz-apps/myapp:latest",
+			cmd:      []string{"node", "script.js"},
+			opts:     RunOptions{},
+			expected: "--memory 512m --cpus 1.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := buildRunArgs(tt.cfg, tt.imageTag, tt.cmd, tt.opts)
+			got := strings.Join(args, " ")
+			if !strings.Contains(got, tt.expected) {
+				t.Errorf("buildRunArgs() = %q, want substring %q", got, tt.expected)
+			}
+		})
 	}
 }

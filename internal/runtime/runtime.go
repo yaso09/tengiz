@@ -15,6 +15,11 @@ type LogOptions struct {
 	Grep   string
 }
 
+type RunOptions struct {
+	Interactive bool
+	ExtraEnv    map[string]string
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
@@ -32,6 +37,7 @@ type Manager interface {
 	Logs(ctx context.Context, name string, opts LogOptions) (io.ReadCloser, error)
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
+	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
 }
 
 type stubManager struct{}
@@ -101,5 +107,9 @@ func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
 }
 
 func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
+	return nil
+}
+
+func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
 	return nil
 }
