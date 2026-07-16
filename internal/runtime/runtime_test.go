@@ -163,6 +163,17 @@ func TestGetContainerConfigVolumes(t *testing.T) {
 	_ = inspectOutput
 }
 
+func TestStubRunOnce(t *testing.T) {
+	m := NewStub()
+	code, err := m.RunOnce(context.Background(), "tengiz-apps/myapp:latest", []string{"echo", "hello"}, nil)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+}
+
 func TestStubGetContainerPort(t *testing.T) {
 	m := NewStub()
 	port, err := m.GetContainerPort(context.Background(), "testapp", "v2")

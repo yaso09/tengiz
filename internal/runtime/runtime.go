@@ -21,6 +21,7 @@ type Manager interface {
 	Logs(ctx context.Context, name string, follow bool) (io.ReadCloser, error)
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
+	RunOnce(ctx context.Context, imageTag string, cmdArgs []string, env map[string]string) (int, error)
 }
 
 type stubManager struct{}
@@ -79,4 +80,8 @@ func (m *stubManager) WaitForReady(ctx context.Context, name string, internalPor
 
 func (m *stubManager) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error {
 	return nil
+}
+
+func (m *stubManager) RunOnce(ctx context.Context, imageTag string, cmdArgs []string, env map[string]string) (int, error) {
+	return 0, nil
 }

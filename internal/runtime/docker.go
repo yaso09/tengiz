@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -309,6 +310,28 @@ func (r *dockerRuntime) WaitForHealth(ctx context.Context, name string, hc *type
 		}
 	}
 	return fmt.Errorf("health check failed after %d retries: %w", retries, lastErr)
+}
+
+func (r *dockerRuntime) RunOnce(ctx context.Context, imageTag string, cmdArgs []string, env map[string]string) (int, error) {
+	args := []string{
+		"run", "--rm", "-i",
+	}
+	args = append(args, envArgs(env)...)
+	args = append(args, imageTag)
+	args = append(args, cmdArgs...)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return exitErr.ExitCode(), nil
+		}
+		return 1, fmt.Errorf("docker run: %w", err)
+	}
+	return 0, nil
 }
 
 func (r *dockerRuntime) Restart(ctx context.Context, name string) error {
