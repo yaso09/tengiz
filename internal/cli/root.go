@@ -467,7 +467,7 @@ var rmCmd = &cobra.Command{
 var logsCmd = &cobra.Command{
 	Use:   "logs <app>",
 	Short: "Show application logs",
-	Long:  "Show application logs. Use -f to follow.",
+	Long:  "Show application logs. Use -f to follow. Supports --tail, --since, and --grep for filtering.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		follow, _ := cmd.Flags().GetBool("follow")
