@@ -12,7 +12,7 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 | # | Feature | I | E | A | Gerekçe |
 |---|---------|---|---|---|---------|
 | 1 | **Rollback Sistemi** ✅ | Çok Yüksek | Orta | Mükemmel | Production güvenlik ağı. Deploy sonrası hata durumunda anında dönüş imkanı olmadan üretim kullanımı riskli. Image tag'lama + deployment history ile yapılır. Mevcut deploy pipeline'a eklenir.<br>**Status:** ✅ Implemented (2026-07-16) |
-| 2 | **Build Logs** ⬜ | Çok Yüksek | Çok Düşük | Mükemmel | Build hata ayıklama olmadan hiçbir deployment aracı kullanılamaz. `builder.go` çıktısını dosyaya yönlendir, `tengiz build-logs <app>` ile görüntüle. Çok düşük efor, çok yüksek etki. |
+| 2 | **Build Logs** ✅ | Çok Yüksek | Çok Düşük | Mükemmel | Build hata ayıklama olmadan hiçbir deployment aracı kullanılamaz. `builder.go` çıktısını dosyaya yönlendir, `tengiz build-logs <app>` ile görüntüle. Çok düşük efor, çok yüksek etki.<br>**Status:** ✅ Implemented (2026-07-16) |
 | 3 | **Log Filtering** ⬜ | Çok Yüksek | Çok Düşük | Mükemmel | Production debugging için `--since`, `--grep`, `--tail` filtreleme kritik. Docker log API'sine passthrough, mevcut `tengiz logs` komutuna flag ekleme. |
 | 4 | **One-off Process Execution** ⬜ | Yüksek | Düşük | Mükemmel | Migration/console/data import olmadan uygulama yönetimi eksik kalır. `tengiz run <cmd>` = `docker run --rm`. Mevcut `os/exec` yapısına çok uygun. |
 | 5 | **Multi-Environment Desteği** ⬜ | Yüksek | Orta | Mükemmel | Development/staging/production ayrımı olmadan gerçek platform kurulamaz. `.tengiz.yaml` → `.tengiz.{env}.yaml` merge, `--env staging` flag'i. |
@@ -376,7 +376,7 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Why add to Tengiz:** Auditing ve debugging için olayların kaydı kritik. Kim ne zaman deploy etti, config değiştirdi, container neden durdu gibi sorulara cevap verir. Özellikle multi-developer ortamlarda vazgeçilmez. Go'nun `log/slog` paketi ile JSON Lines formatında basit bir çözüm eklenebilir.
 - **Detected:** 2026-07-14
 
-## Build Logs (Build Output Capture)
+## Build Logs (Build Output Capture) ✅ Implemented (2026-07-16)
 - **Source:** CapRover
 - **Description:** Her deploy için ayrı build log tutma. `docker build` çıktısı bir dosyaya yazılır ve `tengiz build-logs <app>` ile görüntülenir. Build'in başarılı/başarısız olduğu ve tüm log satırları tek komutla okunabilir.
 - **Why add to Tengiz:** `tengiz logs` container loglarını gösterir ama build sırasında neler olduğunu göstermez. Hata ayıklama deneyimini çok iyileştirir. `builder.go`'daki Docker build çıktısı bir dosyaya yönlendirilerek kolayca eklenebilir.
