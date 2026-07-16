@@ -94,6 +94,10 @@ func (m *mockRTForDeploy) List(ctx context.Context) ([]types.AppStatus, error) {
 func (m *mockRTForDeploy) Logs(ctx context.Context, name string, opts runtime.LogOptions) (io.ReadCloser, error) { return nil, nil }
 func (m *mockRTForDeploy) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
 func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
+func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
+func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
+func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) RunOnce(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string) error { return nil }
 
 func TestDeployZeroDowntimeCreatesVersionedContainer(t *testing.T) {
 	var m interface{} = &mockRTForDeploy{}
@@ -336,6 +340,50 @@ func TestLogsCmdFlagParsing(t *testing.T) {
 		if !strings.Contains(helpText, flag) {
 			t.Errorf("help text missing flag %q", flag)
 		}
+	}
+}
+
+func TestRunCmdRegistration(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"run"})
+	if err != nil {
+		t.Fatal("run command not registered")
+	}
+	if cmd == nil || cmd.Name() != "run" {
+		t.Fatal("run command not found")
+	}
+}
+
+func TestRunCmdFailsWithNoArgs(t *testing.T) {
+	rootCmd.SetArgs([]string{"run"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Error("expected error for missing args")
+	}
+}
+
+func TestRunCmdFailsWithOneArg(t *testing.T) {
+	rootCmd.SetArgs([]string{"run", "myapp"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Error("expected error for missing command")
+	}
+}
+
+func TestRunCmdFailsWithUnknownApp(t *testing.T) {
+	tmpDir := t.TempDir()
+	dataDir = tmpDir
+	rootCmd.SetArgs([]string{"run", "nonexistent", "echo", "hi"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Error("expected error for unknown app")
+	}
+}
+
+func TestMockRTForDeployImplementsRunOnce(t *testing.T) {
+	m := &mockRTForDeploy{}
+	err := m.RunOnce(context.Background(), &types.AppConfig{}, "img", []string{"echo", "hi"})
+	if err != nil {
+		t.Fatal("mockRTForDeploy.RunOnce should return nil")
 	}
 }
 
