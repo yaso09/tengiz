@@ -83,6 +83,33 @@ func TestLoadWithoutResources(t *testing.T) {
 	}
 }
 
+func TestLoadWithVolumes(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := `
+name: myapp
+volumes:
+  - host_path: /data
+    container_path: /app/data
+  - host_path: /config
+    container_path: /etc/config
+    read_only: true
+`
+	os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), []byte(yamlContent), 0644)
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Volumes) != 2 {
+		t.Fatalf("expected 2 volumes, got %d", len(cfg.Volumes))
+	}
+	if cfg.Volumes[0].HostPath != "/data" {
+		t.Fatalf("expected /data, got %s", cfg.Volumes[0].HostPath)
+	}
+	if cfg.Volumes[1].ReadOnly != true {
+		t.Fatal("expected second volume to be read-only")
+	}
+}
+
 func TestLoadNoFile(t *testing.T) {
 	dir := t.TempDir()
 	_, err := Load(dir)

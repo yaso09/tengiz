@@ -223,6 +223,75 @@ func TestStoreListDomainsNoApp(t *testing.T) {
 	}
 }
 
+func TestVolumeCRUD(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	app := types.AppEntry{
+		Name: "testapp",
+		Config: types.AppConfig{
+			Name: "testapp",
+		},
+	}
+	if err := s.SaveApp(app); err != nil {
+		t.Fatal(err)
+	}
+
+	vol := types.VolumeConfig{HostPath: "/host/data", ContainerPath: "/container/data"}
+
+	if err := s.AddVolume("testapp", vol); err != nil {
+		t.Fatal(err)
+	}
+
+	vols, err := s.ListVolumes("testapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vols) != 1 {
+		t.Fatalf("expected 1 volume, got %d", len(vols))
+	}
+	if vols[0].HostPath != "/host/data" {
+		t.Fatalf("expected /host/data, got %s", vols[0].HostPath)
+	}
+
+	roVol := types.VolumeConfig{HostPath: "/host/config", ContainerPath: "/container/config", ReadOnly: true}
+	if err := s.AddVolume("testapp", roVol); err != nil {
+		t.Fatal(err)
+	}
+
+	vols, err = s.ListVolumes("testapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vols) != 2 {
+		t.Fatalf("expected 2 volumes, got %d", len(vols))
+	}
+
+	if err := s.RemoveVolume("testapp", "/host/data"); err != nil {
+		t.Fatal(err)
+	}
+
+	vols, err = s.ListVolumes("testapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vols) != 1 {
+		t.Fatalf("expected 1 volume after removal, got %d", len(vols))
+	}
+	if vols[0].HostPath != "/host/config" {
+		t.Fatalf("expected remaining volume to be /host/config, got %s", vols[0].HostPath)
+	}
+}
+
+func TestVolumeCRUDNonexistentApp(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+	err := s.AddVolume("noexist", types.VolumeConfig{})
+	if err == nil {
+		t.Fatal("expected error for nonexistent app")
+	}
+}
+
 func TestAddDeploymentHistory(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)

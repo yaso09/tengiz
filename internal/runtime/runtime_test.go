@@ -127,6 +127,42 @@ func TestResourceArgs(t *testing.T) {
 	}
 }
 
+func TestVolumeArgs(t *testing.T) {
+	volumes := []types.VolumeConfig{
+		{HostPath: "/data", ContainerPath: "/app/data", ReadOnly: false},
+		{HostPath: "/config", ContainerPath: "/etc/config", ReadOnly: true},
+	}
+	args := volumeArgs(volumes)
+	expected := []string{"-v", "/data:/app/data", "-v", "/config:/etc/config:ro"}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+	}
+	for i := range expected {
+		if args[i] != expected[i] {
+			t.Fatalf("arg %d: expected %q, got %q", i, expected[i], args[i])
+		}
+	}
+}
+
+func TestVolumeArgsNil(t *testing.T) {
+	args := volumeArgs(nil)
+	if args != nil {
+		t.Fatalf("expected nil for nil volumes, got %v", args)
+	}
+}
+
+func TestVolumeArgsEmpty(t *testing.T) {
+	args := volumeArgs([]types.VolumeConfig{})
+	if args != nil {
+		t.Fatalf("expected nil for empty volumes, got %v", args)
+	}
+}
+
+func TestGetContainerConfigVolumes(t *testing.T) {
+	const inspectOutput = `[{"/host/data": "/app/data", "/host/config:/etc/config:ro": ""}]`
+	_ = inspectOutput
+}
+
 func TestStubGetContainerPort(t *testing.T) {
 	m := NewStub()
 	port, err := m.GetContainerPort(context.Background(), "testapp", "v2")

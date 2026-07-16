@@ -156,6 +156,38 @@ List all custom domains for an application.
 |----------|-------------|
 | `app` | Application name |
 
+### `tengiz volume`
+
+Manage persistent storage volumes for applications. Volumes allow stateful apps (databases, uploads) to retain data across container restarts, including scale-to-zero cold starts and redeploys.
+
+#### `tengiz volume add <app> <host_path>:<container_path>[:ro]`
+
+Mount a volume from the host filesystem into an app's container.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `host_path:container_path` | Host path and container path, separated by `:`. Append `:ro` for read-only mount. |
+
+The mount is persisted in `~/.tengiz/apps.json` and injected as `-v` flags on next deploy or start.
+
+#### `tengiz volume remove <app> <host_path>`
+
+Unmount a volume from an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `host_path` | Host path of the volume to remove |
+
+#### `tengiz volume list <app>`
+
+List all mounted volumes for an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+
 ### `tengiz config`
 
 Manage environment variables for an application.
@@ -208,6 +240,10 @@ serverless:
   idle_timeout: 5m    # scale-to-zero timeout
 domains:
   - my-app.example.com
+volumes:
+  - host_path: /data/myapp
+    container_path: /app/data
+    read_only: false
 healthcheck:
   enabled: true
   endpoint: /health
