@@ -165,6 +165,70 @@ func (s *Store) UpdateApp(app types.AppEntry) error {
 	return s.writeJSON("apps.json", apps)
 }
 
+func (s *Store) AddVolume(appName, hostPath, containerPath string, readOnly bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make(map[string]types.AppEntry)
+	s.readJSON("apps.json", &apps)
+	app, ok := apps[appName]
+	if !ok {
+		return fmt.Errorf("app %q not found", appName)
+	}
+	for _, v := range app.Config.Volumes {
+		if v.ContainerPath == containerPath {
+			return fmt.Errorf("volume with container path %q already exists for app %q", containerPath, appName)
+		}
+	}
+	app.Config.Volumes = append(app.Config.Volumes, types.VolumeBinding{
+		HostPath:      hostPath,
+		ContainerPath: containerPath,
+		ReadOnly:      readOnly,
+	})
+	apps[appName] = app
+	return s.writeJSON("apps.json", apps)
+}
+
+func (s *Store) RemoveVolume(appName, containerPath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make(map[string]types.AppEntry)
+	s.readJSON("apps.json", &apps)
+	app, ok := apps[appName]
+	if !ok {
+		return fmt.Errorf("app %q not found", appName)
+	}
+	found := false
+	for i, v := range app.Config.Volumes {
+		if v.ContainerPath == containerPath {
+			app.Config.Volumes = append(app.Config.Volumes[:i], app.Config.Volumes[i+1:]...)
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("volume with container path %q not found for app %q", containerPath, appName)
+	}
+	apps[appName] = app
+	return s.writeJSON("apps.json", apps)
+}
+
+func (s *Store) ListVolumes(appName string) ([]types.VolumeBinding, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	apps := make(map[string]types.AppEntry)
+	s.readJSON("apps.json", &apps)
+	app, ok := apps[appName]
+	if !ok {
+		return nil, fmt.Errorf("app %q not found", appName)
+	}
+	result := make([]types.VolumeBinding, len(app.Config.Volumes))
+	copy(result, app.Config.Volumes)
+	return result, nil
+}
+
 func (s *Store) AddDomain(appName, domain string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

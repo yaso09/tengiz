@@ -223,6 +223,63 @@ func TestStoreListDomainsNoApp(t *testing.T) {
 	}
 }
 
+func TestStoreVolumes(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveApp(types.AppEntry{Name: "myapp"})
+
+	// AddVolume
+	if err := s.AddVolume("myapp", "/host/data", "/container/data", false); err != nil {
+		t.Fatalf("AddVolume error: %v", err)
+	}
+
+	// ListVolumes
+	vols, err := s.ListVolumes("myapp")
+	if err != nil {
+		t.Fatalf("ListVolumes error: %v", err)
+	}
+	if len(vols) != 1 {
+		t.Fatalf("got %d volumes, want 1", len(vols))
+	}
+	if vols[0].HostPath != "/host/data" || vols[0].ContainerPath != "/container/data" || vols[0].ReadOnly {
+		t.Errorf("volume = %+v, want {/host/data /container/data false}", vols[0])
+	}
+
+	// AddVolume with read-only
+	if err := s.AddVolume("myapp", "myvol", "/data", true); err != nil {
+		t.Fatalf("AddVolume read-only error: %v", err)
+	}
+	vols, _ = s.ListVolumes("myapp")
+	if len(vols) != 2 {
+		t.Fatalf("got %d volumes, want 2", len(vols))
+	}
+
+	// RemoveVolume
+	if err := s.RemoveVolume("myapp", "/container/data"); err != nil {
+		t.Fatalf("RemoveVolume error: %v", err)
+	}
+	vols, _ = s.ListVolumes("myapp")
+	if len(vols) != 1 {
+		t.Fatalf("after remove got %d volumes, want 1", len(vols))
+	}
+	if vols[0].ContainerPath != "/data" {
+		t.Errorf("remaining volume ContainerPath = %q, want /data", vols[0].ContainerPath)
+	}
+
+	// RemoveVolume nonexistent
+	err = s.RemoveVolume("myapp", "/nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent volume")
+	}
+
+	// ListVolumes for nonexistent app
+	_, err = s.ListVolumes("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent app")
+	}
+}
+
 func TestAddDeploymentHistory(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)
