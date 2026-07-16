@@ -172,80 +172,54 @@ func TestStubCreateFromImage(t *testing.T) {
 	}
 }
 
-func TestLogsArgs(t *testing.T) {
+func TestLogOptionsBuildArgs(t *testing.T) {
 	tests := []struct {
-		name          string
-		containerName string
-		follow        bool
-		tail          int
-		since         string
-		grep          string
-		expected      []string
+		name     string
+		opts     LogOptions
+		expected []string
 	}{
 		{
-			name:          "no flags",
-			containerName: "tengiz-myapp",
-			follow:        false,
-			tail:          0,
-			since:         "",
-			grep:          "",
-			expected:      []string{"logs", "tengiz-myapp"},
+			name:     "no options",
+			opts:     LogOptions{},
+			expected: []string{"logs", "tengiz-myapp"},
 		},
 		{
-			name:          "follow only",
-			containerName: "tengiz-myapp",
-			follow:        true,
-			tail:          0,
-			since:         "",
-			grep:          "",
-			expected:      []string{"logs", "-f", "tengiz-myapp"},
+			name:     "follow only",
+			opts:     LogOptions{Follow: true},
+			expected: []string{"logs", "-f", "tengiz-myapp"},
 		},
 		{
-			name:          "tail only",
-			containerName: "tengiz-myapp",
-			follow:        false,
-			tail:          50,
-			since:         "",
-			grep:          "",
-			expected:      []string{"logs", "--tail", "50", "tengiz-myapp"},
+			name:     "tail 50",
+			opts:     LogOptions{Tail: 50},
+			expected: []string{"logs", "--tail", "50", "tengiz-myapp"},
 		},
 		{
-			name:          "since only",
-			containerName: "tengiz-myapp",
-			follow:        false,
-			tail:          0,
-			since:         "2024-01-01T00:00:00Z",
-			grep:          "",
-			expected:      []string{"logs", "--since", "2024-01-01T00:00:00Z", "tengiz-myapp"},
+			name:     "since 5m",
+			opts:     LogOptions{Since: "5m"},
+			expected: []string{"logs", "--since", "5m", "tengiz-myapp"},
 		},
 		{
-			name:          "grep only",
-			containerName: "tengiz-myapp",
-			follow:        false,
-			tail:          0,
-			since:         "",
-			grep:          "error",
-			expected:      []string{"logs", "--grep", "error", "tengiz-myapp"},
+			name:     "until 2024-01-01T00:00:00Z",
+			opts:     LogOptions{Until: "2024-01-01T00:00:00Z"},
+			expected: []string{"logs", "--until", "2024-01-01T00:00:00Z", "tengiz-myapp"},
 		},
 		{
-			name:          "all flags",
-			containerName: "tengiz-myapp",
-			follow:        true,
-			tail:          100,
-			since:         "5m",
-			grep:          "ERROR",
-			expected:      []string{"logs", "-f", "--tail", "100", "--since", "5m", "--grep", "ERROR", "tengiz-myapp"},
+			name:     "tail + follow + since",
+			opts:     LogOptions{Follow: true, Tail: 100, Since: "1h"},
+			expected: []string{"logs", "-f", "--tail", "100", "--since", "1h", "tengiz-myapp"},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := logsArgs(tt.containerName, tt.follow, tt.tail, tt.since, tt.grep)
-			if len(got) != len(tt.expected) {
-				t.Fatalf("logsArgs() = %v (len=%d), want %v (len=%d)", got, len(got), tt.expected, len(tt.expected))
+			args := buildLogArgs("tengiz-myapp", tt.opts)
+			if len(args) != len(tt.expected) {
+				t.Errorf("len mismatch: got %v, want %v", args, tt.expected)
+				return
 			}
-			for i := range got {
-				if got[i] != tt.expected[i] {
-					t.Fatalf("logsArgs()[%d] = %q, want %q", i, got[i], tt.expected[i])
+			for i := range args {
+				if args[i] != tt.expected[i] {
+					t.Errorf("arg[%d]: got %q, want %q", i, args[i], tt.expected[i])
 				}
 			}
 		})

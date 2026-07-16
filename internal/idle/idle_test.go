@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yaso09/tengiz/internal/runtime"
 	"github.com/yaso09/tengiz/internal/types"
 )
 
@@ -21,7 +22,7 @@ func (m *mockRuntime) Stop(ctx context.Context, name string) error { m.stopped.S
 func (m *mockRuntime) Remove(ctx context.Context, name string) error { return nil }
 func (m *mockRuntime) IsActive(ctx context.Context, name string) (bool, error) { return false, nil }
 func (m *mockRuntime) List(ctx context.Context) ([]types.AppStatus, error) { return nil, nil }
-func (m *mockRuntime) Logs(ctx context.Context, name string, follow bool, tail int, since string, grep string) (io.ReadCloser, error) { return nil, nil }
+func (m *mockRuntime) Logs(ctx context.Context, name string, opts runtime.LogOptions) (io.ReadCloser, error) { return nil, nil }
 func (m *mockRuntime) CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error { return nil }
 func (m *mockRuntime) RemoveBySuffix(ctx context.Context, name string, suffix string) error { return nil }
 func (m *mockRuntime) GetContainerPort(ctx context.Context, name string, suffix string) (int, error) { return 0, nil }
