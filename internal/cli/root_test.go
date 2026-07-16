@@ -89,7 +89,7 @@ func (m *mockRTForDeploy) RemoveBySuffix(ctx context.Context, name string, suffi
 func (m *mockRTForDeploy) IsActive(ctx context.Context, name string) (bool, error) { return true, nil }
 func (m *mockRTForDeploy) GetContainerPort(ctx context.Context, name string, suffix string) (int, error) { return 0, nil }
 func (m *mockRTForDeploy) List(ctx context.Context) ([]types.AppStatus, error) { return nil, nil }
-func (m *mockRTForDeploy) Logs(ctx context.Context, name string, follow bool) (io.ReadCloser, error) { return nil, nil }
+func (m *mockRTForDeploy) Logs(ctx context.Context, name string, follow bool, tail int, since string, grep string) (io.ReadCloser, error) { return nil, nil }
 func (m *mockRTForDeploy) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
 func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
 
