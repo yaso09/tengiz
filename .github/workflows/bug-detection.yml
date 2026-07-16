@@ -1,0 +1,55 @@
+name: Bug Detection
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+env:
+  OPENAI_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Fetch existing issues
+        run: |
+          mkdir -p docs/bug-context
+          gh issue list --state open --json title,body,number,labels > docs/bug-context/existing-issues.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run bug analysis
+        uses: anomalyco/opencode/github@latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: opencode/deepseek-v4-flash-free
+          prompt: |
+            You are a code reviewer analyzing the Tengiz project for bugs.
+
+            Read the existing open issues from docs/bug-context/existing-issues.json to understand what's already reported.
+
+            Analyze the full codebase for:
+            - Logic errors and incorrect behavior
+            - Nil pointer dereferences
+            - Race conditions or deadlocks
+            - Resource leaks (goroutines, file handles, connections)
+            - Error handling issues (ignored errors, swallowed panics)
+            - Security vulnerabilities (command injection, path traversal, unsafe exec)
+            - Incorrect test assertions or flaky tests
+
+            For each bug you find:
+            1. Check if it's already reported in the existing issues
+            2. If NOT already reported, run: gh issue create --title "<descriptive title>" --label "bug" --body "<detailed report with file paths, line numbers, severity, and suggested fix>"
+            3. If already reported, skip it
+
+            Be thorough but precise. Only report actual bugs, not style issues or opinions.

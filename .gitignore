@@ -10,3 +10,4 @@ tengiz-windows-*
 tengiz
 */__pycache__
 *.egg-info
+docs/bug-context/
