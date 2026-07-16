@@ -18,6 +18,13 @@ type AppConfig struct {
 	Resources   *ResourceConfig     `mapstructure:"resources,omitempty" json:"resources,omitempty"`
 	Env         map[string]string   `mapstructure:"env" json:"env,omitempty"`
 	Git         *GitConfig          `mapstructure:"git,omitempty" json:"git,omitempty"`
+	Volumes     []VolumeBinding     `mapstructure:"volumes,omitempty" json:"volumes,omitempty"`
+}
+
+type VolumeBinding struct {
+	HostPath      string `mapstructure:"host_path" json:"host_path,omitempty"`
+	ContainerPath string `mapstructure:"container_path" json:"container_path,omitempty"`
+	ReadOnly      bool   `mapstructure:"read_only" json:"read_only,omitempty"`
 }
 
 type ResourceConfig struct {

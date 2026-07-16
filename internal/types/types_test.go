@@ -39,6 +39,33 @@ func TestAppConfigEnvEmptyByDefault(t *testing.T) {
 	}
 }
 
+func TestVolumeBindingSerialization(t *testing.T) {
+	cfg := AppConfig{
+		Name: "testapp",
+		Volumes: []VolumeBinding{
+			{HostPath: "/data/db", ContainerPath: "/var/lib/mysql", ReadOnly: false},
+			{HostPath: "myvolume", ContainerPath: "/data", ReadOnly: true},
+		},
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	var got AppConfig
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if len(got.Volumes) != 2 {
+		t.Fatalf("got %d volumes, want 2", len(got.Volumes))
+	}
+	if got.Volumes[0].HostPath != "/data/db" {
+		t.Errorf("HostPath = %q, want /data/db", got.Volumes[0].HostPath)
+	}
+	if got.Volumes[1].ReadOnly != true {
+		t.Errorf("ReadOnly = %v, want true", got.Volumes[1].ReadOnly)
+	}
+}
+
 func TestGitConfigFields(t *testing.T) {
 	cfg := AppConfig{
 		Name: "test-app",
