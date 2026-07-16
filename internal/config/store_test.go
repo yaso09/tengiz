@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"github.com/yaso09/tengiz/internal/types"
 )
@@ -313,5 +314,49 @@ func TestAddDeploymentHistory(t *testing.T) {
 	}
 	if deps[0].ID != "v1" {
 		t.Errorf("deployment ID = %q, want v1", deps[0].ID)
+	}
+}
+
+func TestGetPreviousDeployment(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	_, err := s.GetPreviousDeployment("testapp")
+	if err == nil {
+		t.Fatal("expected error for no history")
+	}
+
+	s.AddDeployment("testapp", types.DeploymentEntry{
+		ID: "v1", ImageTag: "img:v1", Port: 9001,
+		CreatedAt: time.Now(), Status: string(types.DeployPrevious),
+	})
+	s.AddDeployment("testapp", types.DeploymentEntry{
+		ID: "v2", ImageTag: "img:v2", Port: 9002,
+		CreatedAt: time.Now(), Status: string(types.DeployActive),
+	})
+
+	dep, err := s.GetPreviousDeployment("testapp")
+	if err != nil {
+		t.Fatalf("GetPreviousDeployment() error = %v", err)
+	}
+	if dep.ID != "v1" {
+		t.Errorf("expected v1, got %s", dep.ID)
+	}
+}
+
+func TestGetDeploymentByID(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+	s.AddDeployment("testapp", types.DeploymentEntry{ID: "v1", ImageTag: "img:v1", Port: 9001, Status: string(types.DeployPrevious)})
+	dep, err := s.GetDeploymentByID("testapp", "v1")
+	if err != nil {
+		t.Fatalf("GetDeploymentByID() error = %v", err)
+	}
+	if dep.ID != "v1" {
+		t.Errorf("got %s, want v1", dep.ID)
+	}
+	_, err = s.GetDeploymentByID("testapp", "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent ID")
 	}
 }

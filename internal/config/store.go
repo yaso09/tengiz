@@ -309,6 +309,43 @@ func (s *Store) GetDeployments(appName string) ([]types.DeploymentEntry, error) 
 	return deployments[appName], nil
 }
 
+func (s *Store) GetPreviousDeployment(appName string) (*types.DeploymentEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	deployments := make(map[string][]types.DeploymentEntry)
+	s.readJSON("deployments.json", &deployments)
+	entries, ok := deployments[appName]
+	if !ok || len(entries) == 0 {
+		return nil, fmt.Errorf("no deployment history for app %q", appName)
+	}
+
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Status == string(types.DeployPrevious) {
+			return &entries[i], nil
+		}
+	}
+	return nil, fmt.Errorf("no previous deployment found for app %q", appName)
+}
+
+func (s *Store) GetDeploymentByID(appName, deploymentID string) (*types.DeploymentEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	deployments := make(map[string][]types.DeploymentEntry)
+	s.readJSON("deployments.json", &deployments)
+	entries, ok := deployments[appName]
+	if !ok {
+		return nil, fmt.Errorf("no deployment history for app %q", appName)
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].ID == deploymentID {
+			return &entries[i], nil
+		}
+	}
+	return nil, fmt.Errorf("deployment %q not found for app %q", deploymentID, appName)
+}
+
 func (s *Store) readJSON(name string, v interface{}) {
 	data, err := os.ReadFile(filepath.Join(s.dataDir, name))
 	if err == nil {
