@@ -182,3 +182,57 @@ func TestStubGetContainerPort(t *testing.T) {
 		t.Errorf("port = %d, want 0", port)
 	}
 }
+
+func TestLogOptionsBuildArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		opts     LogOptions
+		expected []string
+	}{
+		{
+			name:     "no options",
+			opts:     LogOptions{},
+			expected: []string{"logs", "tengiz-myapp"},
+		},
+		{
+			name:     "follow only",
+			opts:     LogOptions{Follow: true},
+			expected: []string{"logs", "-f", "tengiz-myapp"},
+		},
+		{
+			name:     "tail 50",
+			opts:     LogOptions{Tail: 50},
+			expected: []string{"logs", "--tail", "50", "tengiz-myapp"},
+		},
+		{
+			name:     "since 5m",
+			opts:     LogOptions{Since: "5m"},
+			expected: []string{"logs", "--since", "5m", "tengiz-myapp"},
+		},
+		{
+			name:     "until 2024-01-01T00:00:00Z",
+			opts:     LogOptions{Until: "2024-01-01T00:00:00Z"},
+			expected: []string{"logs", "--until", "2024-01-01T00:00:00Z", "tengiz-myapp"},
+		},
+		{
+			name:     "tail + follow + since",
+			opts:     LogOptions{Follow: true, Tail: 100, Since: "1h"},
+			expected: []string{"logs", "-f", "--tail", "100", "--since", "1h", "tengiz-myapp"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := buildLogArgs("tengiz-myapp", tt.opts)
+			if len(args) != len(tt.expected) {
+				t.Errorf("len mismatch: got %v, want %v", args, tt.expected)
+				return
+			}
+			for i := range args {
+				if args[i] != tt.expected[i] {
+					t.Errorf("arg[%d]: got %q, want %q", i, args[i], tt.expected[i])
+				}
+			}
+		})
+	}
+}
