@@ -1,8 +1,10 @@
 package builder
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,12 +18,12 @@ func New(dataDir string) *Builder {
 	return &Builder{dataDir: dataDir}
 }
 
-func (b *Builder) Build(ctx context.Context, dir string, appName string, detection *Detection, deploymentID string) (string, error) {
+func (b *Builder) Build(ctx context.Context, dir string, appName string, detection *Detection, deploymentID string) (string, string, error) {
 	if detection.Framework == FrameworkDocker {
 		return b.buildWithDockerfile(ctx, dir, appName, deploymentID)
 	}
 	if err := b.ensureDockerfile(dir, detection); err != nil {
-		return "", fmt.Errorf("generate dockerfile: %w", err)
+		return "", "", fmt.Errorf("generate dockerfile: %w", err)
 	}
 	return b.buildWithDockerfile(ctx, dir, appName, deploymentID)
 }
@@ -35,22 +37,26 @@ func (b *Builder) ensureDockerfile(dir string, detection *Detection) error {
 	return os.WriteFile(dfPath, []byte(content), 0644)
 }
 
-func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName string, deploymentID string) (string, error) {
+func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName string, deploymentID string) (string, string, error) {
 	tag := fmt.Sprintf("tengiz-apps/%s:%s", appName, deploymentID)
 	cmd := exec.CommandContext(ctx, "docker", "build", "-t", tag, dir)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	var logBuf bytes.Buffer
+	logWriter := io.MultiWriter(os.Stdout, &logBuf)
+	cmd.Stdout = logWriter
+	cmd.Stderr = logWriter
+
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("docker build: %w", err)
+		return "", logBuf.String(), fmt.Errorf("docker build: %w", err)
 	}
 
 	latestTag := fmt.Sprintf("tengiz-apps/%s:latest", appName)
 	tagCmd := exec.CommandContext(ctx, "docker", "tag", tag, latestTag)
 	if out, err := tagCmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("docker tag latest: %w\n%s", err, string(out))
+		return "", logBuf.String() + string(out), fmt.Errorf("docker tag latest: %w\n%s", err, string(out))
 	}
 
-	return tag, nil
+	return tag, logBuf.String(), nil
 }
 
 func generateDockerfile(d *Detection) string {

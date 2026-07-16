@@ -92,11 +92,21 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 	}
 
 	deploymentID := fmt.Sprintf("%d", time.Now().Unix())
-	imageTag, err := p.b.Build(ctx, cloneDir, appName, detection, deploymentID)
+	imageTag, buildLog, err := p.b.Build(ctx, cloneDir, appName, detection, deploymentID)
 	if err != nil {
+		fmt.Fprint(os.Stderr, buildLog)
 		return fmt.Errorf("build: %w", err)
 	}
 	log.Printf("[tengiz] built image: %s", imageTag)
+
+	if buildLog != "" {
+		if saveErr := p.store.SaveBuildLog(appName, deploymentID, buildLog); saveErr != nil {
+			log.Printf("[tengiz] warning: failed to save build log: %v", saveErr)
+		}
+		if pruneErr := p.store.PruneBuildLogs(appName, 5); pruneErr != nil {
+			log.Printf("[tengiz] warning: failed to prune build logs: %v", pruneErr)
+		}
+	}
 
 	if lookupErr != nil {
 		port, err := p.store.AllocatePort(appName)

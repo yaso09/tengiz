@@ -35,6 +35,7 @@ tengiz deploy [dir]   → detect, build, run container
 tengiz proxy [-a app] → start reverse proxy on :8080 (use -a to route all traffic to one app)
 tengiz ps             → list apps from Docker
 tengiz logs [-f] app  → stream logs
+tengiz build-logs <app> [deployment-id] → show build logs from previous deployments (--tail N)
 tengiz stop/start/rm  → lifecycle
 tengiz config set/get/unset/show → env vars
 tengiz domain add/remove/list   → custom domains

@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,44 @@ import (
 	"github.com/yaso09/tengiz/internal/config"
 	"github.com/yaso09/tengiz/internal/types"
 )
+
+func TestBuildLogsDirStructure(t *testing.T) {
+	dir := t.TempDir()
+	s := config.NewStore(dir)
+
+	if err := s.SaveBuildLog("testapp", "v1", "hello from build"); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := s.ListBuildLogs("testapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != "v1" {
+		t.Fatalf("expected [v1], got %v", ids)
+	}
+
+	content, err := s.GetBuildLog("testapp", "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content != "hello from build" {
+		t.Fatalf("expected 'hello from build', got %q", content)
+	}
+
+	// Verify file structure
+	logDir := filepath.Join(dir, "build-logs", "testapp")
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry in build-logs dir, got %d", len(entries))
+	}
+	if entries[0].Name() != "v1.log" {
+		t.Errorf("expected v1.log, got %s", entries[0].Name())
+	}
+}
 
 func captureOutput(fn func()) string {
 	old := os.Stdout
@@ -216,6 +255,16 @@ func TestVolumeAddWithReadOnly(t *testing.T) {
 	}
 	if !vols[0].ReadOnly {
 		t.Fatal("expected volume to be read-only")
+	}
+}
+
+func TestBuildLogsCmdRegistration(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"build-logs"})
+	if err != nil {
+		t.Fatal("build-logs command not registered")
+	}
+	if cmd == nil || cmd.Name() != "build-logs" {
+		t.Fatal("build-logs command not found")
 	}
 }
 

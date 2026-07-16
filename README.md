@@ -98,6 +98,21 @@ Show application logs.
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz build-logs <app> [deployment-id]`
+
+Show build logs from previous deployments.
+
+| Flag | Description |
+|------|-------------|
+| `--tail N` | Show only last N lines of the latest build log |
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name (required) |
+| `deployment-id` | Specific deployment ID to view (optional) |
+
+Without a deployment ID, lists all available build log IDs. With a deployment ID, shows the full build output. Use `--tail N` to show only the last N lines.
+
 ### `tengiz start <app>`
 
 Cold-start a stopped container.
