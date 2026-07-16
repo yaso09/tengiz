@@ -58,6 +58,7 @@ func init() {
 	volumeCmd.AddCommand(volumeListCmd)
 	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(rollbackCmd)
+	rootCmd.AddCommand(buildLogsCmd)
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
 }
@@ -790,6 +791,79 @@ var rollbackCmd = &cobra.Command{
 	},
 }
 
+var buildLogsCmd = &cobra.Command{
+	Use:   "build-logs <app> [deployment-id]",
+	Short: "Show build logs for an application",
+	Long: `Show build logs from previous deployments.
+
+Without a deployment ID, lists all available build logs.
+With a deployment ID, shows the full build output for that deployment.
+
+Use --tail N to show only the last N lines of the latest build log.`,
+	Args: cobra.RangeArgs(1, 2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		tailLines, _ := cmd.Flags().GetInt("tail")
+
+		store := config.NewStore(dataDir)
+
+		if len(args) == 2 {
+			deploymentID := args[1]
+			content, err := store.GetBuildLog(appName, deploymentID)
+			if err != nil {
+				return fmt.Errorf("build log for %s@%s: %w", appName, deploymentID, err)
+			}
+			if tailLines > 0 {
+				lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+				if len(lines) > tailLines {
+					lines = lines[len(lines)-tailLines:]
+				}
+				fmt.Print(strings.Join(lines, "\n"))
+				if !strings.HasSuffix(content, "\n") {
+					fmt.Println()
+				}
+			} else {
+				fmt.Print(content)
+				if !strings.HasSuffix(content, "\n") {
+					fmt.Println()
+				}
+			}
+			return nil
+		}
+
+		ids, err := store.ListBuildLogs(appName)
+		if err != nil {
+			return fmt.Errorf("list build logs: %w", err)
+		}
+		if len(ids) == 0 {
+			fmt.Printf("No build logs for %s.\n", appName)
+			return nil
+		}
+
+		if tailLines > 0 {
+			content, err := store.GetBuildLog(appName, ids[0])
+			if err != nil {
+				return fmt.Errorf("get latest build log: %w", err)
+			}
+			lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+			if len(lines) > tailLines {
+				lines = lines[len(lines)-tailLines:]
+			}
+			fmt.Print(strings.Join(lines, "\n"))
+			if !strings.HasSuffix(content, "\n") {
+				fmt.Println()
+			}
+			return nil
+		}
+
+		fmt.Printf("Build logs for %s:\n", appName)
+		for _, id := range ids {
+			fmt.Printf("  %s\n", id)
+		}
+		return nil
+	},
+}
+
 var gitCmd = &cobra.Command{
 	Use:   "git",
 	Short: "Manage git deployment configuration",
@@ -952,6 +1026,7 @@ func Execute() {
 	proxyCmd.Flags().IntP("port", "p", 8080, "proxy listen port")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
+	buildLogsCmd.Flags().Int("tail", 0, "show only last N lines of the latest build log")
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

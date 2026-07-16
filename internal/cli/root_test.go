@@ -258,6 +258,16 @@ func TestVolumeAddWithReadOnly(t *testing.T) {
 	}
 }
 
+func TestBuildLogsCmdRegistration(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"build-logs"})
+	if err != nil {
+		t.Fatal("build-logs command not registered")
+	}
+	if cmd == nil || cmd.Name() != "build-logs" {
+		t.Fatal("build-logs command not found")
+	}
+}
+
 func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	configCmd, _, err := rootCmd.Find([]string{"config"})
 	if err != nil {
