@@ -117,6 +117,19 @@ Show build logs from previous deployments.
 
 Without a deployment ID, lists all available build log IDs. With a deployment ID, shows the full build output. Use `--tail N` to show only the last N lines.
 
+### `tengiz run <app> <command> [args...]`
+
+Run a one-off command in a temporary container using the deployed image. Useful for database migrations, interactive consoles, and data imports. The container is automatically removed after the command exits. Use `-t` for interactive TTY (e.g., `tengiz run myapp -t -- sh`).
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name (required) |
+| `command` | Command to execute (required) |
+
+| Flag | Description |
+|------|-------------|
+| `-t, --interactive` | Attach with TTY (docker `-it`) |
+
 ### `tengiz start <app>`
 
 Cold-start a stopped container.
