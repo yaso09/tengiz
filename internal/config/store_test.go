@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -381,5 +383,73 @@ func TestGetDeploymentByID(t *testing.T) {
 	_, err = s.GetDeploymentByID("testapp", "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent ID")
+	}
+}
+
+func TestSaveAndGetBuildLog(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	if err := s.SaveBuildLog("testapp", "v123", "build output here"); err != nil {
+		t.Fatalf("SaveBuildLog() error = %v", err)
+	}
+
+	logs, err := s.ListBuildLogs("testapp")
+	if err != nil {
+		t.Fatalf("ListBuildLogs() error = %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 build log, got %d", len(logs))
+	}
+	if logs[0] != "v123" {
+		t.Errorf("expected deployment ID 'v123', got %q", logs[0])
+	}
+}
+
+func TestGetBuildLogContent(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.SaveBuildLog("testapp", "v1", "line1\nline2\nline3\n")
+
+	content, err := s.GetBuildLog("testapp", "v1")
+	if err != nil {
+		t.Fatalf("GetBuildLog() error = %v", err)
+	}
+	if !strings.Contains(content, "line1") {
+		t.Errorf("expected content to contain 'line1', got %q", content)
+	}
+}
+
+func TestGetBuildLogNotFound(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	_, err := s.GetBuildLog("testapp", "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent build log")
+	}
+}
+
+func TestPruneBuildLogs(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	for i := 0; i < 6; i++ {
+		id := fmt.Sprintf("v%d", i+1)
+		s.SaveBuildLog("testapp", id, "content")
+		time.Sleep(1 * time.Millisecond)
+	}
+
+	if err := s.PruneBuildLogs("testapp", 3); err != nil {
+		t.Fatalf("PruneBuildLogs() error = %v", err)
+	}
+
+	logs, err := s.ListBuildLogs("testapp")
+	if err != nil {
+		t.Fatalf("ListBuildLogs() error = %v", err)
+	}
+	if len(logs) > 3 {
+		t.Errorf("expected at most 3 build logs after prune, got %d: %v", len(logs), logs)
 	}
 }

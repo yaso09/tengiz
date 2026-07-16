@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/yaso09/tengiz/internal/types"
@@ -381,4 +383,99 @@ func (s *Store) writeJSON(name string, v interface{}) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(s.dataDir, name), data, 0644)
+}
+
+func (s *Store) buildLogDir(appName string) string {
+	return filepath.Join(s.dataDir, "build-logs", appName)
+}
+
+func (s *Store) SaveBuildLog(appName, deploymentID, content string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dir := s.buildLogDir(appName)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("mkdir build-logs: %w", err)
+	}
+
+	path := filepath.Join(dir, fmt.Sprintf("%s.log", deploymentID))
+	return os.WriteFile(path, []byte(content), 0644)
+}
+
+func (s *Store) GetBuildLog(appName, deploymentID string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	path := filepath.Join(s.buildLogDir(appName), fmt.Sprintf("%s.log", deploymentID))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read build log: %w", err)
+	}
+	return string(data), nil
+}
+
+func (s *Store) ListBuildLogs(appName string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dir := s.buildLogDir(appName)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("list build logs: %w", err)
+	}
+
+	var ids []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".log") {
+			ids = append(ids, strings.TrimSuffix(e.Name(), ".log"))
+		}
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
+	return ids, nil
+}
+
+func (s *Store) PruneBuildLogs(appName string, keep int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dir := s.buildLogDir(appName)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("prune list: %w", err)
+	}
+
+	type logFile struct {
+		name string
+		info os.FileInfo
+	}
+	var files []logFile
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, logFile{name: e.Name(), info: info})
+	}
+
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].info.ModTime().Before(files[j].info.ModTime())
+	})
+
+	if len(files) <= keep {
+		return nil
+	}
+
+	for _, f := range files[:len(files)-keep] {
+		os.Remove(filepath.Join(dir, f.name))
+	}
+	return nil
 }
