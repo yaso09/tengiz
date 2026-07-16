@@ -7,6 +7,14 @@ import (
 	"github.com/yaso09/tengiz/internal/types"
 )
 
+type LogOptions struct {
+	Follow bool
+	Since  string
+	Until  string
+	Tail   int
+	Grep   string
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
@@ -21,7 +29,7 @@ type Manager interface {
 	IsActive(ctx context.Context, name string) (bool, error)
 	GetContainerPort(ctx context.Context, name string, suffix string) (int, error)
 	List(ctx context.Context) ([]types.AppStatus, error)
-	Logs(ctx context.Context, name string, follow bool, tail int, since string, grep string) (io.ReadCloser, error)
+	Logs(ctx context.Context, name string, opts LogOptions) (io.ReadCloser, error)
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 }
@@ -64,7 +72,7 @@ func (m *stubManager) List(ctx context.Context) ([]types.AppStatus, error) {
 	return nil, nil
 }
 
-func (m *stubManager) Logs(ctx context.Context, name string, follow bool, tail int, since string, grep string) (io.ReadCloser, error) {
+func (m *stubManager) Logs(ctx context.Context, name string, opts LogOptions) (io.ReadCloser, error) {
 	return nil, nil
 }
 
