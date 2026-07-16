@@ -94,6 +94,17 @@ func (m *mockRTForDeploy) List(ctx context.Context) ([]types.AppStatus, error) {
 func (m *mockRTForDeploy) Logs(ctx context.Context, name string, opts runtime.LogOptions) (io.ReadCloser, error) { return nil, nil }
 func (m *mockRTForDeploy) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
 func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
+func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
+func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
+func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+
+func TestMockRTForDeployImplementsManager(t *testing.T) {
+	var m runtime.Manager = &mockRTForDeploy{}
+	if m == nil {
+		t.Fatal("mockRTForDeploy does not implement Manager")
+	}
+}
 
 func TestDeployZeroDowntimeCreatesVersionedContainer(t *testing.T) {
 	var m interface{} = &mockRTForDeploy{}
