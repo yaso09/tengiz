@@ -127,6 +127,87 @@ func TestResourceArgs(t *testing.T) {
 	}
 }
 
+func TestVolumeArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		volumes  []types.VolumeMount
+		expected []string
+	}{
+		{
+			name:     "nil volumes",
+			volumes:  nil,
+			expected: nil,
+		},
+		{
+			name:     "empty volumes",
+			volumes:  []types.VolumeMount{},
+			expected: nil,
+		},
+		{
+			name:     "single host volume",
+			volumes:  []types.VolumeMount{{HostPath: "/data", ContainerPath: "/app/data"}},
+			expected: []string{"-v", "/data:/app/data"},
+		},
+		{
+			name:     "read-only volume",
+			volumes:  []types.VolumeMount{{HostPath: "/data", ContainerPath: "/app/data", ReadOnly: "true"}},
+			expected: []string{"-v", "/data:/app/data:ro"},
+		},
+		{
+			name:     "docker named volume",
+			volumes:  []types.VolumeMount{{HostPath: "mydata", ContainerPath: "/var/lib/data"}},
+			expected: []string{"-v", "mydata:/var/lib/data"},
+		},
+		{
+			name: "multiple volumes",
+			volumes: []types.VolumeMount{
+				{HostPath: "/data", ContainerPath: "/app/data"},
+				{HostPath: "/logs", ContainerPath: "/app/logs", ReadOnly: "true"},
+			},
+			expected: []string{"-v", "/data:/app/data", "-v", "/logs:/app/logs:ro"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := volumeArgs(tt.volumes)
+			if len(got) != len(tt.expected) {
+				t.Fatalf("volumeArgs() = %v (len=%d), want %v (len=%d)", got, len(got), tt.expected, len(tt.expected))
+			}
+			for i := range got {
+				if got[i] != tt.expected[i] {
+					t.Fatalf("volumeArgs()[%d] = %q, want %q", i, got[i], tt.expected[i])
+				}
+			}
+		})
+	}
+}
+
+func TestCreateWithVolumes(t *testing.T) {
+	var m Manager = NewStub()
+	cfg := &types.AppConfig{
+		Name: "testapp",
+		Volumes: []types.VolumeMount{
+			{HostPath: "/data", ContainerPath: "/app/data"},
+		},
+	}
+	if err := m.Create(context.Background(), cfg, "test:latest", 9000); err != nil {
+		t.Fatalf("Create with volumes: %v", err)
+	}
+}
+
+func TestCreateVersionedWithVolumes(t *testing.T) {
+	var m Manager = NewStub()
+	cfg := &types.AppConfig{
+		Name: "testapp",
+		Volumes: []types.VolumeMount{
+			{HostPath: "/data", ContainerPath: "/app/data"},
+		},
+	}
+	if err := m.CreateVersioned(context.Background(), cfg, "test:latest", 9001, "v2"); err != nil {
+		t.Fatalf("CreateVersioned with volumes: %v", err)
+	}
+}
+
 func TestStubGetContainerPort(t *testing.T) {
 	m := NewStub()
 	port, err := m.GetContainerPort(context.Background(), "testapp", "v2")
