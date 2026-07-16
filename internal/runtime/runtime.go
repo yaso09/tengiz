@@ -32,6 +32,7 @@ type Manager interface {
 	Logs(ctx context.Context, name string, opts LogOptions) (io.ReadCloser, error)
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
+	RunOnce(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string) error
 }
 
 type stubManager struct{}
@@ -101,5 +102,9 @@ func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
 }
 
 func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
+	return nil
+}
+
+func (m *stubManager) RunOnce(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string) error {
 	return nil
 }

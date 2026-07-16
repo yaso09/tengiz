@@ -226,6 +226,15 @@ func TestLogOptionsBuildArgs(t *testing.T) {
 	}
 }
 
+func TestStubRunOnce(t *testing.T) {
+	m := NewStub()
+	cfg := &types.AppConfig{Name: "testapp", Port: 3000}
+	err := m.RunOnce(context.Background(), cfg, "test:latest", []string{"echo", "hello"})
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+}
+
 func TestStubGetContainerPort(t *testing.T) {
 	m := NewStub()
 	port, err := m.GetContainerPort(context.Background(), "testapp", "v2")
