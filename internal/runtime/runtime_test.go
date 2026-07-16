@@ -236,3 +236,11 @@ func TestStubGetContainerPort(t *testing.T) {
 		t.Errorf("port = %d, want 0", port)
 	}
 }
+
+func TestStubRunOneOffReturnsNil(t *testing.T) {
+	m := NewStub()
+	err := m.RunOneOff(context.Background(), &types.AppConfig{Name: "test"}, "tengiz-apps/test:latest", []string{"echo", "hi"}, RunOneOffOptions{})
+	if err != nil {
+		t.Fatalf("stub RunOneOff returned error: %v", err)
+	}
+}
