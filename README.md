@@ -515,29 +515,6 @@ tengiz/
 │   └── daily-analysis.yml   # Daily competitor analysis
 ```
 
-### Installer (TUI)
-
-A Textual-based TUI installer for downloading and installing Tengiz binaries:
-
-```bash
-cd installer
-# Install in development mode with UV (Recommended)
-uv pip install -e .
-# Or with pip
-pip install -e .
-# Then run the installer (command available in current environment)
-tengiz-installer
-```
-
-Lists both stable releases (from GitHub Releases) and per-commit builds (from CI artifacts). Auto-detects OS/arch and lets you download + install with one click.
-
-### CI Pipeline
-
-Every commit triggers:
-1. `go vet` — static analysis
-2. `go test` — test suite
-3. Cross-platform build (linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64)
-
 ## License
 
 GPL-3.0
