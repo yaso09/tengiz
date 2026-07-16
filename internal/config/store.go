@@ -309,6 +309,28 @@ func (s *Store) GetDeployments(appName string) ([]types.DeploymentEntry, error) 
 	return deployments[appName], nil
 }
 
+func (s *Store) UpdateDeploymentStatus(appName, deploymentID, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	deployments := make(map[string][]types.DeploymentEntry)
+	s.readJSON("deployments.json", &deployments)
+	entries := deployments[appName]
+	found := false
+	for i := range entries {
+		if entries[i].ID == deploymentID {
+			entries[i].Status = status
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("deployment %q not found for app %q", deploymentID, appName)
+	}
+	deployments[appName] = entries
+	return s.writeJSON("deployments.json", deployments)
+}
+
 func (s *Store) GetPreviousDeployment(appName string) (*types.DeploymentEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

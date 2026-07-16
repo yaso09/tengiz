@@ -344,6 +344,29 @@ func TestGetPreviousDeployment(t *testing.T) {
 	}
 }
 
+func TestUpdateDeploymentStatus(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	s.AddDeployment("testapp", types.DeploymentEntry{
+		ID: "v1", ImageTag: "img:v1", Port: 9001, Status: string(types.DeployActive),
+	})
+
+	if err := s.UpdateDeploymentStatus("testapp", "v1", string(types.DeployRolled)); err != nil {
+		t.Fatalf("UpdateDeploymentStatus() error = %v", err)
+	}
+
+	deps, _ := s.GetDeployments("testapp")
+	if deps[0].Status != string(types.DeployRolled) {
+		t.Errorf("status = %q, want %q", deps[0].Status, types.DeployRolled)
+	}
+
+	err := s.UpdateDeploymentStatus("testapp", "v999", "rolled")
+	if err == nil {
+		t.Fatal("expected error for non-existent deployment")
+	}
+}
+
 func TestGetDeploymentByID(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)
