@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -448,7 +449,34 @@ func buildLogArgs(containerName string, opts LogOptions) []string {
 	return args
 }
 
+func buildRunArgs(cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) []string {
+	args := []string{"run", "--rm"}
+	if opts.Interactive {
+		args = append(args, "-it")
+	}
+	args = append(args, "--label", fmt.Sprintf("%s=%s", labelKey, cfg.Name))
+	args = append(args, envArgs(cfg.Env)...)
+	args = append(args, resourceArgs(cfg.Resources)...)
+	args = append(args, volumeArgs(cfg.Volumes)...)
+	args = append(args, imageTag)
+	args = append(args, cmd...)
+	return args
+}
+
 func (r *dockerRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
+	args := buildRunArgs(cfg, imageTag, cmd, opts)
+	dcmd := exec.CommandContext(ctx, "docker", args...)
+	dcmd.Stdout = os.Stdout
+	dcmd.Stderr = os.Stderr
+	if opts.Interactive {
+		dcmd.Stdin = os.Stdin
+	}
+	if err := dcmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("docker run: %w", err)
+	}
 	return nil
 }
 
