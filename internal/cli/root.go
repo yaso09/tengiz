@@ -165,8 +165,10 @@ var deployCmd = &cobra.Command{
 			cfg.Port = detection.InternalPort
 		}
 
+		deploymentID := fmt.Sprintf("%d", time.Now().Unix())
+
 		b := builder.New(dataDir)
-		imageTag, err := b.Build(context.Background(), projectRoot, cfg.Name, detection)
+		imageTag, err := b.Build(context.Background(), projectRoot, cfg.Name, detection, deploymentID)
 		if err != nil {
 			return fmt.Errorf("build: %w", err)
 		}
@@ -202,6 +204,14 @@ var deployCmd = &cobra.Command{
 				Config:   *cfg,
 			})
 
+			store.AddDeployment(cfg.Name, types.DeploymentEntry{
+				ID:        deploymentID,
+				ImageTag:  imageTag,
+				Port:      port,
+				CreatedAt: time.Now(),
+				Status:    string(types.DeployActive),
+			})
+
 			if err := proxy.RegisterRouteWithProxy(cfg.Name, port); err != nil {
 				log.Printf("[tengiz] proxy not available (route will be registered on proxy start): %v", err)
 			}
@@ -212,7 +222,6 @@ var deployCmd = &cobra.Command{
 		}
 
 		// Zero-downtime deploy: blue/green
-		deploymentID := fmt.Sprintf("%d", time.Now().Unix())
 
 		// Allocate a second port for the new container
 		newPort, err := store.AllocatePort(cfg.Name)

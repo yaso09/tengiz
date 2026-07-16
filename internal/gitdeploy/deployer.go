@@ -91,7 +91,8 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		}
 	}
 
-	imageTag, err := p.b.Build(ctx, cloneDir, appName, detection)
+	deploymentID := fmt.Sprintf("%d", time.Now().Unix())
+	imageTag, err := p.b.Build(ctx, cloneDir, appName, detection, deploymentID)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
 	}
@@ -108,6 +109,14 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 			return fmt.Errorf("create: %w", err)
 		}
 		log.Printf("[tengiz] running on port %d", port)
+
+		p.store.AddDeployment(appName, types.DeploymentEntry{
+			ID:        deploymentID,
+			ImageTag:  imageTag,
+			Port:      port,
+			CreatedAt: time.Now(),
+			Status:    string(types.DeployActive),
+		})
 
 		p.store.SaveApp(types.AppEntry{
 			Name:        appName,
@@ -128,7 +137,8 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		return nil
 	}
 
-	deploymentID := fmt.Sprintf("%d", time.Now().Unix())
+	// Zero-downtime deploy path: generate a fresh deployment ID for this new deploy
+	deploymentID = fmt.Sprintf("%d", time.Now().Unix())
 	newPort, err := p.store.AllocatePort(appName)
 	if err != nil {
 		return fmt.Errorf("port allocation: %w", err)
