@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/yaso09/tengiz/internal/config"
+	"github.com/yaso09/tengiz/internal/runtime"
 	"github.com/yaso09/tengiz/internal/types"
 )
 
@@ -89,7 +90,7 @@ func (m *mockRTForDeploy) RemoveBySuffix(ctx context.Context, name string, suffi
 func (m *mockRTForDeploy) IsActive(ctx context.Context, name string) (bool, error) { return true, nil }
 func (m *mockRTForDeploy) GetContainerPort(ctx context.Context, name string, suffix string) (int, error) { return 0, nil }
 func (m *mockRTForDeploy) List(ctx context.Context) ([]types.AppStatus, error) { return nil, nil }
-func (m *mockRTForDeploy) Logs(ctx context.Context, name string, follow bool) (io.ReadCloser, error) { return nil, nil }
+func (m *mockRTForDeploy) Logs(ctx context.Context, name string, opts runtime.LogOptions) (io.ReadCloser, error) { return nil, nil }
 func (m *mockRTForDeploy) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
 func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
 
@@ -284,6 +285,31 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	for name, found := range expected {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
+		}
+	}
+}
+
+func TestLogsCmdFlagParsing(t *testing.T) {
+	rootCmd.SetArgs([]string{"logs", "--help"})
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := rootCmd.Execute()
+
+	w.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+
+	if err != nil {
+		t.Fatalf("logs --help failed: %v", err)
+	}
+
+	helpText := buf.String()
+	for _, flag := range []string{"--since", "--until", "--tail", "--grep", "--follow", "-f"} {
+		if !strings.Contains(helpText, flag) {
+			t.Errorf("help text missing flag %q", flag)
 		}
 	}
 }
