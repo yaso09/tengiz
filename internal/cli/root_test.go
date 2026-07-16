@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/yaso09/tengiz/internal/config"
+	"github.com/yaso09/tengiz/internal/runtime"
 	"github.com/yaso09/tengiz/internal/types"
 )
 
@@ -90,7 +91,7 @@ func (m *mockRTForDeploy) RemoveBySuffix(ctx context.Context, name string, suffi
 func (m *mockRTForDeploy) IsActive(ctx context.Context, name string) (bool, error) { return true, nil }
 func (m *mockRTForDeploy) GetContainerPort(ctx context.Context, name string, suffix string) (int, error) { return 0, nil }
 func (m *mockRTForDeploy) List(ctx context.Context) ([]types.AppStatus, error) { return nil, nil }
-func (m *mockRTForDeploy) Logs(ctx context.Context, name string, follow bool, tail int, since string, grep string) (io.ReadCloser, error) { return nil, nil }
+func (m *mockRTForDeploy) Logs(ctx context.Context, name string, opts runtime.LogOptions) (io.ReadCloser, error) { return nil, nil }
 func (m *mockRTForDeploy) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
 func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
 
@@ -278,6 +279,7 @@ func TestLogsCmdWithFlags(t *testing.T) {
 		follow, _ := cmd.Flags().GetBool("follow")
 		tail, _ := cmd.Flags().GetInt("tail")
 		since, _ := cmd.Flags().GetString("since")
+		until, _ := cmd.Flags().GetString("until")
 		grep, _ := cmd.Flags().GetString("grep")
 
 		if args[0] != "testapp" {
@@ -292,6 +294,9 @@ func TestLogsCmdWithFlags(t *testing.T) {
 		if since != "5m" {
 			t.Errorf("since = %q, want %q", since, "5m")
 		}
+		if until != "10m" {
+			t.Errorf("until = %q, want %q", until, "10m")
+		}
 		if grep != "error" {
 			t.Errorf("grep = %q, want %q", grep, "error")
 		}
@@ -299,13 +304,38 @@ func TestLogsCmdWithFlags(t *testing.T) {
 		return nil
 	}
 
-	rootCmd.SetArgs([]string{"logs", "testapp", "--tail", "50", "--since", "5m", "--grep", "error"})
+	rootCmd.SetArgs([]string{"logs", "testapp", "--tail", "50", "--since", "5m", "--until", "10m", "--grep", "error"})
 	err := rootCmd.Execute()
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	if !called {
 		t.Fatal("logsCmd.RunE was not called")
+	}
+}
+
+func TestLogsCmdFlagParsing(t *testing.T) {
+	rootCmd.SetArgs([]string{"logs", "--help"})
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := rootCmd.Execute()
+
+	w.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+
+	if err != nil {
+		t.Fatalf("logs --help failed: %v", err)
+	}
+
+	helpText := buf.String()
+	for _, flag := range []string{"--since", "--until", "--tail", "--grep", "--follow", "-f"} {
+		if !strings.Contains(helpText, flag) {
+			t.Errorf("help text missing flag %q", flag)
+		}
 	}
 }
 

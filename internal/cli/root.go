@@ -63,8 +63,9 @@ func init() {
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
 	logsCmd.Flags().Int("tail", 0, "show only last N lines of logs (0 = all)")
-	logsCmd.Flags().String("since", "", "show logs since timestamp (e.g. 2024-01-01T00:00:00Z or 5m)")
-	logsCmd.Flags().String("grep", "", "filter logs with a case-sensitive pattern")
+	logsCmd.Flags().String("since", "", "show logs since timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
+	logsCmd.Flags().String("until", "", "show logs before timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
+	logsCmd.Flags().String("grep", "", "filter logs with a case-sensitive pattern (client-side)")
 }
 
 var rootCmd = &cobra.Command{
@@ -471,14 +472,23 @@ var logsCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		follow, _ := cmd.Flags().GetBool("follow")
-		tail, _ := cmd.Flags().GetInt("tail")
 		since, _ := cmd.Flags().GetString("since")
+		until, _ := cmd.Flags().GetString("until")
+		tail, _ := cmd.Flags().GetInt("tail")
 		grep, _ := cmd.Flags().GetString("grep")
+
 		rt, err := runtime.NewDocker()
 		if err != nil {
 			return err
 		}
-		reader, err := rt.Logs(context.Background(), args[0], follow, tail, since, grep)
+		opts := runtime.LogOptions{
+			Follow: follow,
+			Since:  since,
+			Until:  until,
+			Tail:   tail,
+			Grep:   grep,
+		}
+		reader, err := rt.Logs(context.Background(), args[0], opts)
 		if err != nil {
 			return err
 		}
