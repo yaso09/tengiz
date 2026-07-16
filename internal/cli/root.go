@@ -428,6 +428,13 @@ var rmCmd = &cobra.Command{
 			return err
 		}
 		store.RemoveApp(args[0])
+		// List volumes and notify user to clean them up
+		if vols, err := store.ListVolumes(args[0]); err == nil && len(vols) > 0 {
+			fmt.Printf("[tengiz] warning: %d volume(s) are still mounted. Remove with:\n", len(vols))
+			for _, v := range vols {
+				fmt.Printf("  docker volume rm %s  (or: rm -rf %s)\n", v.HostPath, v.HostPath)
+			}
+		}
 		fmt.Printf("[tengiz] removed: %s\n", args[0])
 		return nil
 	},
