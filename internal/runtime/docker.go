@@ -448,6 +448,10 @@ func buildLogArgs(containerName string, opts LogOptions) []string {
 	return args
 }
 
+func (r *dockerRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
+	return nil
+}
+
 func (r *dockerRuntime) Logs(ctx context.Context, name string, opts LogOptions) (io.ReadCloser, error) {
 	containerName := fmt.Sprintf("tengiz-%s", name)
 	args := buildLogArgs(containerName, opts)

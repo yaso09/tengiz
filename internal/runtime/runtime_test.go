@@ -236,3 +236,21 @@ func TestStubGetContainerPort(t *testing.T) {
 		t.Errorf("port = %d, want 0", port)
 	}
 }
+
+func TestStubRun(t *testing.T) {
+	m := NewStub()
+	cfg := &types.AppConfig{Name: "testapp"}
+	err := m.Run(context.Background(), cfg, "tengiz-apps/testapp:latest", []string{"echo", "hello"}, RunOptions{})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+}
+
+func TestStubRunInteractive(t *testing.T) {
+	m := NewStub()
+	cfg := &types.AppConfig{Name: "testapp", Env: map[string]string{"FOO": "bar"}}
+	err := m.Run(context.Background(), cfg, "tengiz-apps/testapp:v1", []string{"bash"}, RunOptions{Interactive: true})
+	if err != nil {
+		t.Fatalf("Run(interactive) error = %v", err)
+	}
+}
