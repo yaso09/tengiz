@@ -265,6 +265,7 @@ Not: ✅ işaretli özellikler implemente edilmiştir.
 - **Source:** Dokku
 - **Description:** App image'ından geçici container başlatıp komut çalıştırma (`dokku run <cmd>`). Exit'te container otomatik temizlenir. Detached mod, log görüntüleme, stop gibi alt komutlar.
 - **Why add to Tengiz:** Database migration (`tengiz run -- python manage.py migrate`), Rails console, data import gibi işlemler için kritik. Bu olmadan kullanıcılar deploy sonrası migration'ları manuel Docker komutlarıyla yapmak zorunda.
+- **Status:** ✅ Implemented (2026-07-16)
 - **Detected:** 2026-07-14
 
 ## Custom Docker Options

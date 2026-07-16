@@ -32,6 +32,7 @@ go vet ./...                  # static analysis
 ```
 tengiz init [name]    → create .tengiz.yaml
 tengiz deploy [dir]   → detect, build, run container
+tengiz run <app> [-- cmd] → one-off command in ephemeral container
 tengiz proxy [-a app] → start reverse proxy on :8080 (use -a to route all traffic to one app)
 tengiz ps             → list apps from Docker
 tengiz logs [-f] app  → stream logs

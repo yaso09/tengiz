@@ -67,6 +67,29 @@ Build and deploy an application with zero-downtime.
 
 Detects the framework, builds a Docker image, and deploys. On first deploy, allocates a port (9000-9999), starts the container. On subsequent deploys, performs a **blue/green switch**: new versioned container starts on a new port, readiness is checked, traffic is routed to the new container atomically via the proxy admin API, then the old container is stopped and removed. Deployment history is recorded in `~/.tengiz/deployments.json`. If no `.tengiz.yaml` exists, uses the directory name as app name with serverless defaults.
 
+### `tengiz run <app> [-- command args...]`
+
+Execute a one-off command in a temporary container based on a deployed app's image. The container is automatically removed after the command exits. Useful for database migrations, console access, data import, etc.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name (required) |
+| `command args...` | Command and arguments to execute (use `--` to separate from flags) |
+
+| Flag | Description |
+|------|-------------|
+| `--build` | Rebuild the image before running |
+| `--env` | Set environment variables (`KEY=VALUE`, repeatable) |
+
+The container's exit code is returned, enabling shell chaining: `tengiz run myapp -- migrate && tengiz run myapp -- seed`. Uses `docker run --rm -i` — no port allocation, no proxy interaction.
+
+Examples:
+```bash
+tengiz run myapp -- python manage.py migrate
+tengiz run myapp -- rails console
+tengiz run --build myapp -- npm run seed
+```
+
 ### `tengiz proxy [-a <app>] [-p <port>]`
 
 Start the reverse proxy.
