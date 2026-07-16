@@ -127,6 +127,13 @@ func TestResourceArgs(t *testing.T) {
 	}
 }
 
+func TestStartWithVolumes(t *testing.T) {
+	var m Manager = NewStub()
+	if err := m.Start(context.Background(), "testapp"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+}
+
 func TestVolumeArgs(t *testing.T) {
 	tests := []struct {
 		name     string
