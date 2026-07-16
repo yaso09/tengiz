@@ -172,6 +172,86 @@ func TestStubCreateFromImage(t *testing.T) {
 	}
 }
 
+func TestLogsArgs(t *testing.T) {
+	tests := []struct {
+		name          string
+		containerName string
+		follow        bool
+		tail          int
+		since         string
+		grep          string
+		expected      []string
+	}{
+		{
+			name:          "no flags",
+			containerName: "tengiz-myapp",
+			follow:        false,
+			tail:          0,
+			since:         "",
+			grep:          "",
+			expected:      []string{"logs", "tengiz-myapp"},
+		},
+		{
+			name:          "follow only",
+			containerName: "tengiz-myapp",
+			follow:        true,
+			tail:          0,
+			since:         "",
+			grep:          "",
+			expected:      []string{"logs", "-f", "tengiz-myapp"},
+		},
+		{
+			name:          "tail only",
+			containerName: "tengiz-myapp",
+			follow:        false,
+			tail:          50,
+			since:         "",
+			grep:          "",
+			expected:      []string{"logs", "--tail", "50", "tengiz-myapp"},
+		},
+		{
+			name:          "since only",
+			containerName: "tengiz-myapp",
+			follow:        false,
+			tail:          0,
+			since:         "2024-01-01T00:00:00Z",
+			grep:          "",
+			expected:      []string{"logs", "--since", "2024-01-01T00:00:00Z", "tengiz-myapp"},
+		},
+		{
+			name:          "grep only",
+			containerName: "tengiz-myapp",
+			follow:        false,
+			tail:          0,
+			since:         "",
+			grep:          "error",
+			expected:      []string{"logs", "--grep", "error", "tengiz-myapp"},
+		},
+		{
+			name:          "all flags",
+			containerName: "tengiz-myapp",
+			follow:        true,
+			tail:          100,
+			since:         "5m",
+			grep:          "ERROR",
+			expected:      []string{"logs", "-f", "--tail", "100", "--since", "5m", "--grep", "ERROR", "tengiz-myapp"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := logsArgs(tt.containerName, tt.follow, tt.tail, tt.since, tt.grep)
+			if len(got) != len(tt.expected) {
+				t.Fatalf("logsArgs() = %v (len=%d), want %v (len=%d)", got, len(got), tt.expected, len(tt.expected))
+			}
+			for i := range got {
+				if got[i] != tt.expected[i] {
+					t.Fatalf("logsArgs()[%d] = %q, want %q", i, got[i], tt.expected[i])
+				}
+			}
+		})
+	}
+}
+
 func TestStubGetContainerPort(t *testing.T) {
 	m := NewStub()
 	port, err := m.GetContainerPort(context.Background(), "testapp", "v2")

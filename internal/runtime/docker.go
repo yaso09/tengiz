@@ -428,13 +428,27 @@ func (r *dockerRuntime) List(ctx context.Context) ([]types.AppStatus, error) {
 	return apps, nil
 }
 
-func (r *dockerRuntime) Logs(ctx context.Context, name string, follow bool) (io.ReadCloser, error) {
-	containerName := fmt.Sprintf("tengiz-%s", name)
+func logsArgs(containerName string, follow bool, tail int, since string, grep string) []string {
 	args := []string{"logs"}
 	if follow {
 		args = append(args, "-f")
 	}
+	if tail > 0 {
+		args = append(args, "--tail", fmt.Sprintf("%d", tail))
+	}
+	if since != "" {
+		args = append(args, "--since", since)
+	}
+	if grep != "" {
+		args = append(args, "--grep", grep)
+	}
 	args = append(args, containerName)
+	return args
+}
+
+func (r *dockerRuntime) Logs(ctx context.Context, name string, follow bool, tail int, since string, grep string) (io.ReadCloser, error) {
+	containerName := fmt.Sprintf("tengiz-%s", name)
+	args := logsArgs(containerName, follow, tail, since, grep)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

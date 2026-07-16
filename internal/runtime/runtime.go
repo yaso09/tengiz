@@ -21,7 +21,7 @@ type Manager interface {
 	IsActive(ctx context.Context, name string) (bool, error)
 	GetContainerPort(ctx context.Context, name string, suffix string) (int, error)
 	List(ctx context.Context) ([]types.AppStatus, error)
-	Logs(ctx context.Context, name string, follow bool) (io.ReadCloser, error)
+	Logs(ctx context.Context, name string, follow bool, tail int, since string, grep string) (io.ReadCloser, error)
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 }
@@ -64,7 +64,7 @@ func (m *stubManager) List(ctx context.Context) ([]types.AppStatus, error) {
 	return nil, nil
 }
 
-func (m *stubManager) Logs(ctx context.Context, name string, follow bool) (io.ReadCloser, error) {
+func (m *stubManager) Logs(ctx context.Context, name string, follow bool, tail int, since string, grep string) (io.ReadCloser, error) {
 	return nil, nil
 }
 
