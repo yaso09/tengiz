@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
@@ -51,6 +52,10 @@ func init() {
 	rootCmd.AddCommand(webhookCmd)
 	gitCmd.AddCommand(gitConnectCmd)
 	gitCmd.AddCommand(gitDisconnectCmd)
+	volumeCmd.AddCommand(volumeAddCmd)
+	volumeCmd.AddCommand(volumeRemoveCmd)
+	volumeCmd.AddCommand(volumeListCmd)
+	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(gitCmd)
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
@@ -604,6 +609,96 @@ var domainListCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+var volumeCmd = &cobra.Command{
+	Use:   "volume",
+	Short: "Manage persistent storage volumes for applications",
+}
+
+var volumeAddCmd = &cobra.Command{
+	Use:   "add <app> <host_path>:<container_path>[:ro]",
+	Short: "Mount a volume to an application",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		spec := args[1]
+
+		hostPath, containerPath, readOnly := parseVolumeSpec(spec)
+		if hostPath == "" || containerPath == "" {
+			return fmt.Errorf("invalid volume spec: use <host_path>:<container_path>[:ro]")
+		}
+
+		store := config.NewStore(dataDir)
+		if err := store.AddVolume(appName, hostPath, containerPath, readOnly); err != nil {
+			return err
+		}
+		mode := "rw"
+		if readOnly {
+			mode = "ro"
+		}
+		fmt.Printf("[tengiz] volume mounted: %s:%s (%s)\n", hostPath, containerPath, mode)
+		return nil
+	},
+}
+
+var volumeRemoveCmd = &cobra.Command{
+	Use:   "remove <app> <container_path>",
+	Short: "Unmount a volume from an application",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		containerPath := args[1]
+
+		store := config.NewStore(dataDir)
+		if err := store.RemoveVolume(appName, containerPath); err != nil {
+			return err
+		}
+		fmt.Printf("[tengiz] volume unmounted: %s from %s\n", containerPath, appName)
+		return nil
+	},
+}
+
+var volumeListCmd = &cobra.Command{
+	Use:   "list <app>",
+	Short: "List volumes mounted to an application",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		store := config.NewStore(dataDir)
+
+		volumes, err := store.ListVolumes(appName)
+		if err != nil {
+			return err
+		}
+		if len(volumes) == 0 {
+			fmt.Printf("No volumes mounted for %s.\n", appName)
+			return nil
+		}
+		fmt.Printf("%-30s %-30s %-6s\n", "HOST PATH / VOLUME", "CONTAINER PATH", "MODE")
+		for _, v := range volumes {
+			mode := "rw"
+			if v.ReadOnly {
+				mode = "ro"
+			}
+			fmt.Printf("%-30s %-30s %-6s\n", v.HostPath, v.ContainerPath, mode)
+		}
+		return nil
+	},
+}
+
+// parseVolumeSpec parses "host:container" or "host:container:ro"
+func parseVolumeSpec(spec string) (hostPath, containerPath string, readOnly bool) {
+	parts := strings.SplitN(spec, ":", 3)
+	if len(parts) < 2 {
+		return "", "", false
+	}
+	hostPath = parts[0]
+	containerPath = parts[1]
+	if len(parts) >= 3 && parts[2] == "ro" {
+		readOnly = true
+	}
+	return
 }
 
 var gitCmd = &cobra.Command{

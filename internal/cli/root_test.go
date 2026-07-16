@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/yaso09/tengiz/internal/config"
 	"github.com/yaso09/tengiz/internal/types"
 )
 
@@ -157,6 +158,53 @@ func TestInitCmdGitFlags(t *testing.T) {
 	branchFlag := flags.Lookup("git-branch")
 	if branchFlag == nil {
 		t.Fatal("--git-branch flag not found on init command")
+	}
+}
+
+func TestVolumeCommands(t *testing.T) {
+	dir := t.TempDir()
+	s := config.NewStore(dir)
+	s.SaveApp(types.AppEntry{Name: "testapp"})
+
+	origDataDir := dataDir
+	dataDir = dir
+	defer func() { dataDir = origDataDir }()
+
+	// Test volume add
+	rootCmd.SetArgs([]string{"volume", "add", "testapp", "/host/path:/container/path"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("volume add error: %v", err)
+	}
+
+	vols, _ := s.ListVolumes("testapp")
+	if len(vols) != 1 {
+		t.Fatalf("got %d volumes, want 1 after add", len(vols))
+	}
+	if vols[0].HostPath != "/host/path" || vols[0].ContainerPath != "/container/path" {
+		t.Errorf("volume = %+v", vols[0])
+	}
+
+	// Test volume add with :ro suffix
+	rootCmd.SetArgs([]string{"volume", "add", "testapp", "/host/ro:/container/ro:ro"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("volume add ro error: %v", err)
+	}
+	vols, _ = s.ListVolumes("testapp")
+	if len(vols) != 2 {
+		t.Fatalf("got %d volumes, want 2", len(vols))
+	}
+	if !vols[1].ReadOnly {
+		t.Errorf("expected read-only volume")
+	}
+
+	// Test volume remove
+	rootCmd.SetArgs([]string{"volume", "remove", "testapp", "/container/path"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("volume remove error: %v", err)
+	}
+	vols, _ = s.ListVolumes("testapp")
+	if len(vols) != 1 {
+		t.Fatalf("got %d volumes, want 1 after remove", len(vols))
 	}
 }
 
