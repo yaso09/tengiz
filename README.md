@@ -156,6 +156,38 @@ List all custom domains for an application.
 |----------|-------------|
 | `app` | Application name |
 
+### `tengiz volume`
+
+Manage persistent storage volumes for applications.
+
+#### `tengiz volume add <app> <host_path>:<container_path>[:ro]`
+
+Mount a volume to an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `host_path>:<container_path>[:ro]` | Volume spec — host path or named volume, container path, optional `:ro` for read-only |
+
+The volume is persisted in `~/.tengiz/apps.json` and passed as `-v` flags on next deploy/start.
+
+#### `tengiz volume remove <app> <container_path>`
+
+Unmount a volume from an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `container_path` | Container path of the volume to remove |
+
+#### `tengiz volume list <app>`
+
+List all volumes mounted to an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+
 ### `tengiz config`
 
 Manage environment variables for an application.
