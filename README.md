@@ -117,6 +117,24 @@ Show build logs from previous deployments.
 
 Without a deployment ID, lists all available build log IDs. With a deployment ID, shows the full build output. Use `--tail N` to show only the last N lines.
 
+### `tengiz run <app> <command> [args...]`
+
+Run a one-off command in a temporary container built from the app's deployed image.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name (required) |
+| `command` | Command and arguments to run inside the container (required) |
+
+The container is created with the same environment variables, volumes, and resource limits as the deployed app. It is automatically removed when the command exits. Use `--` to separate app from command flags.
+
+**Examples:**
+```bash
+tengiz run myapp python manage.py migrate
+tengiz run myapp -- python manage.py shell
+tengiz run myapp node -e "console.log('hello')"
+```
+
 ### `tengiz start <app>`
 
 Cold-start a stopped container.
