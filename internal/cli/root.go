@@ -359,12 +359,12 @@ var proxyCmd = &cobra.Command{
 			p.SetDefaultApp(appFlag)
 		}
 
-		idleMgr := idle.New(rt, 5*time.Minute)
+		idleMgr := idle.NewWithEnv(rt, 5*time.Minute, env)
 		p.SetIdleManager(idleMgr)
 
 		store := config.NewStoreWithEnv(dataDir, env)
 
-		healthChecker := health.New(rt, store)
+		healthChecker := health.NewWithEnv(rt, store, env)
 		defer healthChecker.StopAll()
 
 		apps, err := store.ListApps()

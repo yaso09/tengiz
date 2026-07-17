@@ -18,13 +18,22 @@ type Checker struct {
 	store  *config.Store
 	mu     sync.Mutex
 	checks map[string]context.CancelFunc
+	env    string
 }
 
 func New(rt runtime.Manager, store *config.Store) *Checker {
+	return NewWithEnv(rt, store, "")
+}
+
+func NewWithEnv(rt runtime.Manager, store *config.Store, env string) *Checker {
+	if env == "" {
+		env = "production"
+	}
 	return &Checker{
 		rt:     rt,
 		store:  store,
 		checks: make(map[string]context.CancelFunc),
+		env:    env,
 	}
 }
 
@@ -98,11 +107,12 @@ func (c *Checker) runChecker(ctx context.Context, appName string) {
 			app.RestartCount++
 			c.store.UpdateApp(*app)
 
-			log.Printf("[health] %s unhealthy (attempt %d), restarting", appName, app.RestartCount)
-			if err := c.rt.Restart(ctx, appName); err != nil {
-				log.Printf("[health] restart %s failed: %v", appName, err)
+			containerName := runtime.ContainerName(appName, c.env)
+			log.Printf("[health] %s unhealthy (attempt %d), restarting", containerName, app.RestartCount)
+			if err := c.rt.Restart(ctx, containerName); err != nil {
+				log.Printf("[health] restart %s failed: %v", containerName, err)
 			} else {
-				log.Printf("[health] %s restarted successfully", appName)
+				log.Printf("[health] %s restarted successfully", containerName)
 			}
 		}
 
