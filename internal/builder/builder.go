@@ -18,14 +18,14 @@ func New(dataDir string) *Builder {
 	return &Builder{dataDir: dataDir}
 }
 
-func (b *Builder) Build(ctx context.Context, dir string, appName string, detection *Detection, deploymentID string) (string, string, error) {
+func (b *Builder) Build(ctx context.Context, dir string, appName string, env string, detection *Detection, deploymentID string) (string, string, error) {
 	if detection.Framework == FrameworkDocker {
-		return b.buildWithDockerfile(ctx, dir, appName, deploymentID)
+		return b.buildWithDockerfile(ctx, dir, appName, env, deploymentID)
 	}
 	if err := b.ensureDockerfile(dir, detection); err != nil {
 		return "", "", fmt.Errorf("generate dockerfile: %w", err)
 	}
-	return b.buildWithDockerfile(ctx, dir, appName, deploymentID)
+	return b.buildWithDockerfile(ctx, dir, appName, env, deploymentID)
 }
 
 func (b *Builder) ensureDockerfile(dir string, detection *Detection) error {
@@ -37,8 +37,11 @@ func (b *Builder) ensureDockerfile(dir string, detection *Detection) error {
 	return os.WriteFile(dfPath, []byte(content), 0644)
 }
 
-func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName string, deploymentID string) (string, string, error) {
-	tag := fmt.Sprintf("tengiz-apps/%s:%s", appName, deploymentID)
+func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName string, env string, deploymentID string) (string, string, error) {
+	if env == "" {
+		env = "production"
+	}
+	tag := fmt.Sprintf("tengiz-apps/%s:%s-%s", appName, env, deploymentID)
 	cmd := exec.CommandContext(ctx, "docker", "build", "-t", tag, dir)
 
 	var logBuf bytes.Buffer
@@ -50,7 +53,7 @@ func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName s
 		return "", logBuf.String(), fmt.Errorf("docker build: %w", err)
 	}
 
-	latestTag := fmt.Sprintf("tengiz-apps/%s:latest", appName)
+	latestTag := fmt.Sprintf("tengiz-apps/%s:%s-latest", appName, env)
 	tagCmd := exec.CommandContext(ctx, "docker", "tag", tag, latestTag)
 	if out, err := tagCmd.CombinedOutput(); err != nil {
 		return "", logBuf.String() + string(out), fmt.Errorf("docker tag latest: %w\n%s", err, string(out))

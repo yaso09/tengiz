@@ -60,6 +60,7 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
@@ -152,10 +153,13 @@ var deployCmd = &cobra.Command{
 			projectRoot = abs
 		}
 
-		cfg, err := config.Load(projectRoot)
+		env, _ := cmd.Flags().GetString("env")
+
+		cfg, err := config.LoadWithEnv(projectRoot, env)
 		if err != nil {
 			cfg = &types.AppConfig{
-				Name: filepath.Base(projectRoot),
+				Name:        filepath.Base(projectRoot),
+				Environment: env,
 				Serverless: types.ServerlessConfig{
 					Enabled:     true,
 					IdleTimeout: 5 * time.Minute,
@@ -178,8 +182,8 @@ var deployCmd = &cobra.Command{
 		deploymentID := fmt.Sprintf("%d", time.Now().Unix())
 
 		b := builder.New(dataDir)
-		store := config.NewStore(dataDir)
-		imageTag, buildLog, err := b.Build(context.Background(), projectRoot, cfg.Name, detection, deploymentID)
+		store := config.NewStoreWithEnv(dataDir, env)
+		imageTag, buildLog, err := b.Build(context.Background(), projectRoot, cfg.Name, cfg.Environment, detection, deploymentID)
 		if err != nil {
 			fmt.Fprint(os.Stderr, buildLog)
 			return fmt.Errorf("build: %w", err)
