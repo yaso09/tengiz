@@ -11,14 +11,22 @@ import (
 )
 
 type Builder struct {
-	dataDir string
+	dataDir  string
+	strategy Strategy
 }
 
 func New(dataDir string) *Builder {
 	return &Builder{dataDir: dataDir}
 }
 
+func (b *Builder) SetStrategy(s Strategy) {
+	b.strategy = s
+}
+
 func (b *Builder) Build(ctx context.Context, dir string, appName string, env string, detection *Detection, deploymentID string) (string, string, error) {
+	if b.strategy != nil {
+		return b.strategy.Build(ctx, dir, appName, env, deploymentID, detection)
+	}
 	if detection.Framework == FrameworkDocker {
 		return b.buildWithDockerfile(ctx, dir, appName, env, deploymentID)
 	}
