@@ -16,18 +16,27 @@ import (
 )
 
 type Manager struct {
-	dataDir string
-	store   *config.Store
-	rt      runtime.Manager
-	builder *builder.Builder
+	dataDir     string
+	store       *config.Store
+	rt          runtime.Manager
+	builder     *builder.Builder
+	builderType string
 }
 
 func NewManager(dataDir string, store *config.Store, rt runtime.Manager) *Manager {
+	return NewManagerWithBuilder(dataDir, "", store, rt)
+}
+
+func NewManagerWithBuilder(dataDir, builderType string, store *config.Store, rt runtime.Manager) *Manager {
+	if builderType == "" {
+		builderType = "auto"
+	}
 	return &Manager{
-		dataDir: dataDir,
-		store:   store,
-		rt:      rt,
-		builder: builder.New(dataDir),
+		dataDir:     dataDir,
+		store:       store,
+		rt:          rt,
+		builder:     builder.NewWithType(dataDir, builderType),
+		builderType: builderType,
 	}
 }
 

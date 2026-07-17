@@ -17,11 +17,12 @@ import (
 )
 
 type Pipeline struct {
-	dataDir string
-	env     string
-	b       *builder.Builder
-	rt      runtime.Manager
-	store   *config.Store
+	dataDir     string
+	env         string
+	b           *builder.Builder
+	rt          runtime.Manager
+	store       *config.Store
+	builderType string
 }
 
 func NewPipeline(dataDir string, rt runtime.Manager, store *config.Store) *Pipeline {
@@ -33,11 +34,29 @@ func NewPipelineWithEnv(dataDir, env string, rt runtime.Manager, store *config.S
 		env = "production"
 	}
 	return &Pipeline{
-		dataDir: dataDir,
-		env:     env,
-		b:       builder.New(dataDir),
-		rt:      rt,
-		store:   store,
+		dataDir:     dataDir,
+		env:         env,
+		b:           builder.New(dataDir),
+		rt:          rt,
+		store:       store,
+		builderType: "auto",
+	}
+}
+
+func NewPipelineWithBuilder(dataDir, env, builderType string, rt runtime.Manager, store *config.Store) *Pipeline {
+	if env == "" {
+		env = "production"
+	}
+	if builderType == "" {
+		builderType = "auto"
+	}
+	return &Pipeline{
+		dataDir:     dataDir,
+		env:         env,
+		b:           builder.NewWithType(dataDir, builderType),
+		rt:          rt,
+		store:       store,
+		builderType: builderType,
 	}
 }
 
