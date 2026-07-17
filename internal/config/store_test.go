@@ -486,6 +486,61 @@ func TestStoreDefaultEnv(t *testing.T) {
 	}
 }
 
+func TestPreviewStoreCRUD(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStoreWithEnv(dir, "production")
+
+	preview := types.PreviewEntry{
+		AppName:       "myapp",
+		PRNumber:      42,
+		Branch:        "feature/awesome",
+		RepoURL:       "https://github.com/user/myapp.git",
+		ImageTag:      "tengiz-apps/myapp:pr-42-1712345678",
+		Port:          9100,
+		ContainerName: "tengiz-myapp-pr-42",
+		DeploymentID:  "1712345678",
+		Status:        string(types.PreviewActive),
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+
+	if err := s.AddPreview(preview); err != nil {
+		t.Fatalf("AddPreview: %v", err)
+	}
+
+	list, err := s.ListPreviews("myapp")
+	if err != nil {
+		t.Fatalf("ListPreviews: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("ListPreviews returned %d, want 1", len(list))
+	}
+
+	got, err := s.GetPreview("myapp", 42)
+	if err != nil {
+		t.Fatalf("GetPreview: %v", err)
+	}
+	if got.PRNumber != 42 || got.AppName != "myapp" {
+		t.Errorf("unexpected preview: %+v", got)
+	}
+
+	if err := s.UpdatePreviewDeployment("myapp", 42, "tengiz-apps/myapp:pr-42-1712349999", "1712349999"); err != nil {
+		t.Fatalf("UpdatePreviewDeployment: %v", err)
+	}
+	got, _ = s.GetPreview("myapp", 42)
+	if got.DeploymentID != "1712349999" {
+		t.Errorf("DeploymentID = %q, want 1712349999", got.DeploymentID)
+	}
+
+	if err := s.DeletePreview("myapp", 42); err != nil {
+		t.Fatalf("DeletePreview: %v", err)
+	}
+	_, err = s.GetPreview("myapp", 42)
+	if err == nil {
+		t.Error("expected error after delete, got nil")
+	}
+}
+
 func TestPruneBuildLogs(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)

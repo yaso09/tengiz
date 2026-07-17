@@ -19,6 +19,7 @@ import (
 	"github.com/yaso09/tengiz/internal/gitdeploy"
 	"github.com/yaso09/tengiz/internal/health"
 	"github.com/yaso09/tengiz/internal/idle"
+	"github.com/yaso09/tengiz/internal/preview"
 	"github.com/yaso09/tengiz/internal/proxy"
 	"github.com/yaso09/tengiz/internal/runtime"
 	"github.com/yaso09/tengiz/internal/types"
@@ -381,6 +382,16 @@ var proxyCmd = &cobra.Command{
 					fmt.Printf("[tengiz] domain: %s -> %s\n", domain, app.Name)
 				}
 				healthChecker.Start(app.Name)
+			}
+		}
+
+		// Register preview deployment routes
+		previews, listErr := store.ListAllPreviews()
+		if listErr == nil {
+			for _, pv := range previews {
+				routeKey := fmt.Sprintf("pr-%d.%s", pv.PRNumber, pv.AppName)
+				p.Register(routeKey, pv.Port)
+				fmt.Printf("[tengiz] preview route: %s -> :%d\n", routeKey, pv.Port)
 			}
 		}
 
@@ -1058,6 +1069,22 @@ var webhookCmd = &cobra.Command{
 			return pipeline.Deploy(ctx, repo, branch, provider)
 		})
 
+		previewMgr := preview.NewManager(dataDir, store, rt)
+
+		previewFn := webhook.PreviewFunc(func(appName string, prNumber int, branch, repoURL string) error {
+			ctx := context.Background()
+			if branch == "" {
+				return previewMgr.Delete(ctx, appName, prNumber)
+			}
+			existing, err := store.GetPreview(appName, prNumber)
+			if existing != nil && err == nil {
+				_, updateErr := previewMgr.Update(ctx, appName, prNumber, branch)
+				return updateErr
+			}
+			_, createErr := previewMgr.Create(ctx, appName, prNumber, branch, repoURL)
+			return createErr
+		})
+
 		// Load webhook config from .tengiz.yaml
 		var whCfg *webhook.Config
 		if configPath != "" {
@@ -1080,6 +1107,7 @@ var webhookCmd = &cobra.Command{
 		}
 
 		s := webhook.New(dataDir, whCfg, deployFn)
+		s.SetPreviewFunc(previewFn)
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
 

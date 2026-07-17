@@ -150,6 +150,26 @@ func TestExtractAppWithCustomDomain(t *testing.T) {
 	}
 }
 
+func TestExtractAppPreviewSubdomain(t *testing.T) {
+	p := New(nil, 8080)
+	p.Register("pr-42.myapp", 9100)
+
+	app := p.extractApp("pr-42.myapp.tengiz.local:8080")
+	if app != "pr-42.myapp" {
+		t.Errorf("extractApp(%q) = %q, want %q", "pr-42.myapp.tengiz.local:8080", app, "pr-42.myapp")
+	}
+}
+
+func TestExtractAppRegularSubdomain(t *testing.T) {
+	p := New(nil, 8080)
+	p.Register("myapp", 9001)
+
+	app := p.extractApp("myapp.tengiz.local:8080")
+	if app != "myapp" {
+		t.Errorf("extractApp(%q) = %q, want %q", "myapp.tengiz.local:8080", app, "myapp")
+	}
+}
+
 func TestRegisterDomainAndUnregisterDomain(t *testing.T) {
 	p := New(nil, 8080)
 	p.Register("testapp", 19999)

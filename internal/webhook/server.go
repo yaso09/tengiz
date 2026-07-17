@@ -16,6 +16,8 @@ import (
 
 type DeployFunc func(ctx context.Context, repoURL, branch, provider string) error
 
+type PreviewFunc func(appName string, prNumber int, branch, repoURL string) error
+
 type Config struct {
 	Secret          string   `yaml:"secret"`
 	AllowedBranches []string `yaml:"allowed_branches"`
@@ -26,6 +28,7 @@ type Server struct {
 	dataDir    string
 	cfg        *Config
 	deployFn   DeployFunc
+	previewFn  PreviewFunc
 	httpServer *http.Server
 }
 
@@ -35,6 +38,10 @@ func New(dataDir string, cfg *Config, fn DeployFunc) *Server {
 		cfg:      cfg,
 		deployFn: fn,
 	}
+}
+
+func (s *Server) SetPreviewFunc(fn PreviewFunc) {
+	s.previewFn = fn
 }
 
 func (s *Server) Start(ctx context.Context, port int) error {
@@ -102,8 +109,14 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only process push events
+	// Handle pull_request events (GitHub)
 	eventType := r.Header.Get("X-Github-Event")
+	if eventType == "pull_request" {
+		s.handlePullRequest(w, r, body)
+		return
+	}
+
+	// Only process push events
 	if eventType == "" {
 		eventType = r.Header.Get("X-Gitlab-Event")
 	}
@@ -160,6 +173,59 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"ok"}`))
+}
+
+func (s *Server) handlePullRequest(w http.ResponseWriter, r *http.Request, body []byte) {
+	var payload struct {
+		Action      string `json:"action"`
+		PullRequest struct {
+			Number int `json:"number"`
+			Head   struct {
+				Ref string `json:"ref"`
+			} `json:"head"`
+		} `json:"pull_request"`
+		Repository struct {
+			CloneURL string `json:"clone_url"`
+			Name     string `json:"name"`
+		} `json:"repository"`
+	}
+
+	if err := json.Unmarshal(body, &payload); err != nil {
+		log.Printf("[tengiz] webhook: invalid pull_request payload: %v", err)
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	appName := payload.Repository.Name
+	prNumber := payload.PullRequest.Number
+	branch := payload.PullRequest.Head.Ref
+	repoURL := payload.Repository.CloneURL
+
+	log.Printf("[tengiz] webhook: pull_request %s for %s PR #%d (%s)", payload.Action, appName, prNumber, branch)
+
+	if s.previewFn == nil {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ignored","reason":"no preview handler configured"}`))
+		return
+	}
+
+	switch payload.Action {
+	case "opened", "reopened", "synchronize":
+		if err := s.previewFn(appName, prNumber, branch, repoURL); err != nil {
+			log.Printf("[tengiz] preview error: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	case "closed":
+		if err := s.previewFn(appName, prNumber, "", repoURL); err != nil {
+			log.Printf("[tengiz] preview cleanup error: %v", err)
+		}
+	default:
+		log.Printf("[tengiz] webhook: ignoring pull_request action %q", payload.Action)
 	}
 
 	w.WriteHeader(http.StatusOK)

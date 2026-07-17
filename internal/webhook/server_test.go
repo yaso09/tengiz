@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 type eventCase struct {
@@ -422,4 +424,107 @@ func TestGiteaHMACVerification(t *testing.T) {
 	}
 }
 
+func TestPullRequestOpenedEvent(t *testing.T) {
+	previewCh := make(chan struct {
+		appName  string
+		prNumber int
+		branch   string
+		repoURL  string
+	}, 1)
+
+	s := New("", nil, nil)
+	s.SetPreviewFunc(func(appName string, prNumber int, branch, repoURL string) error {
+		previewCh <- struct {
+			appName  string
+			prNumber int
+			branch   string
+			repoURL  string
+		}{appName, prNumber, branch, repoURL}
+		return nil
+	})
+
+	body := `{
+		"action": "opened",
+		"pull_request": {
+			"number": 42,
+			"head": { "ref": "feature/awesome" }
+		},
+		"repository": {
+			"clone_url": "https://github.com/user/myapp.git",
+			"name": "myapp"
+		}
+	}`
+
+	req := httptest.NewRequest("POST", "/webhook", strings.NewReader(body))
+	req.Header.Set("X-Github-Event", "pull_request")
+
+	w := httptest.NewRecorder()
+	s.webhookHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	select {
+	case ev := <-previewCh:
+		if ev.prNumber != 42 {
+			t.Errorf("prNumber = %d, want 42", ev.prNumber)
+		}
+		if ev.branch != "feature/awesome" {
+			t.Errorf("branch = %q, want %q", ev.branch, "feature/awesome")
+		}
+		if ev.appName != "myapp" {
+			t.Errorf("appName = %q, want %q", ev.appName, "myapp")
+		}
+	case <-time.After(time.Second):
+		t.Error("previewFn was not called")
+	}
+}
+
+func TestPullRequestClosedEvent(t *testing.T) {
+	cleanupCh := make(chan struct {
+		appName  string
+		prNumber int
+	}, 1)
+
+	s := New("", nil, nil)
+	s.SetPreviewFunc(func(appName string, prNumber int, branch, repoURL string) error {
+		cleanupCh <- struct {
+			appName  string
+			prNumber int
+		}{appName, prNumber}
+		return nil
+	})
+
+	body := `{
+		"action": "closed",
+		"pull_request": {
+			"number": 42,
+			"head": { "ref": "feature/awesome" }
+		},
+		"repository": {
+			"clone_url": "https://github.com/user/myapp.git",
+			"name": "myapp"
+		}
+	}`
+
+	req := httptest.NewRequest("POST", "/webhook", strings.NewReader(body))
+	req.Header.Set("X-Github-Event", "pull_request")
+
+	w := httptest.NewRecorder()
+	s.webhookHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	select {
+	case ev := <-cleanupCh:
+		if ev.prNumber != 42 {
+			t.Errorf("prNumber = %d, want 42", ev.prNumber)
+		}
+	case <-time.After(time.Second):
+		t.Error("previewFn was not called for closed event")
+	}
+}
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -95,8 +96,14 @@ func (p *Proxy) UnregisterDomain(domain string) {
 }
 
 func (p *Proxy) extractApp(host string) string {
-	host = strings.Split(host, ":")[0]
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if host == "" {
+		return ""
+	}
 
+	// 1. Check custom domains
 	p.mu.RLock()
 	app, ok := p.domains[host]
 	p.mu.RUnlock()
@@ -104,6 +111,21 @@ func (p *Proxy) extractApp(host string) string {
 		return app
 	}
 
+	// 2. Try stripping known suffixes and check full prefix as route key
+	//    This handles multi-level subdomains like pr-42.myapp.tengiz.local
+	for _, suffix := range []string{".tengiz.local", ".localhost"} {
+		if strings.HasSuffix(host, suffix) {
+			candidate := strings.TrimSuffix(host, suffix)
+			p.mu.RLock()
+			if _, ok := p.routes[candidate]; ok {
+				p.mu.RUnlock()
+				return candidate
+			}
+			p.mu.RUnlock()
+		}
+	}
+
+	// 3. Fallback: first subdomain part
 	parts := strings.Split(host, ".")
 	if len(parts) < 3 {
 		return ""
