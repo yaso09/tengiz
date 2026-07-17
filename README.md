@@ -11,7 +11,7 @@
 
 ## Features
 
-- **Framework auto-detection** — Next.js, Vite, Go, Node.js, Python, static sites. No config needed.
+- **Framework auto-detection** — Next.js, Vite, Go, Node.js, Python, static sites, plus 100+ via Nixpacks (Rust, Ruby, PHP, Java, Elixir, etc.). No config needed.
 - **Scale-to-zero** — Containers stop after 5 minutes of inactivity, start on first request (cold start).
 - **Zero-downtime deployment** — Blue/green container switching: new container starts before the old one stops, traffic switches atomically at the proxy layer.
 - **On-demand reverse proxy** — Route traffic by hostname (`myapp.tengiz.local:8080`). Admin API (`127.0.0.1:9099`) for dynamic route management.
@@ -26,6 +26,7 @@
 
 - Go 1.26+ (for building from source)
 - Docker (for running containers)
+- Nixpacks CLI (optional, for Nixpacks builds: `--builder nixpacks` or `builder: nixpacks` in config)
 
 ## Installation
 
@@ -81,6 +82,10 @@ Build and deploy an application with zero-downtime.
 | Argument | Description |
 |----------|-------------|
 | `directory` | Project directory (default: `.`) |
+
+| Flag | Description |
+|------|-------------|
+| `--builder` | Build strategy: `docker` (default) or `nixpacks` |
 
 Detects the framework, builds a Docker image, and deploys. On first deploy, allocates a port (9000-9999), starts the container. On subsequent deploys, performs a **blue/green switch**: new versioned container starts on a new port, readiness is checked, traffic is routed to the new container atomically via the proxy admin API, then the old container is stopped and removed. Deployment history is recorded in `~/.tengiz/deployments.json`. If no `.tengiz.yaml` exists, uses the directory name as app name with serverless defaults.
 
@@ -372,8 +377,9 @@ Without a config file, Tengiz uses defaults: app name = directory name, port aut
 | **Node.js** | `package.json` | 8080 |
 | **Python** | `requirements.txt` / `Pipfile` / `pyproject.toml` | 8000 |
 | **Static HTML** | `index.html` | 80 (nginx) |
+| **Nixpacks** (Rust/Ruby/PHP/etc.) | `Cargo.toml`, `Gemfile`, etc. (fallback) | 8080 |
 
-When no Dockerfile exists, Tengiz auto-generates one with a multi-stage build optimized for each framework.
+When no Dockerfile exists, Tengiz auto-generates one with a multi-stage build optimized for each framework. For projects using frameworks only supported by Nixpacks (Rust, Ruby, PHP, Java, Elixir, etc.), set `builder: nixpacks` in `.tengiz.yaml` or use `--builder nixpacks`.
 
 ## Git Auto-Deploy
 
