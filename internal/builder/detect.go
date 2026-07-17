@@ -17,6 +17,7 @@ const (
 	FrameworkPython Framework = "python"
 	FrameworkStatic Framework = "static"
 	FrameworkDocker Framework = "docker"
+	FrameworkNixpacks  Framework = "nixpacks"
 )
 
 type Detection struct {
@@ -30,6 +31,9 @@ type Detection struct {
 func Detect(dir string) (*Detection, error) {
 	if hasFile(dir, "Dockerfile") {
 		return &Detection{Framework: FrameworkDocker, InternalPort: 8080}, nil
+	}
+	if hasFile(dir, ".nixpacks") {
+		return &Detection{Framework: FrameworkNixpacks, InternalPort: 8080}, nil
 	}
 	if hasFile(dir, "next.config.js") || hasFile(dir, "next.config.ts") || hasFile(dir, "next.config.mjs") {
 		return &Detection{

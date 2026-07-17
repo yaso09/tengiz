@@ -42,6 +42,7 @@ type ResourceConfig struct {
 type BuildConfig struct {
 	Command string `mapstructure:"command"`
 	Output  string `mapstructure:"output"`
+	Builder string `mapstructure:"builder" yaml:"builder"`
 }
 
 type ServerlessConfig struct {
