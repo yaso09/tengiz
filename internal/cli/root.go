@@ -585,6 +585,8 @@ var devCmd = &cobra.Command{
 			devArgs = []string{"python", "app.py"}
 		case builder.FrameworkDocker:
 			return fmt.Errorf("dev mode not supported for Docker-based projects; run your Dockerfile directly")
+		case builder.FrameworkNixpacks:
+			return fmt.Errorf("dev mode not supported for nixpacks-based projects; run `nixpacks build .` directly")
 		case builder.FrameworkStatic:
 			return fmt.Errorf("dev mode not supported for static sites; serve the directory with any HTTP server")
 		default:
