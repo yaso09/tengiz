@@ -10,6 +10,58 @@ import (
 	"github.com/yaso09/tengiz/internal/types"
 )
 
+func LoadWithEnv(path, env string) (*types.AppConfig, error) {
+	if env == "" {
+		env = "production"
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		return nil, err
+	}
+
+	envPath := filepath.Join(path, fmt.Sprintf(".tengiz.%s.yaml", env))
+	if _, statErr := os.Stat(envPath); statErr != nil {
+		cfg.Environment = env
+		return cfg, nil
+	}
+
+	v := viper.New()
+	v.SetConfigFile(envPath)
+	v.SetConfigType("yaml")
+	if err := v.ReadInConfig(); err != nil {
+		return nil, fmt.Errorf("env config read: %w", err)
+	}
+
+	// Merge env vars (viper lowercases keys, so use GetStringMapString)
+	if envVars := v.GetStringMapString("env"); len(envVars) > 0 {
+		if cfg.Env == nil {
+			cfg.Env = make(map[string]string)
+		}
+		for k, v := range envVars {
+			cfg.Env[k] = v
+		}
+	}
+
+	// Merge other scalar fields using raw key access
+	allSettings := v.AllSettings()
+	for key, val := range allSettings {
+		switch key {
+		case "port":
+			if port, ok := val.(int); ok && port != 0 {
+				cfg.Port = port
+			}
+		case "name":
+			if name, ok := val.(string); ok && name != "" {
+				cfg.Name = name
+			}
+		}
+	}
+
+	cfg.Environment = env
+	return cfg, nil
+}
+
 const defaultIdleTimeout = 5 * time.Minute
 
 func Load(path string) (*types.AppConfig, error) {
