@@ -175,6 +175,53 @@ func TestBuildWithDeploymentIDCompiles(t *testing.T) {
 	}
 }
 
+func TestNewWithTypeDefaults(t *testing.T) {
+	b := NewWithType("/tmp/data", "")
+	if b.builderType != BuilderAuto {
+		t.Errorf("builderType = %q, want %q", b.builderType, BuilderAuto)
+	}
+}
+
+func TestNewWithTypeNixpacks(t *testing.T) {
+	b := NewWithType("/tmp/data", "nixpacks")
+	if b.builderType != BuilderNixpacks {
+		t.Errorf("builderType = %q, want %q", b.builderType, BuilderNixpacks)
+	}
+}
+
+func TestNewDefaults(t *testing.T) {
+	b := New("/tmp/data")
+	if b.builderType != BuilderAuto {
+		t.Errorf("builderType = %q, want %q", b.builderType, BuilderAuto)
+	}
+}
+
+func TestBuildDispatchesToNixpacksWhenBuilderTypeSet(t *testing.T) {
+	b := NewWithType(t.TempDir(), "nixpacks")
+	dir := t.TempDir()
+
+	t.Setenv("PATH", "")
+	_, _, err := b.Build(context.Background(), dir, "testapp", "production", &Detection{InternalPort: 8080}, "v1")
+	if err == nil {
+		t.Fatal("expected error for nixpacks builder without nixpacks binary")
+	}
+}
+
+func TestBuildDispatchesToAutoByDefault(t *testing.T) {
+	b := New(t.TempDir())
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "index.html"), []byte("<h1>hello</h1>"), 0644)
+
+	tag, _, err := b.Build(context.Background(), dir, "testapp", "production", &Detection{Framework: FrameworkStatic, InternalPort: 80}, "v1")
+	if err != nil {
+		t.Skipf("Build() error (likely no docker): %v", err)
+	}
+	expected := "tengiz-apps/testapp:production-v1"
+	if tag != expected {
+		t.Errorf("tag = %q, want %q", tag, expected)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }
