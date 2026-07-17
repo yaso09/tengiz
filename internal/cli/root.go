@@ -334,13 +334,14 @@ var proxyCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appFlag, _ := cmd.Flags().GetString("app")
 		portFlag, _ := cmd.Flags().GetInt("port")
+		env, _ := cmd.Flags().GetString("env")
 
 		rt, err := runtime.NewDocker()
 		if err != nil {
 			return fmt.Errorf("docker: %w", err)
 		}
 
-		p := proxy.New(rt, portFlag)
+		p := proxy.NewWithEnv(rt, portFlag, env)
 
 		if appFlag != "" {
 			p.SetDefaultApp(appFlag)
@@ -349,7 +350,7 @@ var proxyCmd = &cobra.Command{
 		idleMgr := idle.New(rt, 5*time.Minute)
 		p.SetIdleManager(idleMgr)
 
-		store := config.NewStore(dataDir)
+		store := config.NewStoreWithEnv(dataDir, env)
 
 		healthChecker := health.New(rt, store)
 		defer healthChecker.StopAll()
@@ -1108,6 +1109,7 @@ func getwd() string {
 func Execute() {
 	proxyCmd.Flags().StringP("app", "a", "", "route all requests to this app (bypasses hostname routing)")
 	proxyCmd.Flags().IntP("port", "p", 8080, "proxy listen port")
+	proxyCmd.Flags().String("env", "production", "environment for proxy routing")
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	buildLogsCmd.Flags().Int("tail", 0, "show only last N lines of the latest build log")
 	if err := rootCmd.Execute(); err != nil {
