@@ -14,6 +14,12 @@ type VolumeConfig struct {
 	ReadOnly      bool   `mapstructure:"read_only" yaml:"read_only" json:"read_only,omitempty"`
 }
 
+type WebhookConfig struct {
+	Secret          string   `mapstructure:"secret,omitempty"`
+	AllowedBranches []string `mapstructure:"allowed_branches,omitempty"`
+	Port            int      `mapstructure:"port,omitempty"`
+}
+
 type AppConfig struct {
 	Name        string              `mapstructure:"name"`
 	Port        int                 `mapstructure:"port"`

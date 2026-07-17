@@ -176,6 +176,29 @@ func Load(path string) (*types.AppConfig, error) {
 	return &cfg, nil
 }
 
+func LoadWebhookConfig(path string) (*types.WebhookConfig, error) {
+	v := viper.New()
+	v.SetConfigFile(filepath.Join(path, ".tengiz.yaml"))
+	v.SetConfigType("yaml")
+
+	if err := v.ReadInConfig(); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	if !v.IsSet("webhook") {
+		return nil, nil
+	}
+
+	var wc types.WebhookConfig
+	if err := v.UnmarshalKey("webhook", &wc); err != nil {
+		return nil, fmt.Errorf("webhook config: %w", err)
+	}
+	return &wc, nil
+}
+
 func FindProjectRoot(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
