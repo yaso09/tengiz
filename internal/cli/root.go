@@ -1054,7 +1054,7 @@ var webhookCmd = &cobra.Command{
 			return pipeline.Deploy(ctx, repo, branch, provider)
 		})
 
-		s := webhook.New(dataDir, deployFn)
+		s := webhook.New(dataDir, nil, deployFn)
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
 
