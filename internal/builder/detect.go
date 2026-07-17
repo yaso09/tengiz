@@ -75,7 +75,34 @@ func Detect(dir string) (*Detection, error) {
 			InternalPort: 80,
 		}, nil
 	}
+	if IsNixpacksOnly(dir) {
+		return &Detection{
+			Framework:    FrameworkNixpacks,
+			InternalPort: 8080,
+		}, nil
+	}
 	return &Detection{Framework: FrameworkStatic, InternalPort: 80}, nil
+}
+
+func IsNixpacksOnly(dir string) bool {
+	markers := []string{
+		"Cargo.toml",      // Rust
+		"Gemfile",         // Ruby
+		"composer.json",   // PHP
+		"mix.exs",         // Elixir
+		"shard.yml",       // Crystal
+		"build.gradle",    // Java (Gradle)
+		"pom.xml",         // Java (Maven)
+		"Package.swift",   // Swift
+		"rebar.config",    // Erlang
+		"project.clj",     // Clojure
+	}
+	for _, m := range markers {
+		if hasFile(dir, m) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasFile(dir, name string) bool {

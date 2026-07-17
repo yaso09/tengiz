@@ -160,6 +160,19 @@ func TestBuildCapturesOutput(t *testing.T) {
 	_ = logs
 }
 
+func TestDetectNixpacks(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "Cargo.toml"), []byte("[package]\nname = \"test\""), 0644)
+
+	d, err := Detect(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Framework != FrameworkNixpacks {
+		t.Errorf("Framework = %q, want %q", d.Framework, FrameworkNixpacks)
+	}
+}
+
 func TestBuildWithNixpacksCapturesOutput(t *testing.T) {
 	b := New(t.TempDir())
 	b.BuilderType = types.BuilderTypeNixpacks
