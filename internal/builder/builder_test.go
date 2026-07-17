@@ -3,6 +3,7 @@ package builder
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -173,6 +174,42 @@ func TestBuildWithDeploymentIDCompiles(t *testing.T) {
 	if tag != expected {
 		t.Errorf("tag = %q, want %q", tag, expected)
 	}
+}
+
+func TestBuildWithNixpacksStrategy(t *testing.T) {
+	if _, err := exec.LookPath("nixpacks"); err != nil {
+		t.Skip("nixpacks CLI not installed for integration test")
+	}
+
+	tmpDir := t.TempDir()
+	err := os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"name":"test-app"}`), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b := New(t.TempDir())
+	b.SetStrategy(&NixpacksStrategy{})
+	detection := &Detection{Framework: FrameworkNode, InternalPort: 3000}
+
+	tag, buildLog, err := b.Build(context.Background(), tmpDir, "test-app", "production", detection, "inttest001")
+	if err != nil {
+		t.Fatalf("Build with nixpacks failed: %v\nlog: %s", err, buildLog)
+	}
+	expectedTag := "tengiz-apps/test-app:production-inttest001"
+	if tag != expectedTag {
+		t.Errorf("expected tag %s, got %s", expectedTag, tag)
+	}
+	if buildLog == "" {
+		t.Error("expected non-empty build log")
+	}
+
+	inspectCmd := exec.Command("docker", "inspect", "tengiz-apps/test-app:production-latest")
+	if out, err := inspectCmd.CombinedOutput(); err != nil {
+		t.Errorf("latest tag not found: %v\n%s", err, string(out))
+	}
+
+	cleanupCmd := exec.Command("docker", "rmi", "tengiz-apps/test-app:production-inttest001", "tengiz-apps/test-app:production-latest")
+	_ = cleanupCmd.Run()
 }
 
 func contains(s, substr string) bool {
