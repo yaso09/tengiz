@@ -1256,3 +1256,75 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Dokploy's `admin.ts` and `web-server-settings.ts` manage platform-level configuration: the Dokploy URL (used in build links, notification payloads, and webhook callbacks), Docker daemon configuration (storage driver, log driver, default runtime), server IP for AI-generated domain suggestions, and platform update channel. Settings are stored in the database and exposed via a `getDokployUrl()` helper used across all notification and deployment services. The admin module also provides a `checkHealth()` function for platform self-monitoring.
 - **Why add to Tengiz:** Currently Tengiz has no concept of "this is the platform's public URL" — build links in notifications, webhook callbacks, and deployment status all reference nowhere. Platform settings centralize: the Tengiz instance URL (for generating correct links in deploy success/failure messages), the configured Docker network bridge, default resource limits for new apps, and the platform update channel. Implementation: `tengiz config set platform.url https://tengiz.example.com` stored in `~/.tengiz/config.json` (separate from app-store). The URL is used by notification templates, webhook `target_url` generation, and commit status reporting. Low effort (one store + a few env vars), eliminates embarrassing "unknown URL" outputs from notification features.
 - **Detected:** 2026-07-17
+
+## Herokuish Buildpacks (Classic Heroku Buildpack Support)
+- **Source:** Dokku
+- **Description:** Classic Heroku buildpack support via `herokuish` — the engine that makes Dokku Heroku-compatible. Auto-detects Ruby, Node.js, Python, Java, PHP, Go, Scala, Clojure, Erlang, and more via Heroku's official buildpacks. Users deploy without a Dockerfile, and `herokuish` detects the language, applies the appropriate buildpack, and generates a Docker image. Supports custom buildpack URLs per app (`config:set BUILDPACK_URL=...`), multi-buildpacks via `.buildpacks` file, and `app.json` buildpack declarations.
+- **Why add to Tengiz:** Tengiz currently supports only 6 frameworks via its own detection logic. Herokuish brings Heroku's entire ecosystem of buildpacks (dozens of languages/frameworks) in a single integration. It is distinct from Nixpacks — Herokuish offers exact Heroku compatibility, meaning users can migrate Heroku apps to Tengiz with zero changes. Implementation: run `herokuish` inside a build container or install the `herokuish` binary and call it during the build phase. Complements the existing builder abstraction alongside Dockerfile, Nixpacks, CNB, and Null builders. `.tengiz.yaml`'da `builder: herokuish` ile seçilir. ~500 lines of integration code in `internal/builder/`.
+- **Detected:** 2026-07-17
+
+## Manual SSL Certificate Management (Import/Generate/Inspect/Remove)
+- **Source:** Dokku
+- **Description:** Full manual SSL certificate lifecycle management beyond Let's Encrypt auto-provisioning. `tengiz certs:add <app> <cert.tar>` imports an existing certificate + key pair. `tengiz certs:generate <app>` creates a self-signed certificate for testing. `tengiz certs:report <app>` shows certificate details: issuer, subject, expiry, SANs, fingerprint. `tengiz certs:remove <app>` detaches SSL. Supports multiple-domain SAN certs and wildcard certificates. Stored in `~/.tengiz/certs/` and injected into proxy configuration.
+- **Why add to Tengiz:** Enterprise users need: importing existing wildcard certs from their CA, self-signed certs for internal/staging environments, certificate expiry monitoring, and clean removal when domains change. Implementation: `crypto/x509` for cert parsing, file-based storage, SSH-style command group. Medium effort, high value for enterprise adoption. Complements Let's Encrypt (#51) and Force HTTPS (#52).
+- **Detected:** 2026-07-17
+
+## Per-App Proxy Toggle (Disable/Enable Reverse Proxy)
+- **Source:** Dokku
+- **Description:** `tengiz proxy:disable <app>` and `tengiz proxy:enable <app>` toggle the reverse proxy per-app. When disabled, the app's container runs but isn't exposed through the Tengiz proxy. Useful for: internal-only services (workers, queue consumers), apps handling their own TLS, database/cache containers that shouldn't be internet-facing. Proxy state persists in app configuration.
+- **Why add to Tengiz:** Today Tengiz routes traffic to all running apps automatically via hostname. There's no way to run a container that isn't publicly routable. For background workers or accessory services, unnecessary proxy exposure is a security risk. `.tengiz.yaml`'da `proxy.enabled: false` disables it. Implementation: Tengiz's proxy has a `routes` map — when proxy is disabled, the app is simply not added to it. Low effort (boolean + routing exclusion), high security value.
+- **Detected:** 2026-07-17
+
+## App Auto-Creation on Git Push (Zero-Setup Deploy)
+- **Source:** Dokku
+- **Description:** Dokku auto-creates an app on the first `git push` if it doesn't exist. The app name is derived from the Git remote. This eliminates the `tengiz apps:create` step — users just `git push tengiz main` and the app is created automatically with sensible defaults. `--no-auto-create` disables for environments requiring explicit creation.
+- **Why add to Tengiz:** Every PaaS (Heroku, Vercel, Railway) auto-creates apps on first deploy. Currently Tengiz requires `tengiz create myapp && tengiz deploy .` — a two-step process. Implementation: in the Git deployment handler, if the app doesn't exist, call `createApp()` with default config before running the deploy pipeline. Requires Git-based deploy (#5, implemented) and webhook handler (#13). Low effort (conditional create before deploy), high UX impact.
+- **Detected:** 2026-07-17
+
+## Container Restart Policy Management (Docker Restart Policies)
+- **Source:** Dokku
+- **Description:** Per-app Docker restart policy configuration: `no`, `always`, `unless-stopped`, `on-failure[:max-retries]`. Dokku stores the policy per app and applies it via `--restart` during `docker run`. Default is `unless-stopped`. Per-process-type policies supported.
+- **Why add to Tengiz:** Tengiz's scale-to-zero and health checks handle lifecycle, but the restart policy determines crash behavior: `no` keeps a crashed container dead, `always` restarts even after `docker stop`, `unless-stopped` is the balanced default, `on-failure:5` prevents restart loops with exponential backoff. `.tengiz.yaml`'da `restart_policy: unless-stopped` veya `restart_policy: on-failure:5`. Low effort (one Docker CLI flag). Complements Container Health Check (#4) — health checks detect unresponsive containers, restart policies handle crashed processes.
+- **Detected:** 2026-07-17
+
+## Server Reboot Recovery (Auto-Restart All Apps After Host Reboot)
+- **Source:** Dokku
+- **Description:** `dokku ps:restore` runs on server startup to automatically restore all previously running apps. Reads stored app state and starts containers for every app that was running before reboot. Per-app opt-out. Parallel restoration with configurable worker count prevents thundering herd on Docker daemon startup.
+- **Why add to Tengiz:** When the host server reboots, all Tengiz containers stop. Currently users must manually `tengiz start` each app. A systemd unit (generated by `tengiz server init --systemd`) runs `tengiz ps:restore` on boot. `.tengiz.yaml`'da `restore_on_reboot: false` for per-app opt-out. Medium effort (systemd integration + parallel restore logic). Complements Server Bootstrap (#40).
+- **Detected:** 2026-07-17
+
+## Parallel Bulk Operations (Concurrent Multi-App Lifecycle Commands)
+- **Source:** Dokku
+- **Description:** Dokku supports parallel execution of lifecycle commands across multiple apps: `ps:rebuild --all`, `ps:restart --all`, `ps:stop --all` with configurable worker count (`--parallelism 5`). Bounded goroutine-style execution prevents overwhelming the Docker daemon.
+- **Why add to Tengiz:** Sequential operations on 20+ apps are painfully slow. Parallel execution reduces this to ~1× with sufficient workers. Commands: `tengiz rebuild --all`, `tengiz restart --all`, `tengiz stop --all`, `tengiz start --all` with `--parallelism N` flag (default 3). Implementation: Go goroutine pool + `sync.WaitGroup` + semaphore channel. Low-medium effort, high operational value for multi-app instances.
+- **Detected:** 2026-07-17
+
+## Linux Capabilities Management (Cap-Add/Cap-Drop)
+- **Source:** Dokku
+- **Description:** Per-app Linux capability management: `tengiz docker-options:add <app> run --cap-drop=ALL --cap-add=NET_BIND_SERVICE` implements principle of least privilege. Supports all Docker capability flags. Phase-scoped (build/deploy/run) so build containers can have more privileges than runtime containers.
+- **Why add to Tengiz:** Container security hardening requires dropping unnecessary capabilities. A Node.js web app needs only `NET_BIND_SERVICE` and `CHOWN` — not `SYS_ADMIN` or `NET_ADMIN`. Some apps explicitly need capabilities: `NET_ADMIN` for VPN, `SYS_PTRACE` for debuggers. `.tengiz.yaml`'da `cap_add: [NET_ADMIN]` ve `cap_drop: [ALL]`. Low effort (Docker `--cap-add`/`--cap-drop` flags in `runtime.Create()`). Complements Custom Docker Options (#23) by making cap management first-class.
+- **Detected:** 2026-07-17
+
+## App Repository Lifecycle Management (Git Repo Operations)
+- **Source:** Dokku
+- **Description:** Per-app Git repository management: `git:ensure-existing`, `git:lock/unlock` (prevent/enable pushes), `git:status` (latest commit, branch, size). Locking is critical during maintenance — prevents pushes while debugging production issues.
+- **Why add to Tengiz:** Git-based deployment (#5) uses per-app Git repos. Currently no CLI visibility — users can't check repo status, prevent pushes during maintenance, or view the repo URL. `tengiz git:lock <app>` during maintenance prevents "someone pushed while I was debugging" scenarios. Lock = file-based flag in the repo directory. Low effort, fills operational gap for Git-based deploys.
+- **Detected:** 2026-07-17
+
+## Custom Image Repository Naming Configuration
+- **Source:** Dokku
+- **Description:** Configure Docker image repository naming per app or globally. Uses Go templates: `registry.example.com/myorg/{{ .AppName }}`. Template variables: `AppName`, `AppNameWithEnv`, `CommitSHA`, `Timestamp`. Supports org namespaces and multi-registry naming conventions.
+- **Why add to Tengiz:** Default names (`tengiz-myapp`) work for single-server but conflict in multi-registry scenarios. Custom naming enables: org namespaces on GHCR/Docker Hub, embedding env in image names, consistent CI/CD naming, collision avoidance. `.tengiz.yaml`'da `registry.image_repo: "ghcr.io/myorg/{{ .AppName }}"`. Low effort (Go template substitution in builder). Complements Container Registry (#29) and Build Pipeline (#129).
+- **Detected:** 2026-07-17
+
+## Deploy Source Metadata Recording (Git SHA, Image Ref, Archive URL)
+- **Source:** Dokku
+- **Description:** Every deployment records source metadata: `GIT_SHA`, `GIT_BRANCH`, `GIT_MESSAGE`, `IMAGE_REF` (full ref with digest), `DEPLOY_SOURCE` (git-hook, cli, webhook, rebuild). Stored in build record JSON, displayed in `builds:info`, available as env vars: `TENGIZ_DEPLOY_SOURCE`, `TENGIZ_GIT_SHA`, `TENGIZ_GIT_BRANCH`.
+- **Why add to Tengiz:** Knowing what triggered a deploy and what code is running is fundamental for debugging and audit. Extends Git Commit Hash Auto-Injection (#89) with structured source metadata in every build record, enabling rollback by SHA and commit status API integration. Implementation: extend deploy record struct with `SourceMetadata`, populate in `deploy.go`, persist in build tracking store. `.tengiz.yaml`'da `source_metadata.enabled: true`. Low-medium effort, high audit/observability value.
+- **Detected:** 2026-07-17
+
+## Pluggable Event/Trigger Architecture (Extensibility System)
+- **Source:** Dokku
+- **Description:** Dokku's core is a plugin system with 40+ trigger points across the application lifecycle: `post-app-create`, `pre-deploy`, `post-deploy`, `post-stop`, `post-reboot`, `post-config-set`, `post-scale`, etc. Plugins are executable scripts that implement trigger functions. This has produced 100+ community plugins for databases, SSL, monitoring, CI/CD, and more.
+- **Why add to Tengiz:** Tengiz has no extension mechanism — every feature must be added to core. A plugin system enables: community ecosystem, third-party development without forking, per-site custom logic. Implementation: trigger hooks at key lifecycle points that scan `~/.tengiz/plugins/` for executables and run them with JSON context on stdin. `tengiz plugin install gh:user/repo` downloads and registers a plugin. High effort but transformative for project growth. The existing hook system (#12, #28) provides the foundation — this generalizes it into a discoverable, installable ecosystem.
+- **Detected:** 2026-07-17
