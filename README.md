@@ -82,6 +82,10 @@ Build and deploy an application with zero-downtime.
 |----------|-------------|
 | `directory` | Project directory (default: `.`) |
 
+| Flag | Description |
+|------|-------------|
+| `--builder` | Build strategy: `dockerfile` (default) or `nixpacks`. Overrides `.tengiz.yaml` `build.strategy`. |
+
 Detects the framework, builds a Docker image, and deploys. On first deploy, allocates a port (9000-9999), starts the container. On subsequent deploys, performs a **blue/green switch**: new versioned container starts on a new port, readiness is checked, traffic is routed to the new container atomically via the proxy admin API, then the old container is stopped and removed. Deployment history is recorded in `~/.tengiz/deployments.json`. If no `.tengiz.yaml` exists, uses the directory name as app name with serverless defaults.
 
 ### `tengiz proxy [-a <app>] [-p <port>]`
@@ -332,6 +336,8 @@ Create a `.tengiz.yaml` in your project root:
 ```yaml
 name: my-app
 port: 3000            # container internal port (auto-detected if omitted)
+build:
+  strategy: dockerfile   # build strategy: dockerfile (default) or nixpacks
 serverless:
   enabled: true
   idle_timeout: 5m    # scale-to-zero timeout
@@ -363,6 +369,8 @@ Without a config file, Tengiz uses defaults: app name = directory name, port aut
 
 ## Framework Support
 
+### Built-in (Dockerfile strategy)
+
 | Framework | Detection | Internal Port |
 |-----------|-----------|---------------|
 | **Docker** (Dockerfile exists) | `Dockerfile` | 8080 |
@@ -374,6 +382,10 @@ Without a config file, Tengiz uses defaults: app name = directory name, port aut
 | **Static HTML** | `index.html` | 80 (nginx) |
 
 When no Dockerfile exists, Tengiz auto-generates one with a multi-stage build optimized for each framework.
+
+### Nixpacks strategy
+
+Use `tengiz deploy --builder nixpacks` or set `build.strategy: nixpacks` in `.tengiz.yaml` to use [Nixpacks](https://nixpacks.com) instead. Nixpacks supports hundreds of frameworks including Ruby, Rust, PHP, Java, Elixir, Swift, and more — no Dockerfile authoring needed. Requires `nixpacks` CLI to be installed separately.
 
 ## Git Auto-Deploy
 

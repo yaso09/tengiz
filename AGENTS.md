@@ -13,7 +13,7 @@
 | Package | Responsibility |
 |---------|---------------|
 | `runtime.Manager` | Interface for container lifecycle. `NewDocker()` = exec-based impl, `NewStub()` = test mock. Also: `CreateFromImage`, `RemoveImage`, `KeepLastNImages` for rollback + image cleanup. `ContainerName(name, env)` helper. |
-| `builder` | Framework detection (`detect.go`) + Dockerfile generation (`builder.go`). Supports: Docker, Next.js, Vite, Go, Node, Python, static. Env-aware image tags (`{env}-{deploymentID}`). |
+| `builder` | Framework detection (`detect.go`) + Dockerfile generation (`builder.go`) + NixpacksStrategy (`nixpacks.go`). Supports: Docker, Next.js, Vite, Go, Node, Python, static, plus hundreds more via Nixpacks. Strategy interface for pluggable build backends. Env-aware image tags (`{env}-{deploymentID}`). |
 | `proxy` | `httputil.ReverseProxy` with host-based routing (`appname.tengiz.local` → port 9000+) and custom domain support. Cold-starts stopped containers on demand. Env-aware via `NewWithEnv`. |
 | `idle` | Per-app timer. `Reset(name)` extends deadline. On expiry: calls `runtime.Stop()`. Default 5m timeout. Env-aware via `NewWithEnv`. |
 | `config` | Loads `.tengiz.yaml` via viper. `LoadWithEnv(path, env)` and `LoadForEnvironment(path, env)` merge `.tengiz.{env}.yaml` overrides (latter adds env name validation + comprehensive scalar merge). `Store` persists apps + port allocations in `~/.tengiz/` (env-scoped). Adds `GetEnv`/`SetEnv`/`UnsetEnv`/`ListEnv` for env var management. |
@@ -35,7 +35,7 @@ go vet ./...                  # static analysis
 ```
 tengiz --env <env> <command> → global flag for multi-environment (dev/staging/prod)
 tengiz init [name]    → create .tengiz.yaml
-tengiz deploy [dir]   → detect, build, run container
+tengiz deploy [dir] [--builder nixpacks] → detect, build, run container (--builder overrides config strategy)
 tengiz proxy [-a app] → start reverse proxy on :8080 (use -a to route all traffic to one app)
 tengiz ps             → list apps from Docker
 tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] app  → stream logs with filtering
