@@ -3,6 +3,7 @@ package builder
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -151,6 +152,31 @@ func TestBuildCapturesOutput(t *testing.T) {
 	detection := &Detection{Framework: FrameworkStatic, InternalPort: 80}
 
 	tag, logs, err := b.Build(context.Background(), dir, "testapp", "production", detection, "v123")
+	if err != nil {
+		t.Skipf("Build() error (likely no docker): %v", err)
+	}
+	if tag == "" {
+		t.Error("expected non-empty tag")
+	}
+	_ = logs
+}
+
+func TestBuildWithNixpacksStrategy(t *testing.T) {
+	if _, err := exec.LookPath("nixpacks"); err != nil {
+		t.Skip("nixpacks not installed")
+	}
+
+	b := New(t.TempDir())
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "index.html"), []byte("<h1>hello</h1>"), 0644)
+
+	detection := &Detection{
+		Framework:    FrameworkNixpacks,
+		InternalPort: 80,
+		Builder:      types.BuilderNixpacks,
+	}
+
+	tag, logs, err := b.Build(context.Background(), dir, "testapp-nixpacks", "production", detection, "v1")
 	if err != nil {
 		t.Skipf("Build() error (likely no docker): %v", err)
 	}

@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 type Builder struct {
@@ -19,13 +21,16 @@ func New(dataDir string) *Builder {
 }
 
 func (b *Builder) Build(ctx context.Context, dir string, appName string, env string, detection *Detection, deploymentID string) (string, string, error) {
+	if detection.Builder == types.BuilderNixpacks {
+		return b.buildWithNixpacks(ctx, dir, appName, env, deploymentID)
+	}
 	if detection.Framework == FrameworkDocker {
-		return b.buildWithDockerfile(ctx, dir, appName, env, deploymentID)
+		return b.buildWithDockerfile(ctx, dir, appName, env, deploymentID, filepath.Join(dir, "Dockerfile"))
 	}
 	if err := b.ensureDockerfile(dir, detection); err != nil {
 		return "", "", fmt.Errorf("generate dockerfile: %w", err)
 	}
-	return b.buildWithDockerfile(ctx, dir, appName, env, deploymentID)
+	return b.buildWithDockerfile(ctx, dir, appName, env, deploymentID, filepath.Join(dir, "Dockerfile"))
 }
 
 func (b *Builder) ensureDockerfile(dir string, detection *Detection) error {
@@ -37,12 +42,21 @@ func (b *Builder) ensureDockerfile(dir string, detection *Detection) error {
 	return os.WriteFile(dfPath, []byte(content), 0644)
 }
 
-func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName string, env string, deploymentID string) (string, string, error) {
+func (b *Builder) buildWithNixpacks(ctx context.Context, dir string, appName string, env string, deploymentID string) (string, string, error) {
+	dfPath, err := NixpacksGenerateDockerfile(ctx, dir)
+	if err != nil {
+		return "", "", fmt.Errorf("nixpacks generate: %w", err)
+	}
+	return b.buildWithDockerfile(ctx, dir, appName, env, deploymentID, dfPath)
+}
+
+func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName string, env string, deploymentID string, dockerfilePath string) (string, string, error) {
 	if env == "" {
 		env = "production"
 	}
 	tag := fmt.Sprintf("tengiz-apps/%s:%s-%s", appName, env, deploymentID)
-	cmd := exec.CommandContext(ctx, "docker", "build", "-t", tag, dir)
+
+	cmd := exec.CommandContext(ctx, "docker", "build", "-f", dockerfilePath, "-t", tag, dir)
 
 	var logBuf bytes.Buffer
 	logWriter := io.MultiWriter(os.Stdout, &logBuf)
