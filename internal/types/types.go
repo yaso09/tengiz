@@ -40,8 +40,9 @@ type ResourceConfig struct {
 }
 
 type BuildConfig struct {
-	Command string `mapstructure:"command"`
-	Output  string `mapstructure:"output"`
+	Command  string `mapstructure:"command"`
+	Output   string `mapstructure:"output"`
+	Strategy string `mapstructure:"strategy"`
 }
 
 type ServerlessConfig struct {

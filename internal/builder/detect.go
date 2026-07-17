@@ -25,6 +25,7 @@ type Detection struct {
 	OutputDir    string
 	InternalPort int
 	HealthCheck  *types.HealthCheckConfig
+	Strategy     string
 }
 
 func Detect(dir string) (*Detection, error) {

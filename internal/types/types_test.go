@@ -91,3 +91,10 @@ func TestVolumeConfigDefaults(t *testing.T) {
 		t.Fatal("expected Volumes to be nil by default")
 	}
 }
+
+func TestBuildConfigStrategyField(t *testing.T) {
+	cfg := BuildConfig{Strategy: "nixpacks"}
+	if cfg.Strategy != "nixpacks" {
+		t.Errorf("expected strategy nixpacks, got %s", cfg.Strategy)
+	}
+}
