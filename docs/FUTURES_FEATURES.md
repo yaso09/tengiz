@@ -1328,3 +1328,39 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Dokku's core is a plugin system with 40+ trigger points across the application lifecycle: `post-app-create`, `pre-deploy`, `post-deploy`, `post-stop`, `post-reboot`, `post-config-set`, `post-scale`, etc. Plugins are executable scripts that implement trigger functions. This has produced 100+ community plugins for databases, SSL, monitoring, CI/CD, and more.
 - **Why add to Tengiz:** Tengiz has no extension mechanism — every feature must be added to core. A plugin system enables: community ecosystem, third-party development without forking, per-site custom logic. Implementation: trigger hooks at key lifecycle points that scan `~/.tengiz/plugins/` for executables and run them with JSON context on stdin. `tengiz plugin install gh:user/repo` downloads and registers a plugin. High effort but transformative for project growth. The existing hook system (#12, #28) provides the foundation — this generalizes it into a discoverable, installable ecosystem.
 - **Detected:** 2026-07-17
+
+## Multi-Architecture Builds (Docker Buildx amd64 + arm64)
+- **Source:** Kamal
+- **Description:** Build Docker images for multiple CPU architectures (amd64 + arm64) simultaneously using Docker buildx. Kamal's `builder.arch` config controls target architectures, supports splitting builds natively per architecture, and mixing local + remote builders for cross-compilation. `builder.arch: [amd64, arm64]` produces a multi-arch manifest in the registry.
+- **Why add to Tengiz:** Apple Silicon developers (arm64) deploying to Intel servers (amd64) must currently build for their target arch manually. Multi-arch builds enable one `tengiz deploy` to produce images for both architectures from any machine. Increasingly important as ARM servers (AWS Graviton, Ampere) become common. `.tengiz.yaml`'da `builder.platforms: [linux/amd64, linux/arm64]`. Implementation: `docker buildx build --platform` flag with `--push` for registry-based multi-arch manifests. Medium effort (buildx driver setup + platform flag plumbing), high value for heterogeneous environments. Complements Remote Builder (below) for native-arch builds on remote machines.
+- **Detected:** 2026-07-17
+
+## Remote Docker Builder (SSH-Based Buildx)
+- **Source:** Kamal
+- **Description:** Connect to a remote Docker buildx builder via SSH URL (`ssh://user@host`) for building images on a more powerful remote machine. Kamal's `builder.remote` supports splitting builds by architecture: build native arch locally, cross-compile other archs on the remote. Combined with local registry for image distribution.
+- **Why add to Tengiz:** Heavy builds (large monorepos, native dependencies, LLM model packaging) can overwhelm the deploy server. Offloading builds to a dedicated build server with more RAM/CPU keeps the production server responsive. Enables hybrid workflows: dev machine builds its native arch locally, remote build server cross-compiles other architectures. `.tengiz.yaml`'da `builder.remote: ssh://builder.internal`. Implementation: `docker buildx create --name remote --driver remote ssh://user@host` + `docker buildx use remote`. Medium effort, enables CI/CD-grade build infrastructure without external CI tools. Complements Custom Build Server (#65) at the Docker level.
+- **Detected:** 2026-07-17
+
+## Build-Time Secrets (Docker Build Secrets, Excluded from Image History)
+- **Source:** Kamal
+- **Description:** Pass sensitive values (npm tokens, signing keys, API keys) to the Docker build process in a way that does NOT persist in the final image layers. Kamal's `builder.secrets` injects values from `KAMAL_SECRETS` (vault) using Docker's `--secret` flag with buildkit mount syntax (`RUN --mount=type=secret,id=npmrc`). Secret values never appear in image history, layer cache, or container env. Separate from `builder.args` (build args) which ARE visible in image history.
+- **Why add to Tengiz:** Existing "Build Arguments from Environment" (#21) passes build-time values via `--build-arg` which are visible in `docker history`. For security-critical builds (NPM_TOKEN for private packages, signing keys for artifact verification), secrets must be excluded from image layers. `.tengiz.yaml`'da `build.secrets: { npmrc: "${NPM_TOKEN}" }`. Implementation: `docker build --secret` flag with BuildKit `--mount=type=secret` in generated Dockerfiles or a separate secret injection step. Low-medium effort, high security value. Complements Secrets Management (#32) by extending vault access to the build phase.
+- **Detected:** 2026-07-17
+
+## Config Display Command (Show Effective Merged Configuration)
+- **Source:** Kamal
+- **Description:** `tengiz config` outputs the full merged configuration after resolving env-specific overrides, template evaluation, and secret references. Shows exactly what values will be used during deploy — no guessing how base config + env override + env vars resolved. Values redacted for secrets. Kamal's `kamal config` command resolves all secrets and templates, showing the final effective config as YAML.
+- **Why add to Tengiz:** Today there's no way to see the effective config after `.tengiz.yaml` + `.tengiz.{env}.yaml` merge + env var interpolation. Users guess what values the deploy step sees. `tengiz config show` or `tengiz config dump` resolves all layers and prints the merged result. Critical for debugging config inheritance issues, especially with multi-env setups. Complements Config Validation (#118) which checks schema — this shows the resolved values. Low effort (existing load functions + YAML output), high debugging value.
+- **Detected:** 2026-07-17
+
+## Stale Container Detection (Running Old Versions After Deploy)
+- **Source:** Kamal
+- **Description:** `tengiz app stale_containers <app>` detects containers still running older versions after a deploy. Kamal's `app stale_containers` lists containers whose image tag doesn't match the current deploy version. Supports `--stop` flag to clean them up. Acts as a safety net if zero-downtime deploy's old container cleanup fails.
+- **Why add to Tengiz:** Zero-downtime deploy (#1) launches a new container before stopping the old one. If the old container cleanup fails (timeout, error, crash), an orphaned old-version container keeps running and may receive traffic. `tengiz stale_containers` detects this drift. `.tengiz.yaml`'da `deploy.retain_stale: false` enables auto-cleanup on deploy completion. Distinguish from Container Retention Policy (#17) which keeps N old containers intentionally — this detects UNINTENTIONAL leftovers. Low effort (compare running container images against deploy record), high reliability value.
+- **Detected:** 2026-07-17
+
+## Config Format Self-Documentation (Schema Documentation Command)
+- **Source:** Kamal
+- **Description:** `tengiz config docs [section]` shows the documented configuration schema — what keys are valid, their types, defaults, and descriptions. Kamal's `kamal docs` command auto-generates documentation from `validation.yml`. Sections are navigable: `tengiz config docs builder`, `tengiz config docs proxy`, `tengiz config docs servers`. Reduces the learning curve and serves as built-in reference.
+- **Why add to Tengiz:** Users shouldn't need to read the source code or a separate docs page to learn `.tengiz.yaml` format. `tengiz config docs` in the terminal is always available, always correct, and works offline. Implementation: a Go struct with field tags (`doc:"..."`) or a separate `docs/config.yaml` file with key definitions. Complements Config Validation (#118) which checks format — this teaches the format. Low effort (embedded YAML/JSON or Go struct tags), high UX value.
+- **Detected:** 2026-07-17
