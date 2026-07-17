@@ -117,3 +117,94 @@ func TestLoadNoFile(t *testing.T) {
 		t.Fatal("Load() expected error when no .tengiz.yaml")
 	}
 }
+
+func TestLoadForEnvironment_withEnvFile(t *testing.T) {
+	dir := t.TempDir()
+	base := `
+name: myapp
+port: 3000
+env:
+  APP_ENV: base
+  SHARED_VAR: from-base
+`
+	env := `
+port: 4000
+env:
+  APP_ENV: staging
+  STAGING_SECRET: shh
+`
+	os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), []byte(base), 0644)
+	os.WriteFile(filepath.Join(dir, ".tengiz.staging.yaml"), []byte(env), 0644)
+
+	cfg, err := LoadForEnvironment(dir, "staging")
+	if err != nil {
+		t.Fatalf("LoadForEnvironment() error = %v", err)
+	}
+
+	if cfg.Name != "myapp" {
+		t.Errorf("Name = %q, want %q", cfg.Name, "myapp")
+	}
+	if cfg.Port != 4000 {
+		t.Errorf("Port = %d, want %d", cfg.Port, 4000)
+	}
+	if cfg.Environment != "staging" {
+		t.Errorf("Environment = %q, want %q", cfg.Environment, "staging")
+	}
+
+	// Env map should be merged: env file overrides base, new keys added
+	if cfg.Env["APP_ENV"] != "staging" {
+		t.Errorf("APP_ENV = %q, want %q", cfg.Env["APP_ENV"], "staging")
+	}
+	if cfg.Env["SHARED_VAR"] != "from-base" {
+		t.Errorf("SHARED_VAR = %q, want %q", cfg.Env["SHARED_VAR"], "from-base")
+	}
+	if cfg.Env["STAGING_SECRET"] != "shh" {
+		t.Errorf("STAGING_SECRET = %q, want %q", cfg.Env["STAGING_SECRET"], "shh")
+	}
+}
+
+func TestLoadForEnvironment_missingEnvFile(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), []byte("name: myapp\nport: 3000\n"), 0644)
+
+	cfg, err := LoadForEnvironment(dir, "production")
+	if err != nil {
+		t.Fatalf("LoadForEnvironment() error = %v", err)
+	}
+	if cfg.Port != 3000 {
+		t.Errorf("Port = %d, want %d", cfg.Port, 3000)
+	}
+	if cfg.Environment != "production" {
+		t.Errorf("Environment = %q, want %q", cfg.Environment, "production")
+	}
+}
+
+func TestLoadForEnvironment_envMergePreservesBase(t *testing.T) {
+	dir := t.TempDir()
+	base := `
+name: myapp
+port: 3000
+env:
+  DATABASE_URL: postgres://localhost/mydb
+  API_KEY: base-key
+`
+	env := `
+env:
+  API_KEY: staging-key
+`
+	os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), []byte(base), 0644)
+	os.WriteFile(filepath.Join(dir, ".tengiz.staging.yaml"), []byte(env), 0644)
+
+	cfg, err := LoadForEnvironment(dir, "staging")
+	if err != nil {
+		t.Fatalf("LoadForEnvironment() error = %v", err)
+	}
+
+	// Base key preserved, env key overridden
+	if cfg.Env["DATABASE_URL"] != "postgres://localhost/mydb" {
+		t.Errorf("DATABASE_URL = %q, want %q", cfg.Env["DATABASE_URL"], "postgres://localhost/mydb")
+	}
+	if cfg.Env["API_KEY"] != "staging-key" {
+		t.Errorf("API_KEY = %q, want %q", cfg.Env["API_KEY"], "staging-key")
+	}
+}

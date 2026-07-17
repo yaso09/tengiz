@@ -16,6 +16,7 @@ type VolumeConfig struct {
 
 type AppConfig struct {
 	Name        string              `mapstructure:"name"`
+	Environment string              `mapstructure:"environment,omitempty"`
 	Port        int                 `mapstructure:"port"`
 	Build       BuildConfig         `mapstructure:"build"`
 	Serverless  ServerlessConfig    `mapstructure:"serverless"`
