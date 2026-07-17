@@ -17,11 +17,12 @@ import (
 )
 
 type Pipeline struct {
-	dataDir string
-	env     string
-	b       *builder.Builder
-	rt      runtime.Manager
-	store   *config.Store
+	dataDir     string
+	env         string
+	b           *builder.Builder
+	rt          runtime.Manager
+	store       *config.Store
+	builderType types.BuilderType
 }
 
 func NewPipeline(dataDir string, rt runtime.Manager, store *config.Store) *Pipeline {
@@ -33,11 +34,12 @@ func NewPipelineWithEnv(dataDir, env string, rt runtime.Manager, store *config.S
 		env = "production"
 	}
 	return &Pipeline{
-		dataDir: dataDir,
-		env:     env,
-		b:       builder.New(dataDir),
-		rt:      rt,
-		store:   store,
+		dataDir:     dataDir,
+		env:         env,
+		b:           builder.New(dataDir),
+		rt:          rt,
+		store:       store,
+		builderType: types.BuilderTypeDocker,
 	}
 }
 
@@ -102,6 +104,7 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 	}
 
 	deploymentID := fmt.Sprintf("%d", time.Now().Unix())
+	p.b.BuilderType = p.builderType
 	imageTag, buildLog, err := p.b.Build(ctx, cloneDir, appName, p.env, detection, deploymentID)
 	if err != nil {
 		fmt.Fprint(os.Stderr, buildLog)

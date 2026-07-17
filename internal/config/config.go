@@ -59,6 +59,12 @@ func LoadWithEnv(path, env string) (*types.AppConfig, error) {
 		}
 	}
 
+	if builderVal, ok := allSettings["builder"]; ok {
+		if b, ok := builderVal.(string); ok && b != "" {
+			cfg.Builder = types.BuilderType(b)
+		}
+	}
+
 	cfg.Environment = env
 	return cfg, nil
 }
@@ -118,6 +124,9 @@ func LoadForEnvironment(path, env string) (*types.AppConfig, error) {
 	}
 	if envCfg.Resources != nil {
 		cfg.Resources = envCfg.Resources
+	}
+	if envCfg.Builder != "" {
+		cfg.Builder = envCfg.Builder
 	}
 	if envCfg.Serverless.Enabled != cfg.Serverless.Enabled || envCfg.Serverless.IdleTimeout != 0 {
 		if envCfg.Serverless.IdleTimeout != 0 {

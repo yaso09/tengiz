@@ -63,6 +63,7 @@ func init() {
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	deployCmd.Flags().String("builder", string(types.BuilderTypeDocker), "build strategy: docker or nixpacks")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
@@ -197,6 +198,10 @@ var deployCmd = &cobra.Command{
 		deploymentID := fmt.Sprintf("%d", time.Now().Unix())
 
 		b := builder.New(dataDir)
+		builderType, _ := cmd.Flags().GetString("builder")
+		if builderType == string(types.BuilderTypeNixpacks) {
+			b.BuilderType = types.BuilderTypeNixpacks
+		}
 		store := config.NewStoreWithEnv(dataDir, envFlag)
 		imageTag, buildLog, err := b.Build(context.Background(), projectRoot, cfg.Name, cfg.Environment, detection, deploymentID)
 		if err != nil {
