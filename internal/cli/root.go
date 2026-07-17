@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,6 +51,9 @@ func init() {
 	rootCmd.AddCommand(healthCmd)
 	rootCmd.AddCommand(domainCmd)
 	rootCmd.AddCommand(configCmd)
+	previewCmd.AddCommand(previewLsCmd)
+	previewCmd.AddCommand(previewRmCmd)
+	rootCmd.AddCommand(previewCmd)
 	rootCmd.AddCommand(webhookCmd)
 	gitCmd.AddCommand(gitConnectCmd)
 	gitCmd.AddCommand(gitDisconnectCmd)
@@ -1035,6 +1039,88 @@ var gitDisconnectCmd = &cobra.Command{
 			return fmt.Errorf("remove key: %w", err)
 		}
 		fmt.Println("[tengiz] SSH key removed.")
+		return nil
+	},
+}
+
+var previewCmd = &cobra.Command{
+	Use:   "preview",
+	Short: "Manage preview deployments",
+}
+
+var previewLsCmd = &cobra.Command{
+	Use:   "ls [app]",
+	Short: "List preview deployments",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		store := config.NewStore(dataDir)
+
+		var previews []types.PreviewEntry
+		var err error
+		if len(args) == 1 {
+			previews, err = store.ListPreviewsForApp(args[0])
+		} else {
+			previews, err = store.ListAllPreviews()
+		}
+		if err != nil {
+			return fmt.Errorf("list previews: %w", err)
+		}
+
+		if len(previews) == 0 {
+			fmt.Println("[tengiz] no preview deployments")
+			return nil
+		}
+
+		fmt.Printf("%-20s %-8s %-10s %-30s %-12s\n", "APP", "PR #", "BRANCH", "URL", "STATUS")
+		for _, p := range previews {
+			url := fmt.Sprintf("http://%s:8080", p.Subdomain)
+			fmt.Printf("%-20s %-8d %-10s %-30s %-12s\n", p.AppName, p.PullRequestID, p.Branch, url, p.Status)
+		}
+		return nil
+	},
+}
+
+var previewRmCmd = &cobra.Command{
+	Use:   "rm <app> <pr-number>",
+	Short: "Remove a preview deployment",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		appName := args[0]
+		prNumber, err := strconv.Atoi(args[1])
+		if err != nil {
+			return fmt.Errorf("invalid PR number: %q", args[1])
+		}
+
+		store := config.NewStore(dataDir)
+
+		preview, err := store.GetPreview(appName, prNumber)
+		if err != nil {
+			return fmt.Errorf("preview not found: %w", err)
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		pkey := config.PreviewKey(appName, prNumber)
+		subdomain := fmt.Sprintf("pr-%d.%s.tengiz.local", prNumber, appName)
+
+		proxy.UnregisterDomainWithProxy(subdomain)
+		proxy.UnregisterRouteWithProxy(pkey)
+
+		if err := rt.Remove(cmd.Context(), pkey); err != nil {
+			log.Printf("[tengiz] warning: failed to remove container: %v", err)
+		}
+
+		store.FreePort(preview.Port)
+		store.RemovePreview(appName, prNumber)
+
+		if err := rt.KeepLastNImages(cmd.Context(), pkey, 0); err != nil {
+			log.Printf("[tengiz] warning: image cleanup: %v", err)
+		}
+
+		fmt.Printf("[tengiz] preview PR #%d for %s removed\n", prNumber, appName)
 		return nil
 	},
 }
