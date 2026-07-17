@@ -1,65 +1,44 @@
 package builder
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"os"
-	"os/exec"
-	"path/filepath"
 )
 
+type BuildStrategy interface {
+	Build(ctx context.Context, dir, appName, env string, detection *Detection, deploymentID string) (string, string, error)
+}
+
 type Builder struct {
-	dataDir string
+	dataDir  string
+	strategy BuildStrategy
 }
 
 func New(dataDir string) *Builder {
-	return &Builder{dataDir: dataDir}
+	return &Builder{
+		dataDir:  dataDir,
+		strategy: NewDockerfileStrategy(dataDir),
+	}
+}
+
+func NewWithStrategy(dataDir string, strategy BuildStrategy) *Builder {
+	return &Builder{
+		dataDir:  dataDir,
+		strategy: strategy,
+	}
 }
 
 func (b *Builder) Build(ctx context.Context, dir string, appName string, env string, detection *Detection, deploymentID string) (string, string, error) {
-	if detection.Framework == FrameworkDocker {
-		return b.buildWithDockerfile(ctx, dir, appName, env, deploymentID)
-	}
-	if err := b.ensureDockerfile(dir, detection); err != nil {
-		return "", "", fmt.Errorf("generate dockerfile: %w", err)
-	}
-	return b.buildWithDockerfile(ctx, dir, appName, env, deploymentID)
+	return b.strategy.Build(ctx, dir, appName, env, detection, deploymentID)
 }
 
-func (b *Builder) ensureDockerfile(dir string, detection *Detection) error {
-	dfPath := filepath.Join(dir, "Dockerfile")
-	if _, err := os.Stat(dfPath); err == nil {
-		return nil
+func StrategyFromName(name string, dataDir string) BuildStrategy {
+	switch name {
+	case "nixpacks":
+		return NewDockerfileStrategy(dataDir)
+	default:
+		return NewDockerfileStrategy(dataDir)
 	}
-	content := generateDockerfile(detection)
-	return os.WriteFile(dfPath, []byte(content), 0644)
-}
-
-func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName string, env string, deploymentID string) (string, string, error) {
-	if env == "" {
-		env = "production"
-	}
-	tag := fmt.Sprintf("tengiz-apps/%s:%s-%s", appName, env, deploymentID)
-	cmd := exec.CommandContext(ctx, "docker", "build", "-t", tag, dir)
-
-	var logBuf bytes.Buffer
-	logWriter := io.MultiWriter(os.Stdout, &logBuf)
-	cmd.Stdout = logWriter
-	cmd.Stderr = logWriter
-
-	if err := cmd.Run(); err != nil {
-		return "", logBuf.String(), fmt.Errorf("docker build: %w", err)
-	}
-
-	latestTag := fmt.Sprintf("tengiz-apps/%s:%s-latest", appName, env)
-	tagCmd := exec.CommandContext(ctx, "docker", "tag", tag, latestTag)
-	if out, err := tagCmd.CombinedOutput(); err != nil {
-		return "", logBuf.String() + string(out), fmt.Errorf("docker tag latest: %w\n%s", err, string(out))
-	}
-
-	return tag, logBuf.String(), nil
 }
 
 func generateDockerfile(d *Detection) string {
