@@ -40,8 +40,9 @@ type ResourceConfig struct {
 }
 
 type BuildConfig struct {
-	Command string `mapstructure:"command"`
-	Output  string `mapstructure:"output"`
+	Command string `mapstructure:"command" json:"command,omitempty"`
+	Output  string `mapstructure:"output" json:"output,omitempty"`
+	Builder string `mapstructure:"builder" json:"builder,omitempty"`
 }
 
 type ServerlessConfig struct {
