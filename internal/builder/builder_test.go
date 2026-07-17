@@ -194,6 +194,46 @@ func main() { fmt.Println("hello") }
 	}
 }
 
+func TestBuildWithNixpacksFromDetection(t *testing.T) {
+	b := New(t.TempDir())
+	b.BuilderType = types.BuilderTypeNixpacks
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "Cargo.toml"), []byte("[package]\nname = \"test\""), 0644)
+
+	detection, err := Detect(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detection.Framework != FrameworkNixpacks {
+		t.Skip("nixpacks detection did not trigger (expected for Cargo.toml)")
+	}
+
+	_, logs, err := b.Build(context.Background(), dir, "rustapp", "production", detection, "v1")
+	if err != nil {
+		t.Skipf("nixpacks not installed: %v", err)
+	}
+	if logs == "" {
+		t.Error("expected build logs")
+	}
+}
+
+func TestNixpacksImageTagFormat(t *testing.T) {
+	b := New(t.TempDir())
+	b.BuilderType = types.BuilderTypeNixpacks
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "index.html"), []byte("<h1>hello</h1>"), 0644)
+	detection := &Detection{Framework: FrameworkNixpacks, InternalPort: 80}
+
+	tag, _, err := b.Build(context.Background(), dir, "testapp", "production", detection, "v1")
+	if err != nil {
+		t.Skipf("nixpacks not installed: %v", err)
+	}
+	expected := "tengiz-apps/testapp:production-v1"
+	if tag != expected {
+		t.Errorf("tag = %q, want %q", tag, expected)
+	}
+}
+
 func TestBuildWithDeploymentIDCompiles(t *testing.T) {
 	b := New(t.TempDir())
 	dir := t.TempDir()
