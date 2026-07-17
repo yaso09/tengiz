@@ -1364,3 +1364,95 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** `tengiz config docs [section]` shows the documented configuration schema — what keys are valid, their types, defaults, and descriptions. Kamal's `kamal docs` command auto-generates documentation from `validation.yml`. Sections are navigable: `tengiz config docs builder`, `tengiz config docs proxy`, `tengiz config docs servers`. Reduces the learning curve and serves as built-in reference.
 - **Why add to Tengiz:** Users shouldn't need to read the source code or a separate docs page to learn `.tengiz.yaml` format. `tengiz config docs` in the terminal is always available, always correct, and works offline. Implementation: a Go struct with field tags (`doc:"..."`) or a separate `docs/config.yaml` file with key definitions. Complements Config Validation (#118) which checks format — this teaches the format. Low effort (embedded YAML/JSON or Go struct tags), high UX value.
 - **Detected:** 2026-07-17
+
+---
+
+## Multi-Server Architecture with Periphery Agent
+- **Source:** Komodo
+- **Description:** Distributed client-server architecture with a central "Core" managing multiple "Periphery" agents running on remote servers. Each Periphery is a separate binary that connects to Core via WebSocket, handles Docker operations locally, streams stats, and manages terminals. Core stores server config (address, region, enabled/disabled, key auth, alert thresholds). Periphery agents self-register using onboarding keys — public/private key pairs that allow joining without manual configuration.
+- **Why add to Tengiz:** Tengiz is single-server only. A Periphery agent model would enable true multi-server deployments: deploy apps across machines, separate build load from production, provide a single pane of glass. Tengiz's Go single-binary architecture could embed a lightweight Periphery mode (`tengiz agent`) that connects to a central `tengiz core`. Implementation: WebSocket-based communication, OTel for observability, Periphery-only Docker operations. This is a P0 architectural feature that unblocks all multi-server scenarios, but requires significant effort to design the Core↔Periphery API, authentication (mutual TLS/Noise Protocol), and agent lifecycle. Komodo's `bin/periphery/src/connection/` and `bin/core/src/resource/server.rs` are reference implementations (~5000 lines).
+- **Detected:** 2026-07-17
+
+## Builder Resource (URL / Server / AWS EC2 Build Targets)
+- **Source:** Komodo
+- **Description:** A first-class `Builder` resource that defines how and where builds happen, with three variants: **URL Builder** (connect to a remote Docker daemon directly), **Server Builder** (use a managed Periphery server), **AWS Builder** (launch an ephemeral EC2 instance, run the build, auto-terminate). AWS Builder supports custom AMI, instance type, volume size, subnet, security groups, key pair, and user data script (1185 lines in `bin/core/src/cloud/aws/ec2.rs`). Builds are decoupled from deployments — a build produces an image, a deployment consumes it.
+- **Why add to Tengiz:** Tengiz currently ties build and deploy into one `tengiz deploy` command. A Builder resource separates concerns: pre-built images from CI/CD, remote servers for heavy builds, auto-scaling cloud builders for large monorepos. AWS EC2 ephemeral builders are a game-changer — zero fixed infrastructure for builds, pay-per-build. `.tengiz.yaml`'da `builder: { type: aws, instance_type: c7g.2xlarge }` ile yapılandırılır. Foundation for Build Pipeline (#129) and Build-to-Deploy Trigger Chain (#130).
+- **Detected:** 2026-07-17
+
+## Variable Resource (Global Interpolation Variables)
+- **Source:** Komodo
+- **Description:** Global non-secret variables that can be interpolated into deployment env vars and build args using `[[variable.name]]` syntax. Support `is_secret` flag to hide values from non-admin users in logs/UI. Managed via ResourceSync (GitOps) for declarative variable management. Variables are defined once and referenced across all apps.
+- **Why add to Tengiz:** Eliminates env var duplication across apps. Instead of copying `DATABASE_URL` to every app's config, define it once as a variable and reference it with `[[database_url]]`. Changes propagate everywhere automatically. Secret-flagged variables are hidden from non-admin users. Complements existing env var management (#19) and Secrets Management (#32). `.tengiz.yaml`'da `variables:` bölümü veya ayrı `variables.toml` ile tanımlanır.
+- **Detected:** 2026-07-17
+
+## Secret Interpolation System (Built-in Secrets Without External Vault)
+- **Source:** Komodo
+- **Description:** Core-level and Periphery-level secrets that can be interpolated into deployment/stack environment variables using `[[secret.name]]` syntax. Secret values are hidden in UI, logs, and API responses. Unlike Variable Resource (non-secret), secrets are encrypted at rest and never exposed to non-admin users. No external vault required — secrets are stored encrypted in the platform's own database.
+- **Why add to Tengiz:** Existing "Secrets Management" (#32) describes external vault integration (1Password, AWS Secrets Manager). Komodo's built-in secret system is simpler and self-contained: no external vault dependency, works offline, suitable for single-server deployments. Tengiz could implement this with AES-GCM encryption of secret values in `~/.tengiz/secrets.json`, decrypted only at deploy-time. `.tengiz.yaml`'da `secrets:` bölümü veya `tengiz secret set/get/rm` CLI commands. First-class `Secret` resource type enables GitOps management. Medium effort, high value for users who don't operate a vault infrastructure.
+- **Detected:** 2026-07-17
+
+## User Group Resource (RBAC Groups)
+- **Source:** Komodo
+- **Description:** Group-based permission management beyond individual user permissions. Users inherit permissions from groups they belong to. Supports `everyone` flag (all users inherit), per-resource-type permissions (e.g., all Servers), and per-resource permissions. Synced via ResourceSync. Komodo's `UserGroup` resource stores name, everyone flag, users list, `all:` permissions by resource type, and specific resource permissions.
+- **Why add to Tengiz:** Existing "#77 Granular Scoped API Keys" focuses on machine-to-machine auth. User Groups cover human-to-platform auth: teams of developers need consistent permission sets. Rather than assigning permissions per-user, create groups like `developers` (deploy + view logs), `admins` (full access), `viewers` (read-only). Complements OIDC/SSO (#128) — SSO authenticates, User Groups authorize. Implementation: `tengiz group create/ls/rm/add-user/remove-user` commands, permission checks in CLI and API middleware.
+- **Detected:** 2026-07-17
+
+## Alert System with Severity Levels
+- **Source:** Komodo
+- **Description:** Full alert data model with 5 severity levels: `Ok`, `Info`, `Warning`, `Error`, `Critical`. Targeted alerts per resource (server, deployment, build, stack). Resolved/unresolved state with timestamps. Auto-pruning of old alerts (configurable days). Multiple alert data variants: `ServerUnreachable`, `ContainerDown`, `DeploymentFailed`, `BuildFailed`, `RepoCloneFailed`, `StackDeployFailed`, `SystemStatsHigh`, `ScheduleRun`. Configurable alerters (Slack, Discord, Pushover, ntfy, custom) with per-alerter filtering by alert type, resource whitelist/blacklist, rate limits, and maintenance windows.
+- **Why add to Tengiz:** Existing "#33 Notification System" lists notification channels but lacks the structured alert lifecycle — severity levels, resolved/unresolved tracking, per-resource targeting, auto-pruning. An alert system is not just "send a message" — it's about incident management: track when alerts fire, when they're resolved, escalate Critical vs Info differently, and auto-clean resolved alerts after N days. Implementation: Go struct with severity enum + AlertStore.json, background alert goroutine that integrates with health check, idle timeout, deploy events. `.tengiz.yaml`'da `alerts.severity_threshold: warning` ile yapılandırılır. Complements Prometheus Metrics (#47) — metrics detect issues, alerts notify.
+- **Detected:** 2026-07-17
+
+## Multi-Channel Alerters (Slack, Discord, Pushover, ntfy)
+- **Source:** Komodo
+- **Description:** Specific alerter implementations beyond the generic "notification system": **Slack** (webhook with rich formatting), **Discord** (webhook with embeds, severity-color-coded), **Pushover** (push notification service for mobile), **ntfy.sh** (HTTP-based push notifications, open source), and custom HTTP endpoint. Each alerter supports filtering by alert type, whitelisting/blacklisting specific resources, rate limiting, and maintenance windows. Discord embed colors map to severity: green=Ok, blue=Info, yellow=Warning, red=Error, dark red=Critical.
+- **Why add to Tengiz:** Existing "#33 Notification System" is generic. Specific alerter implementations make notifications actually useful: rich formatting (not just text), mobile push (Pushover/ntfy for after-hours alerts), severity-based coloring (Critical deploy failure vs Info backup completed). Discord embeds with color coding provide at-a-glance severity assessment. Implementation: `alerter` interface with `Send(alert)` method, per-channel config in `.tengiz.yaml`, background goroutine dispatches to registered alerters. Low-medium effort per alerter (each is a HTTP POST with different formatting).
+- **Detected:** 2026-07-17
+
+## Docker Swarm Resource Management
+- **Source:** Komodo
+- **Description:** Full Docker Swarm mode integration as a first-class resource: swarm inspect (join tokens, TLS info, encryption config, CA config, raft config), swarm node listing and inspection (roles: manager/worker, availability, state), swarm service management (create, inspect, list, update, remove), swarm stack management (`docker stack deploy`), swarm secrets (create, rotate, remove), swarm configs (create, rotate, remove). `RemoveSwarmNodes` and `UpdateSwarmNode` operations for node lifecycle.
+- **Why add to Tengiz:** Tengiz currently manages single containers on a single Docker daemon. Docker Swarm brings: multi-node HA (app spreads across 3+ servers), built-in load balancing (routing mesh), service discovery, rolling updates, secrets management, and config management. This is a lighter alternative to Kubernetes that fits Tengiz's Docker-first philosophy. Implementation: `tengiz swarm init/join/leave`, `tengiz service create/ls/rm`, `tengiz stack deploy` commands — all map to Docker CLI via `os/exec`. Swarm mode is built into Docker (no extra install). P1 feature for multi-server deployments.
+- **Detected:** 2026-07-17
+
+## Git Provider Account Management
+- **Source:** Komodo
+- **Description:** Multi-git-provider support configured in core config. Each provider has: domain (github.com, gitlab.com, self-hosted Gitea/GitLab), HTTPS toggle (support for HTTP self-hosted), multiple accounts per provider with username + token. Configured in `core.config.toml` under `[[git_provider]]`. Accounts are referenced by deployment configurations for cloning private repositories.
+- **Why add to Tengiz:** Tengiz's git-based deployment (#5, implemented) needs credentials for private repos. Currently there's no credential management — users must manually configure SSH deploy keys or use public repos. Git Provider Account Management enables: `tengiz git provider add github --token ghp_xxx`, `tengiz deploy --git-provider my-github` for private repo access. Multiple accounts per provider support org-specific tokens. Complements SSH Key Management (#99) with a token-based alternative. Implementation: store credentials encrypted in `~/.tengiz/providers.json`, inject via SSH key or git credential helper during clone.
+- **Detected:** 2026-07-17
+
+## Docker Registry Account Management
+- **Source:** Komodo
+- **Description:** Multi-registry support configured in core config. Each registry has: domain (docker.io, GHCR, GitLab registry, self-hosted), multiple accounts with username + token/password, organizations for UI filtering, Docker login via `echo TOKEN | docker login`. Configured in `config/core.config.toml` under `[[docker_registry]]`. Accounts are referenced by build and deployment configurations for push/pull.
+- **Why add to Tengiz:** Existing "Private Registry Authentication" (#14) and "Container Registry Integration" (#29) mention registry support but lack account management. Multi-account support is essential for teams: one account for pulling base images, another for pushing built images to a different registry. Implementation: `tengiz registry add/ls/rm` commands, credentials in `~/.tengiz/registries.json` (encrypted), references in AppEntry registry fields. Low-medium effort, critical for CI/CD workflows.
+- **Detected:** 2026-07-17
+
+## WebSocket Interactive Terminal (Attach/Exec Modes)
+- **Source:** Komodo
+- **Description:** Full interactive terminal system beyond simple `docker exec`: **Server terminals** (host-level shell access), **Container terminals** (`docker exec`-style), **Attach mode** (attach to container's STDIN for process interaction), **Exec mode** (spawn new process in container), **RecreateMode** — `Always`, `DifferentCommand`, `Never`, **Terminal resize handling** (SIGWINCH passthrough), **Multiple simultaneous terminal sessions** tracked by `Terminal` resource. Uses `portable-pty` + `crossterm` for PTY allocation (465 lines in `bin/periphery/src/terminal.rs`).
+- **Why add to Tengiz:** Existing "#111 Container Entering (tengiz enter)" is a simple `docker exec -it` wrapper. Komodo's terminal system is production-grade: WebSocket streaming for remote use, PTY allocation for proper terminal emulation, attach mode for existing processes, resize handling for correct terminal dimensions. Implementation: Go's `golang.org/x/term` for PTY, `gorilla/websocket` for streaming, `tengiz terminal <app>` with `--attach`/`--exec` flags. Foundation for web-based terminal (future UI feature). Lower priority (P2) as it's additive to an existing basic feature.
+- **Detected:** 2026-07-17
+
+## Granular Docker Prune Operations
+- **Source:** Komodo
+- **Description:** Beyond generic `docker system prune`, Komodo offers per-category prune operations: `PruneContainers` (stopped containers), `PruneNetworks` (unused networks), `PruneImages` (unused images), `PruneVolumes` (unused volumes), `PruneDockerBuilders` (BuildKit builders), `PruneBuildx` (Buildx cache), `PruneSystem` (full system prune). Each operation has specific filtering logic — volume prune only targets orphaned volumes (not referenced by running containers).
+- **Why add to Tengiz:** Existing "#9 Docker Housekeeping" and "#41 Build Cache Management & Git GC" cover basic cleanup. Granular prune gives operators surgical control: prune only images (keep volumes), prune only build cache (keep containers), etc. Users can schedule different prunes for different intervals (daily: stopped containers, weekly: unused images, monthly: build cache). Implementation: map to `docker <object> prune` CLI commands with `--filter` flags. Tengiz's label-based filtering (`tengiz-app=myapp`) adds safety. Low effort (Docker CLI passthrough), high operational value.
+- **Detected:** 2026-07-17
+
+## Batch Operations Across Resource Types
+- **Source:** Komodo
+- **Description:** Batch execution of operations across multiple resources: `BatchRunAction`, `BatchRunProcedure`, `BatchRunBuild`, `BatchDeploy`, `BatchDestroyDeployment`, `BatchCloneRepo`, `BatchPullRepo`, `BatchBuildRepo`, `BatchDeployStack`, `BatchDestroyStack`. Operations filterable by resource type, status, or tags. Concurrent execution with configurable parallelism.
+- **Why add to Tengiz:** Existing "#72 Parallel Bulk Operations" covers multi-app lifecycle commands. Batch operations extend this to builds, repos, stacks, and actions. Use cases: "rebuild all apps tagged 'core'", "deploy all stacks in project 'production'". Implementation: filter by tag/project/status, concurrent goroutine pool with error aggregation. Low-medium effort on top of single-resource operations.
+- **Detected:** 2026-07-17
+
+## Auth Rate Limiting (Brute Force Protection)
+- **Source:** Komodo
+- **Description:** Per-IP rate limiting on authentication failures with configurable max attempts and time window. Blocks brute force attacks against the API and webhook endpoints. Configurable in configuration under `[[rate_limit]]`. Separate from generic rate limiting which targets webhook/API endpoints — auth rate limiting specifically targets login endpoints with IP-based blocking.
+- **Why add to Tengiz:** The webhook server (#13) and any future admin API/auth endpoints are public-facing. Brute force credential attacks are inevitable. Auth rate limiting prevents: dictionary attacks on admin credentials, webhook secret brute-forcing, API key guessing. Implementation: in-memory sliding window counter per IP (Go `sync.Map` + `time.Time`), configurable max_attempts (default 5) and window_seconds (default 300). After threshold, HTTP 429 with Retry-After header. Low effort (standard pattern, Go std library), high security value.
+- **Detected:** 2026-07-17
+
+## Background Monitoring Scheduler
+- **Source:** Komodo
+- **Description:** Background monitoring system that polls servers at configurable intervals (`monitoring_interval`). Health checks verify server reachability, system stats collection records CPU/memory/disk, container status tracking monitors all running containers, stack status tracking checks compose projects, alert generation triggers on failures or high utilization. Monitoring data feeds the alert system, stats store, and health dashboard. Separate goroutines per monitoring domain.
+- **Why add to Tengiz:** Tengiz currently has reactive monitoring (health checks on request, idle timers on timeout) but no proactive background scheduler. A monitoring goroutine would: detect container crashes between health checks, track disk usage trends, verify stack/network stability, and generate alerts without user action. Implementation: `time.Ticker`-based goroutine in `internal/monitor/`, stores results in `~/.tengiz/monitor/` (bounded). Feeds existing health (#4), stats (#72), and alert systems. Config interval in `.tengiz.yaml` (`monitor.interval: 30s`). Medium effort, high reliability value.
+- **Detected:** 2026-07-17
