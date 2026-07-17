@@ -16,6 +16,9 @@ import (
 
 type DeployFunc func(ctx context.Context, repoURL, branch, provider string) error
 
+type PreviewDeployFunc func(ctx context.Context, repoURL string, prNumber int, branch string) error
+type PreviewCleanupFunc func(ctx context.Context, repoURL string, prNumber int) error
+
 type Config struct {
 	Secret          string   `yaml:"secret"`
 	AllowedBranches []string `yaml:"allowed_branches"`
@@ -23,10 +26,12 @@ type Config struct {
 }
 
 type Server struct {
-	dataDir    string
-	cfg        *Config
-	deployFn   DeployFunc
-	httpServer *http.Server
+	dataDir           string
+	cfg               *Config
+	deployFn          DeployFunc
+	previewDeployFn   PreviewDeployFunc
+	previewCleanupFn  PreviewCleanupFunc
+	httpServer        *http.Server
 }
 
 func New(dataDir string, cfg *Config, fn DeployFunc) *Server {
@@ -34,6 +39,16 @@ func New(dataDir string, cfg *Config, fn DeployFunc) *Server {
 		dataDir:  dataDir,
 		cfg:      cfg,
 		deployFn: fn,
+	}
+}
+
+func NewWithPreview(dataDir string, cfg *Config, fn DeployFunc, previewDeployFn PreviewDeployFunc, previewCleanupFn PreviewCleanupFunc) *Server {
+	return &Server{
+		dataDir:          dataDir,
+		cfg:              cfg,
+		deployFn:         fn,
+		previewDeployFn:  previewDeployFn,
+		previewCleanupFn: previewCleanupFn,
 	}
 }
 
@@ -102,7 +117,7 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only process push events
+	// Determine event type
 	eventType := r.Header.Get("X-Github-Event")
 	if eventType == "" {
 		eventType = r.Header.Get("X-Gitlab-Event")
@@ -110,6 +125,14 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 	if eventType == "" {
 		eventType = "push" // Bitbucket/Gitea don't send event type header; assume push
 	}
+
+	// Handle pull_request events for preview deployments
+	if eventType == "pull_request" {
+		s.handlePREvent(w, r, body, provider)
+		return
+	}
+
+	// Only process push events
 	if eventType != "push" && eventType != "Push Hook" && !strings.HasPrefix(eventType, "push") {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ignored","event":"` + eventType + `"}`))
@@ -284,4 +307,88 @@ func parseBitbucketEvent(r *http.Request, body []byte) (repo, ref, provider stri
 func parseGiteaEvent(r *http.Request, body []byte) (repo, ref, provider string, err error) {
 	repo, ref, _, err = parseGitHubEvent(r, body)
 	return repo, ref, "gitea", err
+}
+
+func (s *Server) handlePREvent(w http.ResponseWriter, r *http.Request, body []byte, provider string) {
+	if provider != "github" && provider != "gitea" {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ignored","reason":"PR events only supported for GitHub/Gitea"}`))
+		return
+	}
+
+	// Verify HMAC
+	if err := s.verifyHMAC(r, body); err != nil {
+		log.Printf("[tengiz] webhook HMAC verification failed: %v", err)
+		http.Error(w, "signature verification failed", http.StatusForbidden)
+		return
+	}
+
+	repo, prNumber, branch, action, err := parseGitHubPREvent(body)
+	if err != nil {
+		log.Printf("[tengiz] webhook PR parse error: %v", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	switch action {
+	case "opened", "synchronize", "reopened":
+		if s.previewDeployFn == nil {
+			log.Printf("[tengiz] webhook: no preview deploy function configured")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"ignored","reason":"no preview deploy handler"}`))
+			return
+		}
+		log.Printf("[tengiz] webhook: PR #%d %s — deploying preview", prNumber, action)
+		if err := s.previewDeployFn(r.Context(), repo, prNumber, branch); err != nil {
+			log.Printf("[tengiz] preview deploy error: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	case "closed":
+		if s.previewCleanupFn == nil {
+			log.Printf("[tengiz] webhook: no preview cleanup function configured")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"ignored","reason":"no preview cleanup handler"}`))
+			return
+		}
+		log.Printf("[tengiz] webhook: PR #%d closed — cleaning up preview", prNumber)
+		if err := s.previewCleanupFn(r.Context(), repo, prNumber); err != nil {
+			log.Printf("[tengiz] preview cleanup error: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	default:
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ignored","event":"pull_request","action":"` + action + `"}`))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"ok"}`))
+}
+
+func parseGitHubPREvent(body []byte) (repo string, prNumber int, branch string, action string, err error) {
+	var payload struct {
+		Action string `json:"action"`
+		Number int    `json:"number"`
+		PullRequest struct {
+			Head struct {
+				Ref  string `json:"ref"`
+				Repo struct {
+					CloneURL string `json:"clone_url"`
+				} `json:"repo"`
+			} `json:"head"`
+		} `json:"pull_request"`
+		Repository struct {
+			CloneURL string `json:"clone_url"`
+		} `json:"repository"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", 0, "", "", fmt.Errorf("pull_request: %w", err)
+	}
+	repo = payload.Repository.CloneURL
+	if repo == "" {
+		repo = payload.PullRequest.Head.Repo.CloneURL
+	}
+	return repo, payload.Number, payload.PullRequest.Head.Ref, payload.Action, nil
 }
