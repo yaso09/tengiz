@@ -2,8 +2,12 @@ package webhook
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash"
 	"io"
 	"log"
 	"net/http"
@@ -12,15 +16,23 @@ import (
 
 type DeployFunc func(ctx context.Context, repoURL, branch, provider string) error
 
+type Config struct {
+	Secret          string   `yaml:"secret"`
+	AllowedBranches []string `yaml:"allowed_branches"`
+	Port            int      `yaml:"port"`
+}
+
 type Server struct {
 	dataDir    string
+	cfg        *Config
 	deployFn   DeployFunc
 	httpServer *http.Server
 }
 
-func New(dataDir string, fn DeployFunc) *Server {
+func New(dataDir string, cfg *Config, fn DeployFunc) *Server {
 	return &Server{
 		dataDir:  dataDir,
+		cfg:      cfg,
 		deployFn: fn,
 	}
 }
@@ -67,20 +79,61 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	var repo, ref, provider string
-
+	// Determine provider from headers
+	var provider string
 	switch {
 	case r.Header.Get("X-Github-Event") != "":
-		repo, ref, provider, err = parseGitHubEvent(r, body)
+		provider = "github"
 	case r.Header.Get("X-Gitlab-Event") != "":
-		repo, ref, provider, err = parseGitLabEvent(r, body)
+		provider = "gitlab"
 	case r.Header.Get("X-Hook-UUID") != "":
-		repo, ref, provider, err = parseBitbucketEvent(r, body)
+		provider = "bitbucket"
 	case r.Header.Get("X-Gitea-Event") != "":
-		repo, ref, provider, err = parseGiteaEvent(r, body)
+		provider = "gitea"
 	default:
 		http.Error(w, "unknown provider", http.StatusBadRequest)
 		return
+	}
+
+	// Handle ping events
+	if r.Header.Get("X-Github-Event") == "ping" {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok","event":"ping"}`))
+		return
+	}
+
+	// Only process push events
+	eventType := r.Header.Get("X-Github-Event")
+	if eventType == "" {
+		eventType = r.Header.Get("X-Gitlab-Event")
+	}
+	if eventType == "" {
+		eventType = "push" // Bitbucket/Gitea don't send event type header; assume push
+	}
+	if eventType != "push" && eventType != "Push Hook" && !strings.HasPrefix(eventType, "push") {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ignored","event":"` + eventType + `"}`))
+		return
+	}
+
+	// Verify HMAC if secret is configured
+	if err := s.verifyHMAC(r, body); err != nil {
+		log.Printf("[tengiz] webhook HMAC verification failed: %v", err)
+		http.Error(w, "signature verification failed", http.StatusForbidden)
+		return
+	}
+
+	var repo, ref string
+
+	switch provider {
+	case "github":
+		repo, ref, _, err = parseGitHubEvent(r, body)
+	case "gitlab":
+		repo, ref, _, err = parseGitLabEvent(r, body)
+	case "bitbucket":
+		repo, ref, _, err = parseBitbucketEvent(r, body)
+	case "gitea":
+		repo, ref, _, err = parseGiteaEvent(r, body)
 	}
 
 	if err != nil {
@@ -90,6 +143,15 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	branch := strings.TrimPrefix(ref, "refs/heads/")
+
+	// Branch filtering
+	if !s.isBranchAllowed(branch) {
+		log.Printf("[tengiz] webhook: branch %q not in allowed list, skipping", branch)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"skipped","reason":"branch not allowed"}`))
+		return
+	}
+
 	log.Printf("[tengiz] webhook: %s push to %s/%s", provider, repo, branch)
 
 	if s.deployFn != nil {
@@ -102,6 +164,61 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"ok"}`))
+}
+
+func (s *Server) verifyHMAC(r *http.Request, body []byte) error {
+	if s.cfg == nil || s.cfg.Secret == "" {
+		return nil // no secret configured = skip verification
+	}
+
+	secret := []byte(s.cfg.Secret)
+	var providedSig string
+	var hashFunc func() hash.Hash
+
+	switch {
+	case r.Header.Get("X-Github-Event") != "" || r.Header.Get("X-Gitea-Event") != "":
+		// GitHub/Gitea: X-Hub-Signature-256
+		providedSig = r.Header.Get("X-Hub-Signature-256")
+		hashFunc = sha256.New
+	case r.Header.Get("X-Gitlab-Event") != "":
+		// GitLab: X-Gitlab-Token (plain text comparison)
+		providedToken := r.Header.Get("X-Gitlab-Token")
+		if hmac.Equal([]byte(providedToken), secret) {
+			return nil
+		}
+		return fmt.Errorf("gitlab token mismatch")
+	case r.Header.Get("X-Hook-UUID") != "":
+		// Bitbucket: X-Hub-Signature (HMAC-SHA256)
+		providedSig = r.Header.Get("X-Hub-Signature")
+		hashFunc = sha256.New
+	default:
+		return nil
+	}
+
+	if providedSig == "" {
+		return fmt.Errorf("missing signature header")
+	}
+
+	mac := hmac.New(hashFunc, secret)
+	mac.Write(body)
+	expectedSig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	if !hmac.Equal([]byte(providedSig), []byte(expectedSig)) {
+		return fmt.Errorf("signature mismatch")
+	}
+	return nil
+}
+
+func (s *Server) isBranchAllowed(branch string) bool {
+	if s.cfg == nil || len(s.cfg.AllowedBranches) == 0 {
+		return true // empty list = allow all
+	}
+	for _, allowed := range s.cfg.AllowedBranches {
+		if branch == allowed {
+			return true
+		}
+	}
+	return false
 }
 
 func parseGitHubEvent(r *http.Request, body []byte) (repo, ref, provider string, err error) {

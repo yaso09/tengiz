@@ -250,6 +250,77 @@ func TestLoadForEnvironment_validateEnvName(t *testing.T) {
 	}
 }
 
+func TestLoadWebhookConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `name: myapp
+port: 3000
+webhook:
+  secret: my-secret-key
+  allowed_branches:
+    - main
+    - production
+  port: 9091
+`
+	os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), []byte(cfg), 0644)
+
+	wc, err := LoadWebhookConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadWebhookConfig: %v", err)
+	}
+	if wc.Secret != "my-secret-key" {
+		t.Errorf("Secret = %q, want %q", wc.Secret, "my-secret-key")
+	}
+	if len(wc.AllowedBranches) != 2 || wc.AllowedBranches[0] != "main" {
+		t.Errorf("AllowedBranches = %v, want [main production]", wc.AllowedBranches)
+	}
+	if wc.Port != 9091 {
+		t.Errorf("Port = %d, want 9091", wc.Port)
+	}
+}
+
+func TestLoadWebhookConfigAbsent(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `name: myapp
+port: 3000
+`
+	os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), []byte(cfg), 0644)
+
+	wc, err := LoadWebhookConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadWebhookConfig: %v", err)
+	}
+	if wc != nil {
+		t.Errorf("expected nil config when no webhook section, got %+v", wc)
+	}
+}
+
+func TestLoadWebhookConfigPartial(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `name: myapp
+webhook:
+  allowed_branches:
+    - main
+`
+	os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), []byte(cfg), 0644)
+
+	wc, err := LoadWebhookConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadWebhookConfig: %v", err)
+	}
+	if wc == nil {
+		t.Fatal("expected non-nil config")
+	}
+	if wc.Secret != "" {
+		t.Errorf("Secret = %q, want empty", wc.Secret)
+	}
+	if len(wc.AllowedBranches) != 1 || wc.AllowedBranches[0] != "main" {
+		t.Errorf("AllowedBranches = %v", wc.AllowedBranches)
+	}
+	if wc.Port != 0 {
+		t.Errorf("Port = %d, want 0 (default)", wc.Port)
+	}
+}
+
 func TestLoadForEnvironment_envMergePreservesBase(t *testing.T) {
 	dir := t.TempDir()
 	base := `

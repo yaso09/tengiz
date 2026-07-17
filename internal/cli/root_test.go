@@ -175,6 +175,13 @@ func TestWebhookCommandRegistered(t *testing.T) {
 	}
 }
 
+func TestWebhookCmdReadsConfig(t *testing.T) {
+	flag := webhookCmd.Flags().Lookup("config")
+	if flag == nil {
+		t.Error("webhookCmd missing --config flag")
+	}
+}
+
 func TestGitCommandsRegistered(t *testing.T) {
 	cmd, _, err := rootCmd.Find([]string{"git"})
 	if err != nil {

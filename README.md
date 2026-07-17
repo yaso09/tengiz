@@ -378,8 +378,9 @@ Tengiz supports automatic deployment on `git push` via webhooks.
 4. **Start the webhook server:**
 
    ```bash
-   tengiz webhook
-   # Listens on :9090 by default; use --port to change
+   tengiz webhook                   # listens on :9090
+   tengiz webhook -p 9091           # custom port
+   tengiz webhook --config .tengiz.yaml  # load webhook config from file
    ```
 
 5. **Configure the webhook URL in your git provider:**
@@ -394,6 +395,42 @@ Tengiz supports automatic deployment on `git push` via webhooks.
    - GitLab: Repository → Settings → Webhooks
    - Bitbucket: Repository → Settings → Webhooks
    - Gitea: Repository → Settings → Webhooks
+
+### Webhook Configuration
+
+Configure webhook settings in `.tengiz.yaml`:
+
+```yaml
+webhook:
+  secret: your-webhook-secret     # HMAC verification (recommended)
+  allowed_branches:
+    - main
+    - production
+  port: 9090                      # override default port
+```
+
+Supported providers and HMAC verification:
+- **GitHub** — `X-Hub-Signature-256` HMAC-SHA256
+- **GitLab** — `X-Gitlab-Token` plain text comparison
+- **Bitbucket** — `X-Hub-Signature` HMAC-SHA256
+- **Gitea** — `X-Hub-Signature-256` HMAC-SHA256
+
+When `webhook.secret` is set, the server verifies the payload signature on every push event. Requests with invalid signatures return HTTP 403. If no secret is configured, verification is skipped.
+
+#### GitHub Setup
+1. Go to your repo → Settings → Webhooks → Add webhook
+2. Payload URL: `http://<your-server>:9090/webhook`
+3. Content type: `application/json`
+4. Secret: (same as `webhook.secret` in `.tengiz.yaml`)
+5. Events: Just the push event
+6. Add webhook
+
+#### GitLab Setup
+1. Go to your repo → Settings → Webhooks
+2. URL: `http://<your-server>:9090/webhook`
+3. Secret token: (same as `webhook.secret` in `.tengiz.yaml`)
+4. Trigger: Push events
+5. Add webhook
 
 ### How It Works
 
@@ -410,7 +447,7 @@ Tengiz supports automatic deployment on `git push` via webhooks.
 |---------|-------------|
 | `tengiz git connect` | Generate an SSH deploy key |
 | `tengiz git disconnect` | Remove the SSH deploy key |
-| `tengiz webhook` | Start the webhook server |
+| `tengiz webhook [-p <port>] [--config <path>]` | Start the webhook server with optional config |
 | `tengiz init --git-repo URL` | Create config with git repo |
 
 ## Architecture
