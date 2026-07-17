@@ -39,9 +39,15 @@ type ResourceConfig struct {
 	Memory string `mapstructure:"memory" yaml:"memory" json:"memory,omitempty"`
 }
 
+const (
+	BuilderDefault  = ""
+	BuilderNixpacks = "nixpacks"
+)
+
 type BuildConfig struct {
 	Command string `mapstructure:"command"`
 	Output  string `mapstructure:"output"`
+	Builder string `mapstructure:"builder"`
 }
 
 type ServerlessConfig struct {
