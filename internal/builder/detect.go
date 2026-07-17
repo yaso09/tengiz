@@ -10,13 +10,14 @@ import (
 type Framework string
 
 const (
-	FrameworkNextJS Framework = "nextjs"
-	FrameworkVite   Framework = "vite"
-	FrameworkGo     Framework = "go"
-	FrameworkNode   Framework = "node"
-	FrameworkPython Framework = "python"
-	FrameworkStatic Framework = "static"
-	FrameworkDocker Framework = "docker"
+	FrameworkNextJS   Framework = "nextjs"
+	FrameworkVite     Framework = "vite"
+	FrameworkGo       Framework = "go"
+	FrameworkNode     Framework = "node"
+	FrameworkPython   Framework = "python"
+	FrameworkStatic   Framework = "static"
+	FrameworkDocker   Framework = "docker"
+	FrameworkNixpacks Framework = "nixpacks"
 )
 
 type Detection struct {
@@ -25,6 +26,7 @@ type Detection struct {
 	OutputDir    string
 	InternalPort int
 	HealthCheck  *types.HealthCheckConfig
+	Builder      string
 }
 
 func Detect(dir string) (*Detection, error) {
