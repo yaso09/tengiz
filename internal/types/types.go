@@ -2,6 +2,13 @@ package types
 
 import "time"
 
+type BuilderType string
+
+const (
+	BuilderTypeDocker   BuilderType = "docker"
+	BuilderTypeNixpacks BuilderType = "nixpacks"
+)
+
 type GitConfig struct {
 	Repo     string `mapstructure:"repo" json:"repo,omitempty"`
 	Branch   string `mapstructure:"branch" json:"branch,omitempty"`
@@ -28,6 +35,7 @@ type AppConfig struct {
 	Domains     []string            `mapstructure:"domains"`
 	HealthCheck *HealthCheckConfig  `mapstructure:"healthcheck,omitempty"`
 	Resources   *ResourceConfig     `mapstructure:"resources,omitempty" json:"resources,omitempty"`
+	Builder     BuilderType         `mapstructure:"builder" yaml:"builder" json:"builder,omitempty"`
 	Env         map[string]string   `mapstructure:"env" json:"env,omitempty"`
 	Environment string              `mapstructure:"environment" json:"environment,omitempty"`
 	Git         *GitConfig          `mapstructure:"git,omitempty" json:"git,omitempty"`
