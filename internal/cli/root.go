@@ -118,6 +118,8 @@ var initCmd = &cobra.Command{
 
 		content := fmt.Sprintf(`name: %s
 environment: %s
+build:
+  builder: docker       # build strategy: docker or nixpacks
 # port: 3000            # container internal port (auto-detected if omitted)
 serverless:
   enabled: true
