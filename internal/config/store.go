@@ -384,6 +384,75 @@ func (s *Store) GetDeploymentByID(appName, deploymentID string) (*types.Deployme
 	return nil, fmt.Errorf("deployment %q not found for app %q", deploymentID, appName)
 }
 
+func PreviewKey(appName string, prNumber int) string {
+	return fmt.Sprintf("%s-pr-%d", appName, prNumber)
+}
+
+func (s *Store) SavePreview(preview types.PreviewEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	previews := make(map[string]types.PreviewEntry)
+	s.readJSON("previews.json", &previews)
+	key := PreviewKey(preview.AppName, preview.PullRequestID)
+	previews[key] = preview
+	return s.writeJSON("previews.json", previews)
+}
+
+func (s *Store) GetPreview(appName string, prNumber int) (*types.PreviewEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	previews := make(map[string]types.PreviewEntry)
+	s.readJSON("previews.json", &previews)
+	key := PreviewKey(appName, prNumber)
+	p, ok := previews[key]
+	if !ok {
+		return nil, fmt.Errorf("preview %s not found", key)
+	}
+	return &p, nil
+}
+
+func (s *Store) RemovePreview(appName string, prNumber int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	previews := make(map[string]types.PreviewEntry)
+	s.readJSON("previews.json", &previews)
+	key := PreviewKey(appName, prNumber)
+	delete(previews, key)
+	return s.writeJSON("previews.json", previews)
+}
+
+func (s *Store) ListPreviewsForApp(appName string) ([]types.PreviewEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	previews := make(map[string]types.PreviewEntry)
+	s.readJSON("previews.json", &previews)
+	var result []types.PreviewEntry
+	prefix := appName + "-pr-"
+	for _, p := range previews {
+		if strings.HasPrefix(PreviewKey(p.AppName, p.PullRequestID), prefix) {
+			result = append(result, p)
+		}
+	}
+	return result, nil
+}
+
+func (s *Store) ListAllPreviews() ([]types.PreviewEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	previews := make(map[string]types.PreviewEntry)
+	s.readJSON("previews.json", &previews)
+	result := make([]types.PreviewEntry, 0, len(previews))
+	for _, p := range previews {
+		result = append(result, p)
+	}
+	return result, nil
+}
+
 func (s *Store) readJSON(name string, v interface{}) {
 	data, err := os.ReadFile(filepath.Join(s.dataDir, name))
 	if err == nil {

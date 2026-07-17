@@ -486,6 +486,92 @@ func TestStoreDefaultEnv(t *testing.T) {
 	}
 }
 
+func TestPreviewKey(t *testing.T) {
+	key := PreviewKey("myapp", 42)
+	if key != "myapp-pr-42" {
+		t.Errorf("PreviewKey = %q, want %q", key, "myapp-pr-42")
+	}
+	key = PreviewKey("my-app", 123)
+	if key != "my-app-pr-123" {
+		t.Errorf("PreviewKey = %q, want %q", key, "my-app-pr-123")
+	}
+}
+
+func TestSaveAndGetPreview(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+	preview := types.PreviewEntry{
+		AppName:       "myapp",
+		PullRequestID: 42,
+		Branch:        "feature/login",
+		ImageTag:      "tengiz-apps/myapp:pr-42-1704067200",
+		ContainerName: "tengiz-myapp-pr-42",
+		Port:          9001,
+		Subdomain:     "pr-42.myapp.tengiz.local",
+		Status:        types.PreviewActive,
+	}
+	if err := s.SavePreview(preview); err != nil {
+		t.Fatalf("SavePreview: %v", err)
+	}
+	got, err := s.GetPreview("myapp", 42)
+	if err != nil {
+		t.Fatalf("GetPreview: %v", err)
+	}
+	if got.PullRequestID != 42 {
+		t.Errorf("PullRequestID = %d, want 42", got.PullRequestID)
+	}
+	if got.Port != 9001 {
+		t.Errorf("Port = %d, want 9001", got.Port)
+	}
+	if got.Status != types.PreviewActive {
+		t.Errorf("Status = %q, want %q", got.Status, types.PreviewActive)
+	}
+}
+
+func TestListPreviewsForApp(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+	for i := 1; i <= 3; i++ {
+		preview := types.PreviewEntry{
+			AppName:       "myapp",
+			PullRequestID: i,
+			Branch:        "branch-" + fmt.Sprint(i),
+			ContainerName: fmt.Sprintf("tengiz-myapp-pr-%d", i),
+			Port:          9000 + i,
+			Subdomain:     fmt.Sprintf("pr-%d.myapp.tengiz.local", i),
+			Status:        types.PreviewActive,
+		}
+		s.SavePreview(preview)
+	}
+	previews, err := s.ListPreviewsForApp("myapp")
+	if err != nil {
+		t.Fatalf("ListPreviewsForApp: %v", err)
+	}
+	if len(previews) != 3 {
+		t.Errorf("len = %d, want 3", len(previews))
+	}
+}
+
+func TestRemovePreview(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+	preview := types.PreviewEntry{
+		AppName:       "myapp",
+		PullRequestID: 42,
+		ContainerName: "tengiz-myapp-pr-42",
+		Port:          9001,
+		Status:        types.PreviewActive,
+	}
+	s.SavePreview(preview)
+	if err := s.RemovePreview("myapp", 42); err != nil {
+		t.Fatalf("RemovePreview: %v", err)
+	}
+	_, err := s.GetPreview("myapp", 42)
+	if err == nil {
+		t.Error("expected error after removal, got nil")
+	}
+}
+
 func TestPruneBuildLogs(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)

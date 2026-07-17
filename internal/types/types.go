@@ -103,6 +103,26 @@ const (
 	HealthUnhealthy = "unhealthy"
 )
 
+type PreviewStatus string
+
+const (
+	PreviewActive  PreviewStatus = "active"
+	PreviewCleanup PreviewStatus = "cleanup"
+)
+
+type PreviewEntry struct {
+	AppName       string        `json:"app_name"`
+	PullRequestID int           `json:"pull_request_id"`
+	Branch        string        `json:"branch"`
+	ImageTag      string        `json:"image_tag"`
+	ContainerName string        `json:"container_name"`
+	Port          int           `json:"port"`
+	Subdomain     string        `json:"subdomain"`
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
+	Status        PreviewStatus `json:"status"`
+}
+
 type AppEntry struct {
 	Name             string            `json:"name"`
 	ImageTag         string            `json:"image_tag"`
