@@ -103,10 +103,12 @@ var initCmd = &cobra.Command{
 			return fmt.Errorf(".tengiz.yaml already exists")
 		}
 
+		env := getEnv(cmd)
 		gitRepo, _ := cmd.Flags().GetString("git-repo")
 		gitBranch, _ := cmd.Flags().GetString("git-branch")
 
 		content := fmt.Sprintf(`name: %s
+environment: %s
 # port: 3000            # container internal port (auto-detected if omitted)
 serverless:
   enabled: true
@@ -131,7 +133,7 @@ serverless:
 # resources:
 #   cpu: "1.0"           # CPU cores (e.g., "0.5", "2")
 #   memory: "256m"       # memory limit (e.g., "128m", "1g")
-`, name)
+`, name, env)
 
 		if gitRepo != "" {
 			content += fmt.Sprintf("git:\n  repo: %s\n  branch: %s\n", gitRepo, gitBranch)
