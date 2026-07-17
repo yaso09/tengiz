@@ -95,6 +95,7 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		cfg.Domains = existingApp.Domains
 		cfg.HealthCheck = existingApp.Config.HealthCheck
 		cfg.Serverless = existingApp.Config.Serverless
+		cfg.Environment = existingApp.Config.Environment
 		if existingApp.Config.Port != 0 {
 			cfg.Port = existingApp.Config.Port
 		}
