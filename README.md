@@ -71,6 +71,9 @@ Build and deploy an application with zero-downtime.
 | Argument | Description |
 |----------|-------------|
 | `directory` | Project directory (default: `.`) |
+| `-e`, `--env` | Deployment environment (e.g. `staging`, `production`). Loads `.tengiz.{env}.yaml` on top of `.tengiz.yaml`. |
+
+When using `--env`, Tengiz looks for a `.tengiz.{env}.yaml` file in the project root. Environment-specific configs use a shallow merge for scalar fields (port, resources, etc.) and a deep merge for the `env` map — env file keys add/override individual entries without replacing the entire map. The environment name is stored and displayed in `tengiz ps`.
 
 Detects the framework, builds a Docker image, and deploys. On first deploy, allocates a port (9000-9999), starts the container. On subsequent deploys, performs a **blue/green switch**: new versioned container starts on a new port, readiness is checked, traffic is routed to the new container atomically via the proxy admin API, then the old container is stopped and removed. Deployment history is recorded in `~/.tengiz/deployments.json`. If no `.tengiz.yaml` exists, uses the directory name as app name with serverless defaults.
 
@@ -91,7 +94,7 @@ The proxy also starts an **admin API** on `127.0.0.1:9099` for dynamic route man
 
 List all deployed applications and their status.
 
-Output: `NAME`, `STATE` (running/stopped), `PORT`.
+Output: `NAME`, `STATE` (running/stopped), `PORT`, `ENVIRONMENT`, `HEALTH`.
 
 ### `tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] <app>`
 
