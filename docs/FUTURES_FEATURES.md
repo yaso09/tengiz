@@ -1158,3 +1158,83 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Komodo deployments can link to a build resource via `redeploy_on_build: true`. When the build completes successfully, it automatically triggers a redeploy of any linked deployment. The chain is: build triggers → on success → deployment pulls latest image → container restarts with zero-downtime. This creates a complete CI/CD pipeline without external CI tools. Build-to-deploy links are stored as references in both the Build and Deployment resources.
 - **Why add to Tengiz:** Turns Tengiz into a complete CI/CD platform. After adding the Build Pipeline with Auto-Versioning, the natural next step is linking build output to deployment. The flow: developer pushes code → webhook triggers build → build completes → image pushed to registry → linked deployment auto-redeploys with zero downtime. No Jenkins, no GitHub Actions, no Drone — just Tengiz. `.tengiz.yaml`'da `build.auto_deploy: true` veya `deploy.from_build: myapp-build` ile yapılandırılır. Implementation: after `build.RunBuild()` succeeds, look up any deployments with matching build references and call the deploy pipeline. This closes the loop between features #5 (git-based deploy), #13 (webhook), and #29 (container registry) into a single automated workflow. The only missing piece for a fully self-hosted CI/CD is test running, which could be a pre-build hook step.
 - **Detected:** 2026-07-16
+
+---
+
+## Commit Status Reporting (Git Provider Status API)
+- **Source:** Coolify
+- **Description:** After each deployment, report the result (pending/success/failure) back to the Git provider via the commit status API. GitHub shows a green checkmark or red X on every commit in the PR timeline and commit list. GitLab and Bitbucket supported similarly. Status includes a link back to the deployment for details. Prevents teams from merging broken code because "the deploy was green" when it actually failed.
+- **Why add to Tengiz:** Git-based deployment (#5) and webhooks (#13) handle incoming events but provide no feedback loop to the developer's PR workflow. Without commit status, developers must check Tengiz logs to know if their deploy succeeded — breaking the git push → deploy → confidence cycle. `.tengiz.yaml`'da `git.status: true` ile etkinleştirilir. Implementation: after deploy completes, POST to GitHub Status API (`repos/{owner}/{repo}/statuses/{sha}`) with state, description, and target URL. The webhook payload already contains the commit SHA. Low effort (HTTP POST + token), high collaboration value.
+- **Detected:** 2026-07-17
+
+## Magic Environment Variables (Auto-Generated Service URLs & Credentials)
+- **Source:** Coolify
+- **Description:** Coolify v4.0+ auto-generates environment variables across multi-service Docker Compose stacks: consistent internal FQDNs, auto-generated passwords, database connection strings, and service URLs. When a database service is linked to an application, the connection string is automatically injected as an env var (e.g., `DATABASE_URL=postgres://user:pass@db:5432/myapp`). Passwords are generated using secure random generators.
+- **Why add to Tengiz:** Manual env var configuration across linked services is error-prone and repetitive. Magic env vars make multi-service deployment (accessories, managed DBs, one-click templates) zero-config. When a user creates a Postgres accessory for their app, `DATABASE_URL` is automatically set. Implementation: a `MagicEnv` struct in the deploy pipeline that generates `*_URL`, `*_HOST`, `*_PORT`, `*_PASSWORD` vars based on linked services. Complements existing env var management (#19) and accessory services (#45). Medium effort (cross-service dependency resolution), high UX value.
+- **Detected:** 2026-07-17
+
+## Environment Variable Locking (Immutable Critical Vars)
+- **Source:** Coolify
+- **Description:** Prevent modification or deletion of specific environment variables by marking them as locked. Locked env vars show a padlock icon in the UI and cannot be modified or deleted without first unlocking. Protects critical configuration (database URLs, API keys, secrets) from accidental changes. Unlock requires confirmation and optionally a reason. Audit log records lock/unlock events.
+- **Why add to Tengiz:** A single accidental `tengiz config unset DATABASE_URL` can take down production. Most PaaS platforms protect critical env vars. `.tengiz.yaml`'da `env.locked: [DATABASE_URL, STRIPE_SECRET_KEY]` ile yapılandırılır. CLI: `tengiz config lock DATABASE_URL` and `tengiz config unlock DATABASE_URL` with confirmation prompt. Implementation: a `Locked` boolean per env var in `AppEntry.Config.Env`, checked before any set/unset operation. Low effort, high production safety value.
+- **Detected:** 2026-07-17
+
+## Two-Factor Authentication (2FA) for Platform Admin
+- **Source:** Coolify
+- **Description:** Time-based One-Time Password (TOTP) two-factor authentication for Coolify admin accounts. On first login, users scan a QR code with their authenticator app (Google Authenticator, Authy, 1Password). Subsequent logins require both password and 6-digit TOTP code. Recovery codes are generated for account recovery. Optional enforcement: admins can require 2FA for all users.
+- **Why add to Tengiz:** The proxy, admin API, and webhook server are exposed to the network. A compromised credential gives an attacker full control over all deployed apps. 2FA adds a critical security layer. Complements OIDC/SSO (#128) — SSO handles team auth, 2FA protects individual accounts. Implementation: Go's `github.com/pquerna/otp/totp` for TOTP generation and validation. QR code generation via `github.com/skip2/go-qrcode`. Secrets stored encrypted in `~/.tengiz/auth/`. CLI: `tengiz auth enable-2fa` shows QR code, `tengiz auth disable-2fa` with password confirmation. Medium effort, high security impact.
+- **Detected:** 2026-07-17
+
+## HMAC-Signed Webhook Payloads (Webhook Security)
+- **Source:** Coolify
+- **Description:** Coolify verifies incoming webhook payloads using HMAC-SHA256 signatures. Git providers sign each webhook payload with a shared secret. Coolify computes the HMAC on receipt and compares it to the signature header. Mismatched signatures are rejected with 403. Prevents replay attacks, payload tampering, and unauthorized deploy triggers from third parties.
+- **Why add to Tengiz:** The existing webhook server (#13) accepts payloads from any sender — a trivial security gap. Any attacker who knows the webhook URL can trigger unwanted deploys. HMAC verification closes this gap. Implementation: shared secret stored per-app in `~/.tengiz/apps.json`, HMAC comparison middleware in the webhook HTTP handler. GitHub uses `X-Hub-Signature-256` header, GitLab uses `X-Gitlab-Token`, Bitbucket uses `X-Hub-Signature`. Low effort (standard crypto/hmac), high security value. Complements Rate Limiting (#100) for webhook defense-in-depth.
+- **Detected:** 2026-07-17
+
+## Per-Container Resource Metrics (Live docker stats)
+- **Source:** Coolify
+- **Description:** Coolify displays per-container real-time resource usage via Docker stats API: CPU usage %, memory usage/limit, network I/O, block I/O, PIDs. Metrics refresh every 1-5 seconds for live monitoring. Historical data optionally recorded for trend analysis. Per-container view in app details, aggregated view in server dashboard. Coolify v4.0+'s Sentinel agent provides enhanced metrics.
+- **Why add to Tengiz:** Today `tengiz ps` shows only port, state, env, health — zero resource visibility. Operators can't detect memory leaks, CPU throttling, or noisy neighbors. `tengiz ps --stats` or `tengiz stats <app>` enables live resource inspection. Implementation: `docker stats --no-stream --format json` called in a polling goroutine. Data displayed as a real-time updating table (terminal UI) or one-shot snapshot. Complements System Stats Recording (#72, historical) with live/interactive monitoring. Low effort (Docker CLI passthrough), high operational value.
+- **Detected:** 2026-07-17
+
+## Scheduled Deployments (Cron-Based Auto-Deploy)
+- **Source:** Coolify
+- **Description:** Schedule automatic deployments at specific times using cron expressions. Useful for: nightly rebuilds to pick up base image updates, periodic redeployment of third-party services, scheduled content site regeneration, automatic dependency updates after merging dependabot PRs. Coolify stores schedules per-app with timezone support.
+- **Why add to Tengiz:** Existing Scheduled Tasks / Cron Jobs (#54) run commands inside containers — this schedules the entire deploy pipeline. Different from Git-Sync (#113) which polls a repo — scheduled deploys rebuild from source at fixed intervals. `.tengiz.yaml`'da `deploy.schedule: "0 3 * * *"` ile her gece 3'te otomatik deploy. Implementation: Go's `robfig/cron` library (already referenced for #54) scheduling `deploy.Run()`. Low incremental effort on top of existing cron infrastructure.
+- **Detected:** 2026-07-17
+
+## MCP Server for AI Assistant Integration
+- **Source:** Coolify
+- **Description:** Coolify implements a Model Context Protocol (MCP) server that exposes read-only infrastructure visibility to AI assistants (Claude Desktop, Cursor, Cline). Users can ask natural language questions about their deployments, servers, and applications. The MCP server provides structured tools for querying app status, deployment history, server health, and log access. Future plans include write operations for natural language deployments.
+- **Why add to Tengiz:** MCP is emerging as the standard protocol for AI-to-tool integration (Anthropic's Claude, OpenAI, Cursor all support it). An MCP server makes Tengiz infrastructure queryable and manageable via natural language. Implementation: a lightweight stdio-based MCP server in `internal/mcp/` that wraps Tengiz's existing Go API. Tools: `list_apps`, `get_app_status`, `list_deployments`, `get_logs`, `get_server_health`. AI-assisted debugging (#103) and AI deployment assistant (#15) are separate features — MCP is the protocol layer that enables them. Medium effort, high strategic value as AI-native infrastructure management becomes standard.
+- **Detected:** 2026-07-17
+
+## One-Line Install Script (curl | bash)
+- **Source:** Coolify
+- **Description:** Coolify installs via a single curl command: `curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash`. The script auto-detects the OS, installs Docker if missing, pulls the Coolify Docker image, configures volumes, starts the service, and prints the admin URL. Docker Desktop is supported on macOS/Windows. Self-updates via the same mechanism.
+- **Why add to Tengiz:** Currently Tengiz requires manual Go build (`go build -o tengiz .`). A one-line install reduces friction and enables CI/CD integration. `curl -fsSL https://tengiz.dev/install.sh | bash` downloads the pre-built binary for the correct OS/arch, places it in `/usr/local/bin`, optionally sets up systemd service and shell completions. Implementation: a GitHub Actions workflow that cross-compiles binaries for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, uploads to GitHub Releases. The install script detects platform, downloads the correct binary, verifies checksum. Complements Self-Upgrade (#138). Low-medium effort, high adoption impact.
+- **Detected:** 2026-07-17
+
+## Server Security Hardening (Fail2ban/UFW Integration)
+- **Source:** Coolify
+- **Description:** Coolify configures server-level security during initial setup: UFW firewall with essential ports (22, 80, 443, Coolify ports), Fail2ban with custom jails for SSH brute-force protection and HTTP auth rate limiting. Docker daemon TLS configuration for secure remote access. All automated during `coolify server init`.
+- **Why add to Tengiz:** A fresh server has no firewall, no brute-force protection, and open ports. `tengiz server init --secure` would: enable UFW with default deny, allow ports 22/80/443 and Tengiz admin port, configure Fail2ban with SSH and webhook jails. Implementation: Go executes `ufw` and `fail2ban-client` via `os/exec` (similar to Docker commands), or generates config files. The existing Server Bootstrap (#40) already handles Docker installation — security hardening is a natural extension. Medium effort, high production security value.
+- **Detected:** 2026-07-17
+
+## Database Connection String Auto-Injection
+- **Source:** Coolify
+- **Description:** When a database (PostgreSQL, MySQL, Redis, MongoDB) is linked to an application, Coolify automatically injects the full connection string and individual connection parameters as environment variables into the app container. For PostgreSQL: `DATABASE_URL`, `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`. Variables use the same names as the database image's default env vars, so apps work without any manual configuration.
+- **Why add to Tengiz:** Managed databases (#47) and accessory services (#45) need their connection info propagated to the app. Manual propagation is error-prone and repetitive. Auto-injection makes DB provisioning zero-config: create a Postgres accessory → app restarts with `DATABASE_URL` populated. Implementation: a post-deploy hook that reads the linked accessory's config from store and calls `tengiz config set` on the target app with the generated connection string. Complements Magic Environment Variables (above) for a complete auto-config experience. Medium effort (depends on accessory/DB features existing), high UX value.
+- **Detected:** 2026-07-17
+
+## Database Backup Import/Upload (Bring Your Own Backup)
+- **Source:** Coolify
+- **Description:** Coolify allows users to upload external database backup files and restore them to managed databases. Supports SQL dump files for PostgreSQL/MySQL, MongoDB BSON archives, and Redis RDB files. Files are uploaded via the dashboard, stored temporarily, and restored using native database restore commands. Useful for: migrating from external hosting, restoring from external backup tools, seeding development databases with production data.
+- **Why add to Tengiz:** Existing Automated DB Backups (#98) handle scheduled exports but not imports of external backups. This enables: `tengiz backup import myapp --file prod_dump.sql` to restore from an external file, database migration from other platforms, and dev database seeding. Also enables `tengiz backup download <app> --output ./backup.sql` for manual backup retrieval. Implementation: `docker exec -i <container> pg_dump/pg_restore` with file piping. Low-medium effort, complements the backup system with restore-from-anywhere capability.
+- **Detected:** 2026-07-17
+
+## Protected Service Deletion (Data Loss Prevention)
+- **Source:** Coolify
+- **Description:** Coolify v4.0+ adds multiple safety layers before destructive operations: confirmation dialogs with resource name typing, data loss warnings showing attached volumes and databases, grace period before actual deletion (scheduled deletion instead of immediate), backup-before-delete option that creates a final backup, and safeguards preventing deletion of resources linked to other active resources.
+- **Why add to Tengiz:** A single `tengiz rm myapp` destroys the app, its volumes, and all data. This should require confirmation, especially for production apps. Implementation: `tengiz rm <app>` shows a summary of what will be destroyed (container, volumes, images, domains), requires `--force` or interactive confirmation. Linked resource check prevents deleting an app with attached databases. `--backup` flag creates a final backup before deletion. Complementary to Safe Volume Deletion (#78) which is volume-specific — this is app-level. Low effort, high production safety value.
+- **Detected:** 2026-07-17
