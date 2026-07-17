@@ -35,7 +35,7 @@ func (b *Builder) Build(ctx context.Context, dir string, appName string, env str
 func StrategyFromName(name string, dataDir string) BuildStrategy {
 	switch name {
 	case "nixpacks":
-		return NewDockerfileStrategy(dataDir)
+		return NewNixpacksStrategy()
 	default:
 		return NewDockerfileStrategy(dataDir)
 	}
