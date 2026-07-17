@@ -74,6 +74,8 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	webhookCmd.Flags().Bool("preview", true, "enable preview deployments on pull_request events")
+	webhookCmd.Flags().Bool("preview-cleanup", true, "enable automatic preview cleanup on PR close")
 }
 
 var rootCmd = &cobra.Command{
@@ -1045,6 +1047,8 @@ var webhookCmd = &cobra.Command{
 		port, _ := cmd.Flags().GetInt("port")
 		env, _ := cmd.Flags().GetString("env")
 		configPath, _ := cmd.Flags().GetString("config")
+		previewEnabled, _ := cmd.Flags().GetBool("preview")
+		previewCleanupEnabled, _ := cmd.Flags().GetBool("preview-cleanup")
 
 		rt, err := runtime.NewDocker()
 		if err != nil {
@@ -1053,6 +1057,19 @@ var webhookCmd = &cobra.Command{
 
 		store := config.NewStoreWithEnv(dataDir, env)
 		pipeline := gitdeploy.NewPipelineWithEnv(dataDir, env, rt, store)
+
+		// Create preview deploy/cleanup functions
+		var previewDeployFn webhook.PreviewDeployFunc
+		var previewCleanupFn webhook.PreviewCleanupFunc
+
+		if previewEnabled || previewCleanupEnabled {
+			previewDeployFn = func(ctx context.Context, repoURL string, prNumber int, branch string) error {
+				return pipeline.PreviewDeploy(ctx, repoURL, prNumber, branch)
+			}
+			previewCleanupFn = func(ctx context.Context, repoURL string, prNumber int) error {
+				return pipeline.PreviewCleanup(ctx, repoURL, prNumber)
+			}
+		}
 
 		deployFn := webhook.DeployFunc(func(ctx context.Context, repo, branch, provider string) error {
 			return pipeline.Deploy(ctx, repo, branch, provider)
@@ -1079,7 +1096,7 @@ var webhookCmd = &cobra.Command{
 			port = whCfg.Port
 		}
 
-		s := webhook.New(dataDir, whCfg, deployFn)
+		s := webhook.NewWithPreview(dataDir, whCfg, deployFn, previewDeployFn, previewCleanupFn)
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
 
