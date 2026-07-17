@@ -23,6 +23,7 @@ type AppConfig struct {
 	HealthCheck *HealthCheckConfig  `mapstructure:"healthcheck,omitempty"`
 	Resources   *ResourceConfig     `mapstructure:"resources,omitempty" json:"resources,omitempty"`
 	Env         map[string]string   `mapstructure:"env" json:"env,omitempty"`
+	Environment string              `mapstructure:"environment" json:"environment,omitempty"`
 	Git         *GitConfig          `mapstructure:"git,omitempty" json:"git,omitempty"`
 	Volumes     []VolumeConfig      `mapstructure:"volumes,omitempty" yaml:"volumes,omitempty" json:"volumes,omitempty"`
 }
@@ -102,6 +103,7 @@ type AppEntry struct {
 	Port             int               `json:"port"`
 	Domains          []string          `json:"domains"`
 	Config           AppConfig         `json:"config"`
+	Environment      string            `json:"environment,omitempty"`
 	DeploymentSuffix string            `json:"deployment_suffix,omitempty"`
 	Deployments      []DeploymentEntry `json:"deployments,omitempty"`
 	RestartCount     int               `json:"restart_count,omitempty"`
