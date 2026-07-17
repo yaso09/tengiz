@@ -71,6 +71,9 @@ func init() {
 	logsCmd.Flags().String("since", "", "show logs since timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
 	logsCmd.Flags().String("until", "", "show logs before timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
 	logsCmd.Flags().String("grep", "", "filter logs with a case-sensitive pattern (client-side)")
+	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
+	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
+	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
 }
 
 var rootCmd = &cobra.Command{
@@ -1041,6 +1044,7 @@ var webhookCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		port, _ := cmd.Flags().GetInt("port")
 		env, _ := cmd.Flags().GetString("env")
+		configPath, _ := cmd.Flags().GetString("config")
 
 		rt, err := runtime.NewDocker()
 		if err != nil {
@@ -1054,7 +1058,28 @@ var webhookCmd = &cobra.Command{
 			return pipeline.Deploy(ctx, repo, branch, provider)
 		})
 
-		s := webhook.New(dataDir, nil, deployFn)
+		// Load webhook config from .tengiz.yaml
+		var whCfg *webhook.Config
+		if configPath != "" {
+			twc, loadErr := config.LoadWebhookConfig(configPath)
+			if loadErr != nil {
+				return fmt.Errorf("webhook config: %w", loadErr)
+			}
+			if twc != nil {
+				whCfg = &webhook.Config{
+					Secret:          twc.Secret,
+					AllowedBranches: twc.AllowedBranches,
+					Port:            twc.Port,
+				}
+			}
+		}
+
+		// Config port overrides CLI flag if set
+		if whCfg != nil && whCfg.Port > 0 {
+			port = whCfg.Port
+		}
+
+		s := webhook.New(dataDir, whCfg, deployFn)
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
 
@@ -1152,8 +1177,6 @@ func Execute() {
 	proxyCmd.Flags().StringP("app", "a", "", "route all requests to this app (bypasses hostname routing)")
 	proxyCmd.Flags().IntP("port", "p", 8080, "proxy listen port")
 	proxyCmd.Flags().String("env", "production", "environment for proxy routing")
-	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
-	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	buildLogsCmd.Flags().Int("tail", 0, "show only last N lines of the latest build log")
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
