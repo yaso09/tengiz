@@ -164,13 +164,13 @@ var deployCmd = &cobra.Command{
 			projectRoot = abs
 		}
 
-		env, _ := cmd.Flags().GetString("env")
+		envFlag, _ := cmd.Flags().GetString("env")
 
-		cfg, err := config.LoadWithEnv(projectRoot, env)
+		cfg, err := config.LoadForEnvironment(projectRoot, envFlag)
 		if err != nil {
 			cfg = &types.AppConfig{
 				Name:        filepath.Base(projectRoot),
-				Environment: env,
+				Environment: envFlag,
 				Serverless: types.ServerlessConfig{
 					Enabled:     true,
 					IdleTimeout: 5 * time.Minute,
@@ -193,7 +193,7 @@ var deployCmd = &cobra.Command{
 		deploymentID := fmt.Sprintf("%d", time.Now().Unix())
 
 		b := builder.New(dataDir)
-		store := config.NewStoreWithEnv(dataDir, env)
+		store := config.NewStoreWithEnv(dataDir, envFlag)
 		imageTag, buildLog, err := b.Build(context.Background(), projectRoot, cfg.Name, cfg.Environment, detection, deploymentID)
 		if err != nil {
 			fmt.Fprint(os.Stderr, buildLog)
@@ -417,15 +417,17 @@ var psCmd = &cobra.Command{
 
 		store := config.NewStoreWithEnv(dataDir, env)
 		storeApps, _ := store.ListApps()
+		envMap := make(map[string]string, len(storeApps))
 		healthMap := make(map[string]string, len(storeApps))
 		for _, sa := range storeApps {
+			envMap[sa.Name] = sa.Config.Environment
 			healthMap[sa.Name] = sa.HealthStatus
 			if healthMap[sa.Name] == "" {
 				healthMap[sa.Name] = string(types.HealthUnknown)
 			}
 		}
 
-		fmt.Printf("%-20s %-10s %-8s %-10s\n", "NAME", "STATE", "PORT", "HEALTH")
+		fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", "NAME", "STATE", "PORT", "ENVIRONMENT", "HEALTH")
 		for _, a := range apps {
 			portStr := fmt.Sprintf("%d", a.Port)
 			if a.Port == 0 {
@@ -435,7 +437,11 @@ var psCmd = &cobra.Command{
 			if health == "" {
 				health = string(types.HealthUnknown)
 			}
-			fmt.Printf("%-20s %-10s %-8s %-10s\n", a.Name, a.State, portStr, health)
+			env := envMap[a.Name]
+			if env == "" {
+				env = "-"
+			}
+			fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", a.Name, a.State, portStr, env, health)
 		}
 		return nil
 	},
