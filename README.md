@@ -100,7 +100,7 @@ The proxy also starts an **admin API** on `127.0.0.1:9099` for dynamic route man
 
 List all deployed applications and their status.
 
-Output: `NAME`, `STATE` (running/stopped), `PORT`.
+Output: `NAME`, `STATE` (running/stopped), `PORT`, `ENVIRONMENT`, `HEALTH`.
 
 ### `tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] <app>`
 
