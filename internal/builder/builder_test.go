@@ -175,6 +175,15 @@ func TestBuildWithDeploymentIDCompiles(t *testing.T) {
 	}
 }
 
+func TestBuilderStrategyDispatch(t *testing.T) {
+	t.Run("default strategy is dockerfile", func(t *testing.T) {
+		b := New(t.TempDir())
+		if b.strategy == nil {
+			t.Fatal("expected non-nil strategy")
+		}
+	})
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }

@@ -12,6 +12,7 @@
 ## Features
 
 - **Framework auto-detection** — Next.js, Vite, Go, Node.js, Python, static sites. No config needed.
+- **Nixpacks build system** — Optional `--builder nixpacks` supports hundreds of frameworks (Ruby, Rust, PHP, Java, Elixir, etc.) via the `nixpacks` CLI.
 - **Scale-to-zero** — Containers stop after 5 minutes of inactivity, start on first request (cold start).
 - **Zero-downtime deployment** — Blue/green container switching: new container starts before the old one stops, traffic switches atomically at the proxy layer.
 - **On-demand reverse proxy** — Route traffic by hostname (`myapp.tengiz.local:8080`). Admin API (`127.0.0.1:9099`) for dynamic route management.
@@ -81,6 +82,10 @@ Build and deploy an application with zero-downtime.
 | Argument | Description |
 |----------|-------------|
 | `directory` | Project directory (default: `.`) |
+
+| Flag | Description |
+|------|-------------|
+| `--builder` | Build strategy: `docker` (default) or `nixpacks`. Overrides `build.builder` in config. |
 
 Detects the framework, builds a Docker image, and deploys. On first deploy, allocates a port (9000-9999), starts the container. On subsequent deploys, performs a **blue/green switch**: new versioned container starts on a new port, readiness is checked, traffic is routed to the new container atomically via the proxy admin API, then the old container is stopped and removed. Deployment history is recorded in `~/.tengiz/deployments.json`. If no `.tengiz.yaml` exists, uses the directory name as app name with serverless defaults.
 
@@ -374,6 +379,8 @@ Without a config file, Tengiz uses defaults: app name = directory name, port aut
 | **Static HTML** | `index.html` | 80 (nginx) |
 
 When no Dockerfile exists, Tengiz auto-generates one with a multi-stage build optimized for each framework.
+
+With `builder: nixpacks` in `.tengiz.yaml` (or `--builder nixpacks`), Tengiz delegates detection and building to the [Nixpacks](https://nixpacks.com/) CLI, supporting Ruby, Rust, PHP, Java, Elixir, and hundreds more frameworks.
 
 ## Git Auto-Deploy
 

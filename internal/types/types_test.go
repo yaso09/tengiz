@@ -91,3 +91,37 @@ func TestVolumeConfigDefaults(t *testing.T) {
 		t.Fatal("expected Volumes to be nil by default")
 	}
 }
+
+func TestBuildConfigBuilderField(t *testing.T) {
+	cfg := AppConfig{
+		Name: "test",
+		Build: BuildConfig{
+			Command: "npm run build",
+			Output:  "dist",
+			Builder: "nixpacks",
+		},
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var decoded AppConfig
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if decoded.Build.Builder != "nixpacks" {
+		t.Errorf("Build.Builder = %q, want %q", decoded.Build.Builder, "nixpacks")
+	}
+}
+
+func TestBuildConfigDefaultBuilder(t *testing.T) {
+	cfg := AppConfig{
+		Name: "test",
+		Build: BuildConfig{
+			Command: "npm run build",
+		},
+	}
+	if cfg.Build.Builder != "" {
+		t.Errorf("default Build.Builder should be empty, got %q", cfg.Build.Builder)
+	}
+}
