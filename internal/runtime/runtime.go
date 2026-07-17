@@ -2,10 +2,18 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"github.com/yaso09/tengiz/internal/types"
 )
+
+func ContainerName(name, env string) string {
+	if env == "" || env == "production" {
+		return fmt.Sprintf("tengiz-%s", name)
+	}
+	return fmt.Sprintf("tengiz-%s-%s", name, env)
+}
 
 type LogOptions struct {
 	Follow bool

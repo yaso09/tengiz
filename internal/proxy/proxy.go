@@ -21,6 +21,7 @@ type Proxy struct {
 	domains     map[string]string
 	rt          runtime.Manager
 	port        int
+	env         string
 	idleManager interface {
 		Reset(name string)
 	}
@@ -40,11 +41,19 @@ type route struct {
 }
 
 func New(rt runtime.Manager, port int) *Proxy {
+	return NewWithEnv(rt, port, "")
+}
+
+func NewWithEnv(rt runtime.Manager, port int, env string) *Proxy {
+	if env == "" {
+		env = "production"
+	}
 	return &Proxy{
 		routes:  make(map[string]*route),
 		domains: make(map[string]string),
 		rt:      rt,
 		port:    port,
+		env:     env,
 	}
 }
 
@@ -121,14 +130,15 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	active, err := p.rt.IsActive(r.Context(), app)
+	containerName := runtime.ContainerName(app, p.env)
+	active, err := p.rt.IsActive(r.Context(), containerName)
 	if err != nil || !active {
-		log.Printf("[proxy] cold start: %s", app)
-		if err := p.rt.Start(r.Context(), app); err != nil {
+		log.Printf("[proxy] cold start: %s", containerName)
+		if err := p.rt.Start(r.Context(), containerName); err != nil {
 			http.Error(w, fmt.Sprintf("cold start failed: %s", err), http.StatusBadGateway)
 			return
 		}
-		if err := p.rt.WaitForReady(r.Context(), app, 0); err != nil {
+		if err := p.rt.WaitForReady(r.Context(), containerName, 0); err != nil {
 			log.Printf("[proxy] wait for ready: %v", err)
 		}
 	}

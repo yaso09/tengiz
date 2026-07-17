@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -428,6 +430,59 @@ func TestGetBuildLogNotFound(t *testing.T) {
 	_, err := s.GetBuildLog("testapp", "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for non-existent build log")
+	}
+}
+
+func TestStoreEnvironmentScoping(t *testing.T) {
+	dir := t.TempDir()
+
+	prodStore := NewStoreWithEnv(dir, "production")
+	app := types.AppEntry{Name: "myapp", Port: 9000}
+	if err := prodStore.SaveApp(app); err != nil {
+		t.Fatalf("SaveApp (prod): %v", err)
+	}
+
+	stageStore := NewStoreWithEnv(dir, "staging")
+	stageApp := types.AppEntry{Name: "myapp", Port: 9001}
+	if err := stageStore.SaveApp(stageApp); err != nil {
+		t.Fatalf("SaveApp (staging): %v", err)
+	}
+
+	prodApp, err := prodStore.GetApp("myapp")
+	if err != nil {
+		t.Fatalf("GetApp (prod): %v", err)
+	}
+	if prodApp.Port != 9000 {
+		t.Errorf("expected prod port 9000, got %d", prodApp.Port)
+	}
+
+	stgApp, err := stageStore.GetApp("myapp")
+	if err != nil {
+		t.Fatalf("GetApp (staging): %v", err)
+	}
+	if stgApp.Port != 9001 {
+		t.Errorf("expected staging port 9001, got %d", stgApp.Port)
+	}
+
+	prodFile := filepath.Join(dir, "apps-production.json")
+	stageFile := filepath.Join(dir, "apps-staging.json")
+	if _, err := os.Stat(prodFile); os.IsNotExist(err) {
+		t.Errorf("production apps file not found: %s", prodFile)
+	}
+	if _, err := os.Stat(stageFile); os.IsNotExist(err) {
+		t.Errorf("staging apps file not found: %s", stageFile)
+	}
+}
+
+func TestStoreDefaultEnv(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStoreWithEnv(dir, "")
+	if err := store.SaveApp(types.AppEntry{Name: "myapp", Port: 9000}); err != nil {
+		t.Fatalf("SaveApp: %v", err)
+	}
+	prodFile := filepath.Join(dir, "apps-production.json")
+	if _, err := os.Stat(prodFile); os.IsNotExist(err) {
+		t.Errorf("expected production apps file: %s", prodFile)
 	}
 }
 

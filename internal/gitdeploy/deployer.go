@@ -18,14 +18,23 @@ import (
 
 type Pipeline struct {
 	dataDir string
+	env     string
 	b       *builder.Builder
 	rt      runtime.Manager
 	store   *config.Store
 }
 
 func NewPipeline(dataDir string, rt runtime.Manager, store *config.Store) *Pipeline {
+	return NewPipelineWithEnv(dataDir, "", rt, store)
+}
+
+func NewPipelineWithEnv(dataDir, env string, rt runtime.Manager, store *config.Store) *Pipeline {
+	if env == "" {
+		env = "production"
+	}
 	return &Pipeline{
 		dataDir: dataDir,
+		env:     env,
 		b:       builder.New(dataDir),
 		rt:      rt,
 		store:   store,
@@ -92,7 +101,7 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 	}
 
 	deploymentID := fmt.Sprintf("%d", time.Now().Unix())
-	imageTag, buildLog, err := p.b.Build(ctx, cloneDir, appName, detection, deploymentID)
+	imageTag, buildLog, err := p.b.Build(ctx, cloneDir, appName, p.env, detection, deploymentID)
 	if err != nil {
 		fmt.Fprint(os.Stderr, buildLog)
 		return fmt.Errorf("build: %w", err)
@@ -164,7 +173,8 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 	}
 	log.Printf("[tengiz] new container starting on port %d", newPort)
 
-	if err := p.rt.WaitForReady(ctx, fmt.Sprintf("%s-%s", appName, deploymentID), cfg.Port); err != nil {
+	containerName := runtime.ContainerName(appName, p.env)
+	if err := p.rt.WaitForReady(ctx, fmt.Sprintf("%s-%s", containerName, deploymentID), cfg.Port); err != nil {
 		log.Printf("[tengiz] warning: new container may not be ready: %v", err)
 	}
 
@@ -173,9 +183,9 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 	}
 
 	if existingApp.DeploymentSuffix != "" {
-		p.rt.RemoveBySuffix(ctx, appName, existingApp.DeploymentSuffix)
+		p.rt.RemoveBySuffix(ctx, containerName, existingApp.DeploymentSuffix)
 	} else {
-		p.rt.Remove(ctx, appName)
+		p.rt.Remove(ctx, containerName)
 	}
 	p.store.FreePort(existingApp.Port)
 

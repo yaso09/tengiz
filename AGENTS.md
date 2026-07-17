@@ -12,12 +12,14 @@
 
 | Package | Responsibility |
 |---------|---------------|
-| `runtime.Manager` | Interface for container lifecycle. `NewDocker()` = exec-based impl, `NewStub()` = test mock. Also: `CreateFromImage`, `RemoveImage`, `KeepLastNImages` for rollback + image cleanup. |
-| `builder` | Framework detection (`detect.go`) + Dockerfile generation (`builder.go`). Supports: Docker, Next.js, Vite, Go, Node, Python, static. |
-| `proxy` | `httputil.ReverseProxy` with host-based routing (`appname.tengiz.local` → port 9000+) and custom domain support. Cold-starts stopped containers on demand. |
-| `idle` | Per-app timer. `Reset(name)` extends deadline. On expiry: calls `runtime.Stop()`. Default 5m timeout. |
-| `config` | Loads `.tengiz.yaml` via viper. `Store` persists apps + port allocations in `~/.tengiz/*.json`. Adds `GetEnv`/`SetEnv`/`UnsetEnv`/`ListEnv` for env var management. |
-| `types` | Shared: `AppConfig`, `AppStatus`, `AppEntry`, `PortEntry`, `DeploymentEntry`, `DeploymentStatus`. |
+| `runtime.Manager` | Interface for container lifecycle. `NewDocker()` = exec-based impl, `NewStub()` = test mock. Also: `CreateFromImage`, `RemoveImage`, `KeepLastNImages` for rollback + image cleanup. `ContainerName(name, env)` helper. |
+| `builder` | Framework detection (`detect.go`) + Dockerfile generation (`builder.go`). Supports: Docker, Next.js, Vite, Go, Node, Python, static. Env-aware image tags (`{env}-{deploymentID}`). |
+| `proxy` | `httputil.ReverseProxy` with host-based routing (`appname.tengiz.local` → port 9000+) and custom domain support. Cold-starts stopped containers on demand. Env-aware via `NewWithEnv`. |
+| `idle` | Per-app timer. `Reset(name)` extends deadline. On expiry: calls `runtime.Stop()`. Default 5m timeout. Env-aware via `NewWithEnv`. |
+| `config` | Loads `.tengiz.yaml` via viper. `LoadWithEnv(path, env)` merges `.tengiz.{env}.yaml` overrides. `Store` persists apps + port allocations in `~/.tengiz/` (env-scoped). Adds `GetEnv`/`SetEnv`/`UnsetEnv`/`ListEnv` for env var management. |
+| `health` | Periodic HTTP health checks with automatic restart. Env-aware via `NewWithEnv`. |
+| `gitdeploy` | Git-based deployment pipeline. Env-aware via `NewPipelineWithEnv`. |
+| `types` | Shared: `AppConfig`, `AppStatus`, `AppEntry`, `PortEntry`, `DeploymentEntry`, `DeploymentStatus`. `AppConfig.Environment` field. |
 
 ## Commands
 
@@ -30,6 +32,7 @@ go vet ./...                  # static analysis
 ## CLI
 
 ```
+tengiz --env <env> <command> → global flag for multi-environment (dev/staging/prod)
 tengiz init [name]    → create .tengiz.yaml
 tengiz deploy [dir]   → detect, build, run container
 tengiz proxy [-a app] → start reverse proxy on :8080 (use -a to route all traffic to one app)
@@ -53,7 +56,8 @@ tengiz rollback <app>           → rollback to previous deployment
 ## Quirks
 
 - Container names are prefixed `tengiz-<appname>`, labeled with `tengiz-app=<appname>`
-- Port allocations: 9000-9999, persisted in `~/.tengiz/ports.json`
+- Non-production envs use `tengiz-<appname>-<env>` naming; all envs add `tengiz-env=<env>` label
+- Port allocations: 9000-9999, persisted in `~/.tengiz/ports.json` (env-scoped: `ports-{env}.json`)
 - No config file = uses dir name as app name + defaults
 - Env vars stored in `AppEntry.Config.Env` → auto-persisted via JSON in `~/.tengiz/apps.json`
 - `.tengiz.yaml` `env:` section uses `KEY: value` format (map, not list)

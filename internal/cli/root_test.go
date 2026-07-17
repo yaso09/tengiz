@@ -40,8 +40,8 @@ func TestBuildLogsDirStructure(t *testing.T) {
 		t.Fatalf("expected 'hello from build', got %q", content)
 	}
 
-	// Verify file structure
-	logDir := filepath.Join(dir, "build-logs", "testapp")
+	// Verify file structure (production env by default)
+	logDir := filepath.Join(dir, "build-logs", "production", "testapp")
 	entries, err := os.ReadDir(logDir)
 	if err != nil {
 		t.Fatal(err)

@@ -30,6 +30,7 @@ import (
 func init() {
 	home, _ := os.UserHomeDir()
 	dataDir = filepath.Join(home, ".tengiz")
+	rootCmd.PersistentFlags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(deployCmd)
 	rootCmd.AddCommand(proxyCmd)
@@ -60,6 +61,7 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
@@ -75,6 +77,14 @@ var rootCmd = &cobra.Command{
 	Use:   "tengiz",
 	Short: "Tengiz - Serverless deployment platform",
 	Long:  "Tengiz is a Vercel alternative. Deploy any app with scale-to-zero.",
+}
+
+func getEnv(cmd *cobra.Command) string {
+	env, _ := cmd.Flags().GetString("env")
+	if env == "" {
+		return "production"
+	}
+	return env
 }
 
 var initCmd = &cobra.Command{
@@ -93,10 +103,12 @@ var initCmd = &cobra.Command{
 			return fmt.Errorf(".tengiz.yaml already exists")
 		}
 
+		env := getEnv(cmd)
 		gitRepo, _ := cmd.Flags().GetString("git-repo")
 		gitBranch, _ := cmd.Flags().GetString("git-branch")
 
 		content := fmt.Sprintf(`name: %s
+environment: %s
 # port: 3000            # container internal port (auto-detected if omitted)
 serverless:
   enabled: true
@@ -121,7 +133,7 @@ serverless:
 # resources:
 #   cpu: "1.0"           # CPU cores (e.g., "0.5", "2")
 #   memory: "256m"       # memory limit (e.g., "128m", "1g")
-`, name)
+`, name, env)
 
 		if gitRepo != "" {
 			content += fmt.Sprintf("git:\n  repo: %s\n  branch: %s\n", gitRepo, gitBranch)
@@ -152,10 +164,13 @@ var deployCmd = &cobra.Command{
 			projectRoot = abs
 		}
 
-		cfg, err := config.Load(projectRoot)
+		env, _ := cmd.Flags().GetString("env")
+
+		cfg, err := config.LoadWithEnv(projectRoot, env)
 		if err != nil {
 			cfg = &types.AppConfig{
-				Name: filepath.Base(projectRoot),
+				Name:        filepath.Base(projectRoot),
+				Environment: env,
 				Serverless: types.ServerlessConfig{
 					Enabled:     true,
 					IdleTimeout: 5 * time.Minute,
@@ -178,8 +193,8 @@ var deployCmd = &cobra.Command{
 		deploymentID := fmt.Sprintf("%d", time.Now().Unix())
 
 		b := builder.New(dataDir)
-		store := config.NewStore(dataDir)
-		imageTag, buildLog, err := b.Build(context.Background(), projectRoot, cfg.Name, detection, deploymentID)
+		store := config.NewStoreWithEnv(dataDir, env)
+		imageTag, buildLog, err := b.Build(context.Background(), projectRoot, cfg.Name, cfg.Environment, detection, deploymentID)
 		if err != nil {
 			fmt.Fprint(os.Stderr, buildLog)
 			return fmt.Errorf("build: %w", err)
@@ -260,7 +275,8 @@ var deployCmd = &cobra.Command{
 		fmt.Printf("[tengiz] new container starting on port %d\n", newPort)
 
 		// Wait for the new container to be ready
-		if err := rt.WaitForReady(context.Background(), fmt.Sprintf("%s-%s", cfg.Name, deploymentID), cfg.Port); err != nil {
+		containerName := runtime.ContainerName(cfg.Name, cfg.Environment)
+		if err := rt.WaitForReady(context.Background(), fmt.Sprintf("%s-%s", containerName, deploymentID), cfg.Port); err != nil {
 			log.Printf("[tengiz] warning: new container may not be ready: %v", err)
 		}
 
@@ -272,11 +288,11 @@ var deployCmd = &cobra.Command{
 		// Stop old container
 		oldSuffix := existingApp.DeploymentSuffix
 		if oldSuffix != "" {
-			if err := rt.RemoveBySuffix(context.Background(), cfg.Name, oldSuffix); err != nil {
+			if err := rt.RemoveBySuffix(context.Background(), containerName, oldSuffix); err != nil {
 				log.Printf("[tengiz] warning: failed to remove old container: %v", err)
 			}
 		} else {
-			if err := rt.Remove(context.Background(), cfg.Name); err != nil {
+			if err := rt.Remove(context.Background(), containerName); err != nil {
 				log.Printf("[tengiz] warning: failed to remove old container: %v", err)
 			}
 		}
@@ -330,24 +346,25 @@ var proxyCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appFlag, _ := cmd.Flags().GetString("app")
 		portFlag, _ := cmd.Flags().GetInt("port")
+		env, _ := cmd.Flags().GetString("env")
 
 		rt, err := runtime.NewDocker()
 		if err != nil {
 			return fmt.Errorf("docker: %w", err)
 		}
 
-		p := proxy.New(rt, portFlag)
+		p := proxy.NewWithEnv(rt, portFlag, env)
 
 		if appFlag != "" {
 			p.SetDefaultApp(appFlag)
 		}
 
-		idleMgr := idle.New(rt, 5*time.Minute)
+		idleMgr := idle.NewWithEnv(rt, 5*time.Minute, env)
 		p.SetIdleManager(idleMgr)
 
-		store := config.NewStore(dataDir)
+		store := config.NewStoreWithEnv(dataDir, env)
 
-		healthChecker := health.New(rt, store)
+		healthChecker := health.NewWithEnv(rt, store, env)
 		defer healthChecker.StopAll()
 
 		apps, err := store.ListApps()
@@ -382,6 +399,7 @@ var psCmd = &cobra.Command{
 	Use:   "ps",
 	Short: "List deployed applications",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
 		rt, err := runtime.NewDocker()
 		if err != nil {
 			return fmt.Errorf("docker: %w", err)
@@ -397,7 +415,7 @@ var psCmd = &cobra.Command{
 			return nil
 		}
 
-		store := config.NewStore(dataDir)
+		store := config.NewStoreWithEnv(dataDir, env)
 		storeApps, _ := store.ListApps()
 		healthMap := make(map[string]string, len(storeApps))
 		for _, sa := range storeApps {
@@ -428,11 +446,12 @@ var stopCmd = &cobra.Command{
 	Short: "Stop an application",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
 		rt, err := runtime.NewDocker()
 		if err != nil {
 			return err
 		}
-		return rt.Stop(context.Background(), args[0])
+		return rt.Stop(context.Background(), runtime.ContainerName(args[0], env))
 	},
 }
 
@@ -441,11 +460,12 @@ var startCmd = &cobra.Command{
 	Short: "Start a stopped application",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
 		rt, err := runtime.NewDocker()
 		if err != nil {
 			return err
 		}
-		return rt.Start(context.Background(), args[0])
+		return rt.Start(context.Background(), runtime.ContainerName(args[0], env))
 	},
 }
 
@@ -454,16 +474,19 @@ var rmCmd = &cobra.Command{
 	Short: "Remove an application completely",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		appName := args[0]
+		containerName := runtime.ContainerName(appName, env)
 		rt, err := runtime.NewDocker()
 		if err != nil {
 			return err
 		}
-		store := config.NewStore(dataDir)
-		if err := rt.Remove(context.Background(), args[0]); err != nil {
+		store := config.NewStoreWithEnv(dataDir, env)
+		if err := rt.Remove(context.Background(), containerName); err != nil {
 			return err
 		}
-		store.RemoveApp(args[0])
-		fmt.Printf("[tengiz] removed: %s\n", args[0])
+		store.RemoveApp(appName)
+		fmt.Printf("[tengiz] removed: %s\n", appName)
 		return nil
 	},
 }
@@ -474,6 +497,7 @@ var logsCmd = &cobra.Command{
 	Long:  "Show application logs. Use -f to follow. Supports --tail, --since, --until, and --grep for filtering.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
 		follow, _ := cmd.Flags().GetBool("follow")
 		since, _ := cmd.Flags().GetString("since")
 		until, _ := cmd.Flags().GetString("until")
@@ -491,7 +515,7 @@ var logsCmd = &cobra.Command{
 			Tail:   tail,
 			Grep:   grep,
 		}
-		reader, err := rt.Logs(context.Background(), args[0], opts)
+		reader, err := rt.Logs(context.Background(), runtime.ContainerName(args[0], env), opts)
 		if err != nil {
 			return err
 		}
@@ -561,8 +585,9 @@ var healthCmd = &cobra.Command{
 	Short: "Check application health status",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
 		appName := args[0]
-		store := config.NewStore(dataDir)
+		store := config.NewStoreWithEnv(dataDir, env)
 		rt, err := runtime.NewDocker()
 		if err != nil {
 			return fmt.Errorf("docker: %w", err)
@@ -597,8 +622,9 @@ var domainAddCmd = &cobra.Command{
 	Short: "Add a custom domain to an application",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
 		appName, domain := args[0], args[1]
-		store := config.NewStore(dataDir)
+		store := config.NewStoreWithEnv(dataDir, env)
 
 		if _, err := store.GetApp(appName); err != nil {
 			return fmt.Errorf("app %q not found", appName)
@@ -623,8 +649,9 @@ var domainRemoveCmd = &cobra.Command{
 	Short: "Remove a custom domain from an application",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
 		appName, domain := args[0], args[1]
-		store := config.NewStore(dataDir)
+		store := config.NewStoreWithEnv(dataDir, env)
 
 		if err := store.RemoveDomain(appName, domain); err != nil {
 			return err
@@ -645,8 +672,9 @@ var domainListCmd = &cobra.Command{
 	Short: "List custom domains for an application",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
 		appName := args[0]
-		store := config.NewStore(dataDir)
+		store := config.NewStoreWithEnv(dataDir, env)
 
 		domains, err := store.ListDomains(appName)
 		if err != nil {
@@ -683,7 +711,8 @@ var volumeAddCmd = &cobra.Command{
 		containerPath := parts[1]
 		readOnly := len(parts) == 3 && parts[2] == "ro"
 
-		store := config.NewStore(dataDir)
+		env := getEnv(cmd)
+		store := config.NewStoreWithEnv(dataDir, env)
 		vol := types.VolumeConfig{
 			HostPath:      hostPath,
 			ContainerPath: containerPath,
@@ -702,7 +731,8 @@ var volumeRemoveCmd = &cobra.Command{
 	Short: "Unmount a volume from an app",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		store := config.NewStore(dataDir)
+		env := getEnv(cmd)
+		store := config.NewStoreWithEnv(dataDir, env)
 		if err := store.RemoveVolume(args[0], args[1]); err != nil {
 			return err
 		}
@@ -716,7 +746,8 @@ var volumeListCmd = &cobra.Command{
 	Short: "List mounted volumes for an app",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		store := config.NewStore(dataDir)
+		env := getEnv(cmd)
+		store := config.NewStoreWithEnv(dataDir, env)
 		vols, err := store.ListVolumes(args[0])
 		if err != nil {
 			return err
@@ -743,8 +774,9 @@ var rollbackCmd = &cobra.Command{
 	Long:  "Reverses the most recent deployment. The previous active container is started and the current one is stopped.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
 		appName := args[0]
-		store := config.NewStore(dataDir)
+		store := config.NewStoreWithEnv(dataDir, env)
 
 		app, err := store.GetApp(appName)
 		if err != nil {
@@ -761,6 +793,8 @@ var rollbackCmd = &cobra.Command{
 			return fmt.Errorf("docker: %w", err)
 		}
 
+		containerName := runtime.ContainerName(appName, env)
+
 		newPort, err := store.AllocatePort(appName)
 		if err != nil {
 			return fmt.Errorf("port allocation: %w", err)
@@ -771,7 +805,7 @@ var rollbackCmd = &cobra.Command{
 			return fmt.Errorf("create rollback container: %w", err)
 		}
 
-		if err := rt.WaitForReady(cmd.Context(), appName, app.Config.Port); err != nil {
+		if err := rt.WaitForReady(cmd.Context(), containerName, app.Config.Port); err != nil {
 			log.Printf("[tengiz] warning: rollback container may not be ready: %v", err)
 		}
 
@@ -780,11 +814,11 @@ var rollbackCmd = &cobra.Command{
 		}
 
 		if app.DeploymentSuffix != "" {
-			if err := rt.RemoveBySuffix(cmd.Context(), appName, app.DeploymentSuffix); err != nil {
+			if err := rt.RemoveBySuffix(cmd.Context(), containerName, app.DeploymentSuffix); err != nil {
 				log.Printf("[tengiz] warning: failed to remove current container: %v", err)
 			}
 		} else {
-			if err := rt.Remove(cmd.Context(), appName); err != nil {
+			if err := rt.Remove(cmd.Context(), containerName); err != nil {
 				log.Printf("[tengiz] warning: failed to remove current container: %v", err)
 			}
 		}
@@ -822,10 +856,11 @@ With a deployment ID, shows the full build output for that deployment.
 Use --tail N to show only the last N lines of the latest build log.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
 		appName := args[0]
 		tailLines, _ := cmd.Flags().GetInt("tail")
 
-		store := config.NewStore(dataDir)
+		store := config.NewStoreWithEnv(dataDir, env)
 
 		if len(args) == 2 {
 			deploymentID := args[1]
@@ -898,11 +933,12 @@ Examples:
   tengiz run -i myapp -- bash`,
 	Args: cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
 		appName := args[0]
 		command := args[1:]
 		interactive, _ := cmd.Flags().GetBool("interactive")
 
-		store := config.NewStore(dataDir)
+		store := config.NewStoreWithEnv(dataDir, env)
 
 		app, err := store.GetApp(appName)
 		if err != nil {
@@ -998,14 +1034,15 @@ var webhookCmd = &cobra.Command{
 	Long:  "Starts an HTTP server that listens for GitHub/GitLab/Bitbucket/Gitea push events and triggers automatic deployment.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		port, _ := cmd.Flags().GetInt("port")
+		env, _ := cmd.Flags().GetString("env")
 
 		rt, err := runtime.NewDocker()
 		if err != nil {
 			return fmt.Errorf("docker: %w", err)
 		}
 
-		store := config.NewStore(dataDir)
-		pipeline := gitdeploy.NewPipeline(dataDir, rt, store)
+		store := config.NewStoreWithEnv(dataDir, env)
+		pipeline := gitdeploy.NewPipelineWithEnv(dataDir, env, rt, store)
 
 		deployFn := webhook.DeployFunc(func(ctx context.Context, repo, branch, provider string) error {
 			return pipeline.Deploy(ctx, repo, branch, provider)
@@ -1030,8 +1067,9 @@ var configSetCmd = &cobra.Command{
 	Short: "Set an environment variable",
 	Args:  cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
 		appName, key, value := args[0], args[1], args[2]
-		store := config.NewStore(dataDir)
+		store := config.NewStoreWithEnv(dataDir, env)
 		if err := store.SetEnv(appName, key, value); err != nil {
 			return err
 		}
@@ -1045,7 +1083,8 @@ var configGetCmd = &cobra.Command{
 	Short: "Get an environment variable",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		store := config.NewStore(dataDir)
+		env := getEnv(cmd)
+		store := config.NewStoreWithEnv(dataDir, env)
 		val, ok, err := store.GetEnv(args[0], args[1])
 		if err != nil {
 			return err
@@ -1063,7 +1102,8 @@ var configUnsetCmd = &cobra.Command{
 	Short: "Remove an environment variable",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		store := config.NewStore(dataDir)
+		env := getEnv(cmd)
+		store := config.NewStoreWithEnv(dataDir, env)
 		if err := store.UnsetEnv(args[0], args[1]); err != nil {
 			return err
 		}
@@ -1077,16 +1117,17 @@ var configShowCmd = &cobra.Command{
 	Short: "Show all environment variables for an application",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		store := config.NewStore(dataDir)
-		env, err := store.ListEnv(args[0])
+		env := getEnv(cmd)
+		store := config.NewStoreWithEnv(dataDir, env)
+		envVars, err := store.ListEnv(args[0])
 		if err != nil {
 			return err
 		}
-		if len(env) == 0 {
+		if len(envVars) == 0 {
 			fmt.Printf("No environment variables set for %s.\n", args[0])
 			return nil
 		}
-		for k, v := range env {
+		for k, v := range envVars {
 			fmt.Printf("%s=%s\n", k, v)
 		}
 		return nil
@@ -1104,7 +1145,9 @@ func getwd() string {
 func Execute() {
 	proxyCmd.Flags().StringP("app", "a", "", "route all requests to this app (bypasses hostname routing)")
 	proxyCmd.Flags().IntP("port", "p", 8080, "proxy listen port")
+	proxyCmd.Flags().String("env", "production", "environment for proxy routing")
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
+	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	buildLogsCmd.Flags().Int("tail", 0, "show only last N lines of the latest build log")
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

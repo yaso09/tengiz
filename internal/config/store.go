@@ -12,14 +12,28 @@ import (
 	"github.com/yaso09/tengiz/internal/types"
 )
 
+func NewStoreWithEnv(dataDir, env string) *Store {
+	if env == "" {
+		env = "production"
+	}
+	os.MkdirAll(dataDir, 0755)
+	return &Store{dataDir: dataDir, env: env}
+}
+
+func (s *Store) envFile(name string) string {
+	ext := filepath.Ext(name)
+	base := strings.TrimSuffix(name, ext)
+	return fmt.Sprintf("%s-%s%s", base, s.env, ext)
+}
+
 type Store struct {
 	mu      sync.Mutex
 	dataDir string
+	env     string
 }
 
 func NewStore(dataDir string) *Store {
-	os.MkdirAll(dataDir, 0755)
-	return &Store{dataDir: dataDir}
+	return NewStoreWithEnv(dataDir, "")
 }
 
 func (s *Store) SaveApp(app types.AppEntry) error {
@@ -27,9 +41,9 @@ func (s *Store) SaveApp(app types.AppEntry) error {
 	defer s.mu.Unlock()
 
 	apps := make(map[string]types.AppEntry)
-	s.readJSON("apps.json", &apps)
+	s.readJSON(s.envFile("apps.json"), &apps)
 	apps[app.Name] = app
-	return s.writeJSON("apps.json", apps)
+	return s.writeJSON(s.envFile("apps.json"), apps)
 }
 
 func (s *Store) RemoveApp(name string) error {
@@ -37,9 +51,9 @@ func (s *Store) RemoveApp(name string) error {
 	defer s.mu.Unlock()
 
 	apps := make(map[string]types.AppEntry)
-	s.readJSON("apps.json", &apps)
+	s.readJSON(s.envFile("apps.json"), &apps)
 	delete(apps, name)
-	return s.writeJSON("apps.json", apps)
+	return s.writeJSON(s.envFile("apps.json"), apps)
 }
 
 func (s *Store) ListApps() ([]types.AppEntry, error) {
@@ -47,7 +61,7 @@ func (s *Store) ListApps() ([]types.AppEntry, error) {
 	defer s.mu.Unlock()
 
 	apps := make(map[string]types.AppEntry)
-	s.readJSON("apps.json", &apps)
+	s.readJSON(s.envFile("apps.json"), &apps)
 	result := make([]types.AppEntry, 0, len(apps))
 	for _, v := range apps {
 		result = append(result, v)
@@ -60,12 +74,12 @@ func (s *Store) AllocatePort(appName string) (int, error) {
 	defer s.mu.Unlock()
 
 	ports := make(map[int]string)
-	s.readJSON("ports.json", &ports)
+	s.readJSON(s.envFile("ports.json"), &ports)
 
 	for p := 9000; p <= 9999; p++ {
 		if _, used := ports[p]; !used {
 			ports[p] = appName
-			if err := s.writeJSON("ports.json", ports); err != nil {
+			if err := s.writeJSON(s.envFile("ports.json"), ports); err != nil {
 				return 0, err
 			}
 			return p, nil
@@ -79,9 +93,9 @@ func (s *Store) FreePort(port int) error {
 	defer s.mu.Unlock()
 
 	ports := make(map[int]string)
-	s.readJSON("ports.json", &ports)
+	s.readJSON(s.envFile("ports.json"), &ports)
 	delete(ports, port)
-	return s.writeJSON("ports.json", ports)
+	return s.writeJSON(s.envFile("ports.json"), ports)
 }
 
 func (s *Store) GetEnv(appName, key string) (string, bool, error) {
@@ -98,7 +112,7 @@ func (s *Store) SetEnv(appName, key, value string) error {
 	defer s.mu.Unlock()
 
 	apps := make(map[string]types.AppEntry)
-	s.readJSON("apps.json", &apps)
+	s.readJSON(s.envFile("apps.json"), &apps)
 	app, ok := apps[appName]
 	if !ok {
 		return fmt.Errorf("app %q not found", appName)
@@ -108,7 +122,7 @@ func (s *Store) SetEnv(appName, key, value string) error {
 	}
 	app.Config.Env[key] = value
 	apps[appName] = app
-	return s.writeJSON("apps.json", apps)
+	return s.writeJSON(s.envFile("apps.json"), apps)
 }
 
 func (s *Store) UnsetEnv(appName, key string) error {
@@ -116,7 +130,7 @@ func (s *Store) UnsetEnv(appName, key string) error {
 	defer s.mu.Unlock()
 
 	apps := make(map[string]types.AppEntry)
-	s.readJSON("apps.json", &apps)
+	s.readJSON(s.envFile("apps.json"), &apps)
 	app, ok := apps[appName]
 	if !ok {
 		return fmt.Errorf("app %q not found", appName)
@@ -126,7 +140,7 @@ func (s *Store) UnsetEnv(appName, key string) error {
 		app.Config.Env = nil
 	}
 	apps[appName] = app
-	return s.writeJSON("apps.json", apps)
+	return s.writeJSON(s.envFile("apps.json"), apps)
 }
 
 func (s *Store) ListEnv(appName string) (map[string]string, error) {
@@ -149,7 +163,7 @@ func (s *Store) GetApp(name string) (*types.AppEntry, error) {
 	defer s.mu.Unlock()
 
 	apps := make(map[string]types.AppEntry)
-	s.readJSON("apps.json", &apps)
+	s.readJSON(s.envFile("apps.json"), &apps)
 	app, ok := apps[name]
 	if !ok {
 		return nil, fmt.Errorf("app %q not found", name)
@@ -162,9 +176,9 @@ func (s *Store) UpdateApp(app types.AppEntry) error {
 	defer s.mu.Unlock()
 
 	apps := make(map[string]types.AppEntry)
-	s.readJSON("apps.json", &apps)
+	s.readJSON(s.envFile("apps.json"), &apps)
 	apps[app.Name] = app
-	return s.writeJSON("apps.json", apps)
+	return s.writeJSON(s.envFile("apps.json"), apps)
 }
 
 func (s *Store) AddDomain(appName, domain string) error {
@@ -172,7 +186,7 @@ func (s *Store) AddDomain(appName, domain string) error {
 	defer s.mu.Unlock()
 
 	apps := make(map[string]types.AppEntry)
-	s.readJSON("apps.json", &apps)
+	s.readJSON(s.envFile("apps.json"), &apps)
 	app, ok := apps[appName]
 	if !ok {
 		return fmt.Errorf("app %q not found", appName)
@@ -184,7 +198,7 @@ func (s *Store) AddDomain(appName, domain string) error {
 	}
 	app.Domains = append(app.Domains, domain)
 	apps[appName] = app
-	return s.writeJSON("apps.json", apps)
+	return s.writeJSON(s.envFile("apps.json"), apps)
 }
 
 func (s *Store) RemoveDomain(appName, domain string) error {
@@ -192,7 +206,7 @@ func (s *Store) RemoveDomain(appName, domain string) error {
 	defer s.mu.Unlock()
 
 	apps := make(map[string]types.AppEntry)
-	s.readJSON("apps.json", &apps)
+	s.readJSON(s.envFile("apps.json"), &apps)
 	app, ok := apps[appName]
 	if !ok {
 		return fmt.Errorf("app %q not found", appName)
@@ -209,7 +223,7 @@ func (s *Store) RemoveDomain(appName, domain string) error {
 		return fmt.Errorf("domain %q not found for app %q", domain, appName)
 	}
 	apps[appName] = app
-	return s.writeJSON("apps.json", apps)
+	return s.writeJSON(s.envFile("apps.json"), apps)
 }
 
 func (s *Store) ListDomains(appName string) ([]string, error) {
@@ -217,7 +231,7 @@ func (s *Store) ListDomains(appName string) ([]string, error) {
 	defer s.mu.Unlock()
 
 	apps := make(map[string]types.AppEntry)
-	s.readJSON("apps.json", &apps)
+	s.readJSON(s.envFile("apps.json"), &apps)
 	app, ok := apps[appName]
 	if !ok {
 		return nil, fmt.Errorf("app %q not found", appName)
@@ -232,7 +246,7 @@ func (s *Store) AddVolume(appName string, vol types.VolumeConfig) error {
 	defer s.mu.Unlock()
 
 	apps := make(map[string]types.AppEntry)
-	s.readJSON("apps.json", &apps)
+	s.readJSON(s.envFile("apps.json"), &apps)
 	app, ok := apps[appName]
 	if !ok {
 		return fmt.Errorf("app %q not found", appName)
@@ -244,7 +258,7 @@ func (s *Store) AddVolume(appName string, vol types.VolumeConfig) error {
 	}
 	app.Config.Volumes = append(app.Config.Volumes, vol)
 	apps[appName] = app
-	return s.writeJSON("apps.json", apps)
+	return s.writeJSON(s.envFile("apps.json"), apps)
 }
 
 func (s *Store) RemoveVolume(appName, hostPath string) error {
@@ -252,7 +266,7 @@ func (s *Store) RemoveVolume(appName, hostPath string) error {
 	defer s.mu.Unlock()
 
 	apps := make(map[string]types.AppEntry)
-	s.readJSON("apps.json", &apps)
+	s.readJSON(s.envFile("apps.json"), &apps)
 	app, ok := apps[appName]
 	if !ok {
 		return fmt.Errorf("app %q not found", appName)
@@ -269,7 +283,7 @@ func (s *Store) RemoveVolume(appName, hostPath string) error {
 		return fmt.Errorf("volume with host path %q not found for app %q", hostPath, appName)
 	}
 	apps[appName] = app
-	return s.writeJSON("apps.json", apps)
+	return s.writeJSON(s.envFile("apps.json"), apps)
 }
 
 func (s *Store) ListVolumes(appName string) ([]types.VolumeConfig, error) {
@@ -277,7 +291,7 @@ func (s *Store) ListVolumes(appName string) ([]types.VolumeConfig, error) {
 	defer s.mu.Unlock()
 
 	apps := make(map[string]types.AppEntry)
-	s.readJSON("apps.json", &apps)
+	s.readJSON(s.envFile("apps.json"), &apps)
 	app, ok := apps[appName]
 	if !ok {
 		return nil, fmt.Errorf("app %q not found", appName)
@@ -292,14 +306,14 @@ func (s *Store) AddDeployment(appName string, dep types.DeploymentEntry) error {
 	defer s.mu.Unlock()
 
 	deployments := make(map[string][]types.DeploymentEntry)
-	s.readJSON("deployments.json", &deployments)
+	s.readJSON(s.envFile("deployments.json"), &deployments)
 	entries := deployments[appName]
 	entries = append(entries, dep)
 	if len(entries) > 10 {
 		entries = entries[len(entries)-10:]
 	}
 	deployments[appName] = entries
-	return s.writeJSON("deployments.json", deployments)
+	return s.writeJSON(s.envFile("deployments.json"), deployments)
 }
 
 func (s *Store) GetDeployments(appName string) ([]types.DeploymentEntry, error) {
@@ -307,7 +321,7 @@ func (s *Store) GetDeployments(appName string) ([]types.DeploymentEntry, error) 
 	defer s.mu.Unlock()
 
 	deployments := make(map[string][]types.DeploymentEntry)
-	s.readJSON("deployments.json", &deployments)
+	s.readJSON(s.envFile("deployments.json"), &deployments)
 	return deployments[appName], nil
 }
 
@@ -316,7 +330,7 @@ func (s *Store) UpdateDeploymentStatus(appName, deploymentID, status string) err
 	defer s.mu.Unlock()
 
 	deployments := make(map[string][]types.DeploymentEntry)
-	s.readJSON("deployments.json", &deployments)
+	s.readJSON(s.envFile("deployments.json"), &deployments)
 	entries := deployments[appName]
 	found := false
 	for i := range entries {
@@ -330,7 +344,7 @@ func (s *Store) UpdateDeploymentStatus(appName, deploymentID, status string) err
 		return fmt.Errorf("deployment %q not found for app %q", deploymentID, appName)
 	}
 	deployments[appName] = entries
-	return s.writeJSON("deployments.json", deployments)
+	return s.writeJSON(s.envFile("deployments.json"), deployments)
 }
 
 func (s *Store) GetPreviousDeployment(appName string) (*types.DeploymentEntry, error) {
@@ -338,7 +352,7 @@ func (s *Store) GetPreviousDeployment(appName string) (*types.DeploymentEntry, e
 	defer s.mu.Unlock()
 
 	deployments := make(map[string][]types.DeploymentEntry)
-	s.readJSON("deployments.json", &deployments)
+	s.readJSON(s.envFile("deployments.json"), &deployments)
 	entries, ok := deployments[appName]
 	if !ok || len(entries) == 0 {
 		return nil, fmt.Errorf("no deployment history for app %q", appName)
@@ -357,7 +371,7 @@ func (s *Store) GetDeploymentByID(appName, deploymentID string) (*types.Deployme
 	defer s.mu.Unlock()
 
 	deployments := make(map[string][]types.DeploymentEntry)
-	s.readJSON("deployments.json", &deployments)
+	s.readJSON(s.envFile("deployments.json"), &deployments)
 	entries, ok := deployments[appName]
 	if !ok {
 		return nil, fmt.Errorf("no deployment history for app %q", appName)
@@ -386,7 +400,7 @@ func (s *Store) writeJSON(name string, v interface{}) error {
 }
 
 func (s *Store) buildLogDir(appName string) string {
-	return filepath.Join(s.dataDir, "build-logs", appName)
+	return filepath.Join(s.dataDir, "build-logs", s.env, appName)
 }
 
 func (s *Store) SaveBuildLog(appName, deploymentID, content string) error {
