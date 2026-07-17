@@ -357,6 +357,16 @@ func TestLogsCmdFlagParsing(t *testing.T) {
 	}
 }
 
+func TestInitTemplateContainsBuilder(t *testing.T) {
+	src, err := os.ReadFile("root.go")
+	if err != nil {
+		t.Skip("root.go not accessible")
+	}
+	if !bytes.Contains(src, []byte("builder:")) {
+		t.Error("init template missing builder field")
+	}
+}
+
 func TestDeployBuilderFlag(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("env", "production", "")
