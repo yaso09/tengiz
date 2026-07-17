@@ -179,6 +179,21 @@ func TestLoadForEnvironment_missingEnvFile(t *testing.T) {
 	}
 }
 
+func TestLoadForEnvironment_validateEnvName(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), []byte("name: myapp\n"), 0644)
+
+	_, err := LoadForEnvironment(dir, "staging/prod")
+	if err == nil {
+		t.Fatal("LoadForEnvironment() expected error for invalid env name")
+	}
+
+	_, err = LoadForEnvironment(dir, "good-env_123")
+	if err != nil {
+		t.Fatalf("LoadForEnvironment() unexpected error for valid env name: %v", err)
+	}
+}
+
 func TestLoadForEnvironment_envMergePreservesBase(t *testing.T) {
 	dir := t.TempDir()
 	base := `

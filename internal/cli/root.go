@@ -60,6 +60,7 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	deployCmd.Flags().StringP("env", "e", "", "deployment environment (e.g. staging, production)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
@@ -152,7 +153,8 @@ var deployCmd = &cobra.Command{
 			projectRoot = abs
 		}
 
-		cfg, err := config.Load(projectRoot)
+		envFlag, _ := cmd.Flags().GetString("env")
+		cfg, err := config.LoadForEnvironment(projectRoot, envFlag)
 		if err != nil {
 			cfg = &types.AppConfig{
 				Name: filepath.Base(projectRoot),
@@ -160,6 +162,7 @@ var deployCmd = &cobra.Command{
 					Enabled:     true,
 					IdleTimeout: 5 * time.Minute,
 				},
+				Environment: envFlag,
 			}
 		}
 
@@ -399,15 +402,17 @@ var psCmd = &cobra.Command{
 
 		store := config.NewStore(dataDir)
 		storeApps, _ := store.ListApps()
+		envMap := make(map[string]string, len(storeApps))
 		healthMap := make(map[string]string, len(storeApps))
 		for _, sa := range storeApps {
+			envMap[sa.Name] = sa.Config.Environment
 			healthMap[sa.Name] = sa.HealthStatus
 			if healthMap[sa.Name] == "" {
 				healthMap[sa.Name] = string(types.HealthUnknown)
 			}
 		}
 
-		fmt.Printf("%-20s %-10s %-8s %-10s\n", "NAME", "STATE", "PORT", "HEALTH")
+		fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", "NAME", "STATE", "PORT", "ENVIRONMENT", "HEALTH")
 		for _, a := range apps {
 			portStr := fmt.Sprintf("%d", a.Port)
 			if a.Port == 0 {
@@ -417,7 +422,11 @@ var psCmd = &cobra.Command{
 			if health == "" {
 				health = string(types.HealthUnknown)
 			}
-			fmt.Printf("%-20s %-10s %-8s %-10s\n", a.Name, a.State, portStr, health)
+			env := envMap[a.Name]
+			if env == "" {
+				env = "-"
+			}
+			fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", a.Name, a.State, portStr, env, health)
 		}
 		return nil
 	},
