@@ -74,6 +74,7 @@ func resourceArgs(rc *types.ResourceConfig) []string {
 }
 
 const labelKey = "tengiz-app"
+const envLabelKey = "tengiz-env"
 
 type dockerRuntime struct{}
 
@@ -89,12 +90,13 @@ func (r *dockerRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageT
 	if internalPort == 0 {
 		internalPort = 8080
 	}
-	containerName := fmt.Sprintf("tengiz-%s", cfg.Name)
+	cn := ContainerName(cfg.Name, cfg.Environment)
 
 	args := []string{
 		"run", "-d",
-		"--name", containerName,
+		"--name", cn,
 		"--label", fmt.Sprintf("%s=%s", labelKey, cfg.Name),
+		"--label", fmt.Sprintf("%s=%s", envLabelKey, cfg.Environment),
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", port, internalPort),
 		"--restart", "no",
 	}
@@ -115,12 +117,13 @@ func (r *dockerRuntime) CreateFromImage(ctx context.Context, cfg *types.AppConfi
 	if internalPort == 0 {
 		internalPort = 8080
 	}
-	containerName := fmt.Sprintf("tengiz-%s", cfg.Name)
+	cn := ContainerName(cfg.Name, cfg.Environment)
 
 	args := []string{
 		"run", "-d",
-		"--name", containerName,
+		"--name", cn,
 		"--label", fmt.Sprintf("%s=%s", labelKey, cfg.Name),
+		"--label", fmt.Sprintf("%s=%s", envLabelKey, cfg.Environment),
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", port, internalPort),
 		"--restart", "no",
 	}
@@ -137,7 +140,7 @@ func (r *dockerRuntime) CreateFromImage(ctx context.Context, cfg *types.AppConfi
 }
 
 func (r *dockerRuntime) Start(ctx context.Context, name string) error {
-	containerName := fmt.Sprintf("tengiz-%s", name)
+	containerName := name
 
 	imageTag, ports, envs, vols := r.getContainerConfig(ctx, containerName)
 
@@ -148,7 +151,7 @@ func (r *dockerRuntime) Start(ctx context.Context, name string) error {
 	}
 
 	// Verify container is actually running (may have exited immediately)
-	active, _ := r.IsActive(ctx, name)
+	active, _ := r.IsActive(ctx, containerName)
 	if !active && imageTag != "" {
 		log.Printf("[runtime] container %s exited after start, recreating", name)
 		exec.CommandContext(ctx, "docker", "rm", "-f", containerName).Run()
@@ -279,7 +282,7 @@ func (r *dockerRuntime) WaitForHealth(ctx context.Context, name string, hc *type
 	if hc == nil || !hc.Enabled {
 		return nil
 	}
-	containerName := fmt.Sprintf("tengiz-%s", name)
+	containerName := name
 	portCmd := exec.CommandContext(ctx, "docker", "inspect",
 		"--format", "{{json .NetworkSettings.Ports}}", containerName)
 	portOut, err := portCmd.CombinedOutput()
@@ -341,8 +344,7 @@ func (r *dockerRuntime) WaitForHealth(ctx context.Context, name string, hc *type
 }
 
 func (r *dockerRuntime) Restart(ctx context.Context, name string) error {
-	containerName := fmt.Sprintf("tengiz-%s", name)
-	cmd := exec.CommandContext(ctx, "docker", "restart", "-t", "5", containerName)
+	cmd := exec.CommandContext(ctx, "docker", "restart", "-t", "5", name)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker restart: %w\n%s", err, string(out))
@@ -351,8 +353,7 @@ func (r *dockerRuntime) Restart(ctx context.Context, name string) error {
 }
 
 func (r *dockerRuntime) Stop(ctx context.Context, name string) error {
-	containerName := fmt.Sprintf("tengiz-%s", name)
-	cmd := exec.CommandContext(ctx, "docker", "stop", "-t", "5", containerName)
+	cmd := exec.CommandContext(ctx, "docker", "stop", "-t", "5", name)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker stop: %w\n%s", err, string(out))
@@ -361,8 +362,7 @@ func (r *dockerRuntime) Stop(ctx context.Context, name string) error {
 }
 
 func (r *dockerRuntime) Remove(ctx context.Context, name string) error {
-	containerName := fmt.Sprintf("tengiz-%s", name)
-	cmd := exec.CommandContext(ctx, "docker", "rm", "-f", containerName)
+	cmd := exec.CommandContext(ctx, "docker", "rm", "-f", name)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker rm: %w\n%s", err, string(out))
@@ -371,8 +371,7 @@ func (r *dockerRuntime) Remove(ctx context.Context, name string) error {
 }
 
 func (r *dockerRuntime) IsActive(ctx context.Context, name string) (bool, error) {
-	containerName := fmt.Sprintf("tengiz-%s", name)
-	cmd := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{.State.Running}}", containerName)
+	cmd := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{.State.Running}}", name)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return false, nil
@@ -488,8 +487,7 @@ func (r *dockerRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag 
 }
 
 func (r *dockerRuntime) Logs(ctx context.Context, name string, opts LogOptions) (io.ReadCloser, error) {
-	containerName := fmt.Sprintf("tengiz-%s", name)
-	args := buildLogArgs(containerName, opts)
+	args := buildLogArgs(name, opts)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -509,12 +507,14 @@ func (r *dockerRuntime) CreateVersioned(ctx context.Context, cfg *types.AppConfi
 	if internalPort == 0 {
 		internalPort = 8080
 	}
-	containerName := fmt.Sprintf("tengiz-%s-%s", sanitizeContainerName(cfg.Name), suffix)
+	cn := ContainerName(cfg.Name, cfg.Environment)
+	containerName := fmt.Sprintf("%s-%s", cn, suffix)
 
 	args := []string{
 		"run", "-d",
 		"--name", containerName,
 		"--label", fmt.Sprintf("%s=%s", labelKey, cfg.Name),
+		"--label", fmt.Sprintf("%s=%s", envLabelKey, cfg.Environment),
 		"--label", fmt.Sprintf("tengiz-deployment=%s", suffix),
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", port, internalPort),
 		"--restart", "no",
@@ -532,7 +532,7 @@ func (r *dockerRuntime) CreateVersioned(ctx context.Context, cfg *types.AppConfi
 }
 
 func (r *dockerRuntime) RemoveBySuffix(ctx context.Context, name string, suffix string) error {
-	containerName := fmt.Sprintf("tengiz-%s-%s", sanitizeContainerName(name), suffix)
+	containerName := fmt.Sprintf("%s-%s", name, suffix)
 	cmd := exec.CommandContext(ctx, "docker", "rm", "-f", containerName)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -542,7 +542,7 @@ func (r *dockerRuntime) RemoveBySuffix(ctx context.Context, name string, suffix 
 }
 
 func (r *dockerRuntime) GetContainerPort(ctx context.Context, name string, suffix string) (int, error) {
-	containerName := fmt.Sprintf("tengiz-%s-%s", sanitizeContainerName(name), suffix)
+	containerName := fmt.Sprintf("%s-%s", name, suffix)
 	portCmd := exec.CommandContext(ctx, "docker", "inspect",
 		"--format", "{{json .NetworkSettings.Ports}}", containerName)
 	portOut, err := portCmd.CombinedOutput()
@@ -569,7 +569,7 @@ func (r *dockerRuntime) GetContainerPort(ctx context.Context, name string, suffi
 }
 
 func (r *dockerRuntime) WaitForReady(ctx context.Context, name string, internalPort int) error {
-	containerName := fmt.Sprintf("tengiz-%s", name)
+	containerName := name
 	// Wait for container to be running
 	for {
 		cmd := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{.State.Running}}", containerName)
