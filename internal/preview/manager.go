@@ -58,7 +58,7 @@ func (m *Manager) Create(ctx context.Context, appName string, prNumber int, bran
 		return nil, fmt.Errorf("clone: %w", err)
 	}
 
-	detection, err := builder.Detect(cloneDir)
+	detection, err := builder.DetectWithBuilder(cloneDir, "")
 	if err != nil {
 		return nil, fmt.Errorf("detect: %w", err)
 	}
@@ -140,7 +140,7 @@ func (m *Manager) Update(ctx context.Context, appName string, prNumber int, bran
 		return nil, fmt.Errorf("clone: %w", err)
 	}
 
-	detection, err := builder.Detect(cloneDir)
+	detection, err := builder.DetectWithBuilder(cloneDir, "")
 	if err != nil {
 		return nil, fmt.Errorf("detect: %w", err)
 	}

@@ -63,6 +63,7 @@ func init() {
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	initBuilderFlag(deployCmd)
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
@@ -81,6 +82,10 @@ var rootCmd = &cobra.Command{
 	Use:   "tengiz",
 	Short: "Tengiz - Serverless deployment platform",
 	Long:  "Tengiz is a Vercel alternative. Deploy any app with scale-to-zero.",
+}
+
+func initBuilderFlag(cmd *cobra.Command) {
+	cmd.Flags().String("builder", "", "Build strategy (docker or nixpacks)")
 }
 
 func getEnv(cmd *cobra.Command) string {
@@ -182,9 +187,15 @@ var deployCmd = &cobra.Command{
 			}
 		}
 
+		builderFlag, _ := cmd.Flags().GetString("builder")
+		builderType := cfg.Build.Builder
+		if builderFlag != "" {
+			builderType = builderFlag
+		}
+
 		fmt.Printf("[tengiz] deploying %s from %s\n", cfg.Name, projectRoot)
 
-		detection, err := builder.Detect(projectRoot)
+		detection, err := builder.DetectWithBuilder(projectRoot, builderType)
 		if err != nil {
 			return fmt.Errorf("detect: %w", err)
 		}
@@ -196,7 +207,7 @@ var deployCmd = &cobra.Command{
 
 		deploymentID := fmt.Sprintf("%d", time.Now().Unix())
 
-		b := builder.New(dataDir)
+		b := builder.NewWithStrategy(dataDir, builder.StrategyFromName(builderType, dataDir))
 		store := config.NewStoreWithEnv(dataDir, envFlag)
 		imageTag, buildLog, err := b.Build(context.Background(), projectRoot, cfg.Name, cfg.Environment, detection, deploymentID)
 		if err != nil {

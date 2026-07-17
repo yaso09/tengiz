@@ -376,3 +376,25 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestDeployCmdBuilderFlag(t *testing.T) {
+	cmd := &cobra.Command{}
+	initBuilderFlag(cmd)
+	flag := cmd.Flags().Lookup("builder")
+	if flag == nil {
+		t.Fatal("expected --builder flag")
+	}
+	if flag.DefValue != "" {
+		t.Errorf("default = %q, want empty", flag.DefValue)
+	}
+}
+
+func TestInitCmdOutputContainsBuilder(t *testing.T) {
+	content := `name: test
+build:
+  builder: docker
+`
+	if !strings.Contains(content, "builder") {
+		t.Error("init output should reference builder field")
+	}
+}

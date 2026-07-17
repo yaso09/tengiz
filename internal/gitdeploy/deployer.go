@@ -70,7 +70,7 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 
 	existingApp, lookupErr := p.store.GetApp(appName)
 
-	detection, err := builder.Detect(cloneDir)
+	detection, err := builder.DetectWithBuilder(cloneDir, "")
 	if err != nil {
 		return fmt.Errorf("detect: %w", err)
 	}
