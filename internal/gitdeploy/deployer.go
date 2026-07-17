@@ -173,7 +173,8 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 	}
 	log.Printf("[tengiz] new container starting on port %d", newPort)
 
-	if err := p.rt.WaitForReady(ctx, fmt.Sprintf("%s-%s", appName, deploymentID), cfg.Port); err != nil {
+	containerName := runtime.ContainerName(appName, p.env)
+	if err := p.rt.WaitForReady(ctx, fmt.Sprintf("%s-%s", containerName, deploymentID), cfg.Port); err != nil {
 		log.Printf("[tengiz] warning: new container may not be ready: %v", err)
 	}
 
@@ -182,9 +183,9 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 	}
 
 	if existingApp.DeploymentSuffix != "" {
-		p.rt.RemoveBySuffix(ctx, appName, existingApp.DeploymentSuffix)
+		p.rt.RemoveBySuffix(ctx, containerName, existingApp.DeploymentSuffix)
 	} else {
-		p.rt.Remove(ctx, appName)
+		p.rt.Remove(ctx, containerName)
 	}
 	p.store.FreePort(existingApp.Port)
 
