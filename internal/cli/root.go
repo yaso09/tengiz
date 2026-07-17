@@ -385,6 +385,16 @@ var proxyCmd = &cobra.Command{
 			}
 		}
 
+		// Register preview deployment routes
+		previews, listErr := store.ListAllPreviews()
+		if listErr == nil {
+			for _, pv := range previews {
+				routeKey := fmt.Sprintf("pr-%d.%s", pv.PRNumber, pv.AppName)
+				p.Register(routeKey, pv.Port)
+				fmt.Printf("[tengiz] preview route: %s -> :%d\n", routeKey, pv.Port)
+			}
+		}
+
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
