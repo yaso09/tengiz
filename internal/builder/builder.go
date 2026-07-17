@@ -8,10 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 type Builder struct {
-	dataDir string
+	dataDir     string
+	BuilderType types.BuilderType
 }
 
 func New(dataDir string) *Builder {
@@ -19,6 +22,9 @@ func New(dataDir string) *Builder {
 }
 
 func (b *Builder) Build(ctx context.Context, dir string, appName string, env string, detection *Detection, deploymentID string) (string, string, error) {
+	if b.BuilderType == types.BuilderTypeNixpacks {
+		return b.buildWithNixpacks(ctx, dir, appName, env, deploymentID, detection)
+	}
 	if detection.Framework == FrameworkDocker {
 		return b.buildWithDockerfile(ctx, dir, appName, env, deploymentID)
 	}

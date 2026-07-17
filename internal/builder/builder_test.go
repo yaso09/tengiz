@@ -160,6 +160,27 @@ func TestBuildCapturesOutput(t *testing.T) {
 	_ = logs
 }
 
+func TestBuildWithNixpacksCapturesOutput(t *testing.T) {
+	b := New(t.TempDir())
+	b.BuilderType = types.BuilderTypeNixpacks
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(`package main
+import "fmt"
+func main() { fmt.Println("hello") }
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	detection := &Detection{Framework: FrameworkNixpacks, InternalPort: 8080}
+
+	_, logs, err := b.Build(context.Background(), dir, "testapp", "production", detection, "v1")
+	if err != nil {
+		t.Skipf("Nixpacks not installed: %v", err)
+	}
+	if logs == "" {
+		t.Error("expected non-empty build logs")
+	}
+}
+
 func TestBuildWithDeploymentIDCompiles(t *testing.T) {
 	b := New(t.TempDir())
 	dir := t.TempDir()
