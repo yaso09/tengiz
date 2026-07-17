@@ -15,7 +15,7 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 | 2 | **Build Logs** ✅ | Çok Yüksek | Çok Düşük | Mükemmel | Build hata ayıklama olmadan hiçbir deployment aracı kullanılamaz. `builder.go` çıktısını dosyaya yönlendir, `tengiz build-logs <app>` ile görüntüle. Çok düşük efor, çok yüksek etki.<br>**Status:** ✅ Implemented (2026-07-16) |
 | 3 | **Log Filtering** ✅ | Çok Yüksek | Çok Düşük | Mükemmel | Production debugging için `--since`, `--grep`, `--tail` filtreleme kritik. Docker log API'sine passthrough, mevcut `tengiz logs` komutuna flag ekleme.<br>**Status:** ✅ Implemented (2026-07-16) |
 | 4 | **One-off Process Execution** ✅ | Yüksek | Düşük | Mükemmel | Migration/console/data import olmadan uygulama yönetimi eksik kalır. `tengiz run <cmd>` = `docker run --rm`. Mevcut `os/exec` yapısına çok uygun.<br>**Status:** ✅ Implemented (2026-07-16) |
-| 5 | **Multi-Environment Desteği** ⬜ | Yüksek | Orta | Mükemmel | Development/staging/production ayrımı olmadan gerçek platform kurulamaz. `.tengiz.yaml` → `.tengiz.{env}.yaml` merge, `--env staging` flag'i. |
+| 5 | **Multi-Environment Desteği** ✅ | Yüksek | Orta | Mükemmel | Development/staging/production ayrımı olmadan gerçek platform kurulamaz. `.tengiz.yaml` → `.tengiz.{env}.yaml` merge, `--env staging` flag'i. |
 | 6 | **Webhook ile Otomatik Deploy** ⬜ | Yüksek | Orta | Mükemmel | Git tabanlı deployment'ın tamamlayıcısı. Webhook sunucusu push event'lerini alır, deploy tetikler. `tengiz webhook` komutu ile hafif bir HTTP sunucusu. |
 | 7 | **Preview Deployments** ⬜ | Yüksek | Orta-Yüksek | Mükemmel | Vercel'in en sevilen özelliği — PR bazında geçici ortam + otomatik cleanup. Container isimleri `tengiz-pr-<app>-<pr_id>`. PR kapanınca otomatik sil. |
 | 8 | **Nixpacks Build Sistemi** ⬜ | Yüksek | Orta | Mükemmel | Framework desteğini 6'dan yüzlerceye çıkarır (Ruby, Rust, PHP, Elixir, Java). `builder` paketine yeni `BuildStrategy` olarak eklenir, `.tengiz.yaml`'da `--builder nixpacks` ile seçilir. |
@@ -467,6 +467,7 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Source:** Kamal
 - **Description:** Kamal `-d staging` ile farklı ortamları destekler. `config/deploy.staging.yml` base config ile merge edilir. `require_destination` ile deploy için ortam zorunlu kılınabilir.
 - **Why add to Tengiz:** Development/staging/production ayrımı olmadan gerçek bir platform kurulamaz. `tengiz deploy -e staging` gibi bir flag ile farklı `.tengiz.staging.yaml` dosyası merge edilebilir.
+- **Status:** ✅ Implemented (2026-07-17)
 - **Detected:** 2026-07-14
 
 ## Gelişmiş Docker Build (Multi-Arch, Cache)
