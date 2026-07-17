@@ -11,7 +11,7 @@
 
 ## Features
 
-- **Framework auto-detection** — Next.js, Vite, Go, Node.js, Python, static sites. No config needed.
+- **Framework auto-detection** — Next.js, Vite, Go, Node.js, Python, static sites, plus hundreds more via **Nixpacks** (Ruby, Rust, PHP, Java, Elixir, etc.). No config needed.
 - **Scale-to-zero** — Containers stop after 5 minutes of inactivity, start on first request (cold start).
 - **Zero-downtime deployment** — Blue/green container switching: new container starts before the old one stops, traffic switches atomically at the proxy layer.
 - **On-demand reverse proxy** — Route traffic by hostname (`myapp.tengiz.local:8080`). Admin API (`127.0.0.1:9099`) for dynamic route management.
@@ -82,7 +82,11 @@ Build and deploy an application with zero-downtime.
 |----------|-------------|
 | `directory` | Project directory (default: `.`) |
 
-Detects the framework, builds a Docker image, and deploys. On first deploy, allocates a port (9000-9999), starts the container. On subsequent deploys, performs a **blue/green switch**: new versioned container starts on a new port, readiness is checked, traffic is routed to the new container atomically via the proxy admin API, then the old container is stopped and removed. Deployment history is recorded in `~/.tengiz/deployments.json`. If no `.tengiz.yaml` exists, uses the directory name as app name with serverless defaults.
+| Flag | Description |
+|------|-------------|
+| `--builder` | Build strategy: `nixpacks` (default: empty = built-in) |
+
+Detects the framework, builds a Docker image, and deploys. Use `--builder nixpacks` to use Nixpacks as the build strategy (supports hundreds of frameworks). On first deploy, allocates a port (9000-9999), starts the container. On subsequent deploys, performs a **blue/green switch**: new versioned container starts on a new port, readiness is checked, traffic is routed to the new container atomically via the proxy admin API, then the old container is stopped and removed. Deployment history is recorded in `~/.tengiz/deployments.json`. If no `.tengiz.yaml` exists, uses the directory name as app name with serverless defaults.
 
 ### `tengiz proxy [-a <app>] [-p <port>]`
 
@@ -332,6 +336,8 @@ Create a `.tengiz.yaml` in your project root:
 ```yaml
 name: my-app
 port: 3000            # container internal port (auto-detected if omitted)
+# build:
+#   builder: nixpacks  # build strategy: nixpacks (default: empty = built-in)
 serverless:
   enabled: true
   idle_timeout: 5m    # scale-to-zero timeout
@@ -372,6 +378,10 @@ Without a config file, Tengiz uses defaults: app name = directory name, port aut
 | **Node.js** | `package.json` | 8080 |
 | **Python** | `requirements.txt` / `Pipfile` / `pyproject.toml` | 8000 |
 | **Static HTML** | `index.html` | 80 (nginx) |
+
+| **Nixpacks** (via `--builder nixpacks` or `build.builder: nixpacks`) | `nixpacks plan --json` | Auto-detected (default 8080) |
+
+**Nixpacks** extends support to hundreds of frameworks (Ruby, Rust, PHP, Java, Elixir, etc.) with automatic detection. Use `tengiz deploy --builder nixpacks` or set `build.builder: nixpacks` in `.tengiz.yaml`.
 
 When no Dockerfile exists, Tengiz auto-generates one with a multi-stage build optimized for each framework.
 
