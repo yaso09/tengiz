@@ -63,6 +63,7 @@ func init() {
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	deployCmd.Flags().String("builder", "", "build strategy (nixpacks or default)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
@@ -184,9 +185,19 @@ var deployCmd = &cobra.Command{
 
 		fmt.Printf("[tengiz] deploying %s from %s\n", cfg.Name, projectRoot)
 
-		detection, err := builder.Detect(projectRoot)
-		if err != nil {
-			return fmt.Errorf("detect: %w", err)
+		builderFlag, _ := cmd.Flags().GetString("builder")
+		useNixpacks := builderFlag == types.BuilderNixpacks || cfg.Build.Builder == types.BuilderNixpacks
+
+		var detection *builder.Detection
+		var detectErr error
+		if useNixpacks {
+			fmt.Printf("[tengiz] using nixpacks build strategy\n")
+			detection, detectErr = builder.DetectWithNixpacks(cmd.Context(), projectRoot)
+		} else {
+			detection, detectErr = builder.Detect(projectRoot)
+		}
+		if detectErr != nil {
+			return fmt.Errorf("detect: %w", detectErr)
 		}
 		fmt.Printf("[tengiz] detected: %s (port %d)\n", detection.Framework, detection.InternalPort)
 

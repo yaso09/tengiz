@@ -357,6 +357,24 @@ func TestLogsCmdFlagParsing(t *testing.T) {
 	}
 }
 
+func TestDeployBuilderFlagParsing(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("builder", "", "build strategy (nixpacks or default)")
+
+	// Test default
+	builder, _ := cmd.Flags().GetString("builder")
+	if builder != "" {
+		t.Errorf("expected empty default, got %q", builder)
+	}
+
+	// Test nixpacks
+	cmd.Flags().Set("builder", "nixpacks")
+	builder, _ = cmd.Flags().GetString("builder")
+	if builder != "nixpacks" {
+		t.Errorf("expected nixpacks, got %q", builder)
+	}
+}
+
 func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	configCmd, _, err := rootCmd.Find([]string{"config"})
 	if err != nil {
