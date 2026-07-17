@@ -19,6 +19,7 @@
 | `config` | Loads `.tengiz.yaml` via viper. `LoadWithEnv(path, env)` and `LoadForEnvironment(path, env)` merge `.tengiz.{env}.yaml` overrides (latter adds env name validation + comprehensive scalar merge). `Store` persists apps + port allocations in `~/.tengiz/` (env-scoped). Adds `GetEnv`/`SetEnv`/`UnsetEnv`/`ListEnv` for env var management. |
 | `health` | Periodic HTTP health checks with automatic restart. Env-aware via `NewWithEnv`. |
 | `gitdeploy` | Git-based deployment pipeline. Env-aware via `NewPipelineWithEnv`. |
+| `preview` | Preview deployment lifecycle (PR-based). `Manager` struct with `Create/Update/Delete/List`. Webhook `pull_request` events trigger auto-create/update/cleanup. |
 | `types` | Shared: `AppConfig`, `AppStatus`, `AppEntry`, `PortEntry`, `DeploymentEntry`, `DeploymentStatus`. `AppConfig.Environment` field. |
 
 ## Commands
@@ -44,6 +45,9 @@ tengiz stop/start/rm  → lifecycle
 tengiz config set/get/unset/show → env vars
 tengiz domain add/remove/list   → custom domains
 tengiz volume add/remove/list   → persistent storage volumes
+tengiz preview list <app>       → list preview deployments
+tengiz preview rm <app> <pr>    → remove a preview deployment
+tengiz preview deploy <app> <pr> → create/update preview deployment (webhook preferred)
 tengiz rollback <app>           → rollback to previous deployment
 ```
 
@@ -61,6 +65,6 @@ tengiz rollback <app>           → rollback to previous deployment
 - No config file = uses dir name as app name + defaults
 - Env vars stored in `AppEntry.Config.Env` → auto-persisted via JSON in `~/.tengiz/apps.json`
 - `.tengiz.yaml` `env:` section uses `KEY: value` format (map, not list)
-- Proxy's `extractApp()` checks custom domains first (`p.domains` map), then falls back to subdomain split (e.g. `myapp.tengiz.local` → `myapp`)
+- Proxy's `extractApp()` checks custom domains first (`p.domains` map), then strips `.tengiz.local`/`.localhost` suffixes and checks the full prefix as a route key, then falls back to first subdomain part (e.g. `pr-42.myapp.tengiz.local` → `pr-42.myapp` as route key, `myapp.tengiz.local` → `myapp`)
 - Tests for `proxy` are slow (~2s each) due to TCP dial timeout on unreachable ports
 - `idle` tests are time-sensitive (use `time.Sleep` with 50ms granularity)

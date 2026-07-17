@@ -16,6 +16,7 @@
 - **Zero-downtime deployment** — Blue/green container switching: new container starts before the old one stops, traffic switches atomically at the proxy layer.
 - **On-demand reverse proxy** — Route traffic by hostname (`myapp.tengiz.local:8080`). Admin API (`127.0.0.1:9099`) for dynamic route management.
 - **Multi-environment** — Isolate dev/staging/production with `--env` flag, env-scoped config overrides, and separate state files.
+- **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
@@ -253,6 +254,36 @@ List all mounted volumes for an application.
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name |
+
+### `tengiz preview`
+
+Manage preview deployments (PR-based ephemeral environments). Preview deployments are automatically created on `pull_request` webhook events (opened/synchronize/reopened) and cleaned up on PR close.
+
+#### `tengiz preview list <app>`
+
+List active preview deployments for an app.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+
+#### `tengiz preview rm <app> <pr-number>`
+
+Remove a preview deployment, stopping its container, freeing the port, and removing the Docker image.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `pr-number` | PR number to remove |
+
+#### `tengiz preview deploy <app> <pr-number> [directory]`
+
+Create or update a preview deployment from a local directory (primarily webhook-based for git auto-deploy).
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `pr-number` | PR number |
 
 ### `tengiz config`
 
@@ -583,6 +614,7 @@ tengiz/
 │   ├── cli/                 # Cobra CLI commands
 │   ├── config/              # .tengiz.yaml loader + state persistence
 │   ├── idle/                # Scale-to-zero timer manager
+│   ├── preview/             # Preview deployment lifecycle (PR-based)
 │   ├── proxy/               # Reverse proxy with cold-start routing
 │   ├── runtime/             # Docker container lifecycle (via CLI)
 │   └── types/               # Shared types
