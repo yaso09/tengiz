@@ -10,22 +10,45 @@ import (
 	"path/filepath"
 )
 
+type BuilderType string
+
+const (
+	BuilderAuto     BuilderType = "auto"
+	BuilderNixpacks BuilderType = "nixpacks"
+)
+
 type Builder struct {
-	dataDir string
+	dataDir     string
+	builderType BuilderType
 }
 
 func New(dataDir string) *Builder {
-	return &Builder{dataDir: dataDir}
+	return NewWithType(dataDir, string(BuilderAuto))
+}
+
+func NewWithType(dataDir string, builderType string) *Builder {
+	if builderType == "" {
+		builderType = string(BuilderAuto)
+	}
+	return &Builder{
+		dataDir:     dataDir,
+		builderType: BuilderType(builderType),
+	}
 }
 
 func (b *Builder) Build(ctx context.Context, dir string, appName string, env string, detection *Detection, deploymentID string) (string, string, error) {
-	if detection.Framework == FrameworkDocker {
+	switch b.builderType {
+	case BuilderNixpacks:
+		return b.buildWithNixpacks(ctx, dir, appName, env, deploymentID)
+	default:
+		if detection.Framework == FrameworkDocker {
+			return b.buildWithDockerfile(ctx, dir, appName, env, deploymentID)
+		}
+		if err := b.ensureDockerfile(dir, detection); err != nil {
+			return "", "", fmt.Errorf("generate dockerfile: %w", err)
+		}
 		return b.buildWithDockerfile(ctx, dir, appName, env, deploymentID)
 	}
-	if err := b.ensureDockerfile(dir, detection); err != nil {
-		return "", "", fmt.Errorf("generate dockerfile: %w", err)
-	}
-	return b.buildWithDockerfile(ctx, dir, appName, env, deploymentID)
 }
 
 func (b *Builder) ensureDockerfile(dir string, detection *Detection) error {
@@ -51,6 +74,42 @@ func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName s
 
 	if err := cmd.Run(); err != nil {
 		return "", logBuf.String(), fmt.Errorf("docker build: %w", err)
+	}
+
+	latestTag := fmt.Sprintf("tengiz-apps/%s:%s-latest", appName, env)
+	tagCmd := exec.CommandContext(ctx, "docker", "tag", tag, latestTag)
+	if out, err := tagCmd.CombinedOutput(); err != nil {
+		return "", logBuf.String() + string(out), fmt.Errorf("docker tag latest: %w\n%s", err, string(out))
+	}
+
+	return tag, logBuf.String(), nil
+}
+
+func (b *Builder) checkNixpacks() error {
+	_, err := exec.LookPath("nixpacks")
+	return err
+}
+
+func (b *Builder) buildWithNixpacks(ctx context.Context, dir string, appName string, env string, deploymentID string) (string, string, error) {
+	if env == "" {
+		env = "production"
+	}
+
+	if err := b.checkNixpacks(); err != nil {
+		return "", "", fmt.Errorf("nixpacks not found on $PATH: %w\ninstall: curl -fsSL https://nixpacks.com/install.sh | bash", err)
+	}
+
+	tag := fmt.Sprintf("tengiz-apps/%s:%s-%s", appName, env, deploymentID)
+
+	cmd := exec.CommandContext(ctx, "nixpacks", "build", dir, "--name", tag)
+
+	var logBuf bytes.Buffer
+	logWriter := io.MultiWriter(os.Stdout, &logBuf)
+	cmd.Stdout = logWriter
+	cmd.Stderr = logWriter
+
+	if err := cmd.Run(); err != nil {
+		return "", logBuf.String(), fmt.Errorf("nixpacks build: %w", err)
 	}
 
 	latestTag := fmt.Sprintf("tengiz-apps/%s:%s-latest", appName, env)
