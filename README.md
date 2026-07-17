@@ -82,7 +82,11 @@ Build and deploy an application with zero-downtime.
 |----------|-------------|
 | `directory` | Project directory (default: `.`) |
 
-Detects the framework, builds a Docker image, and deploys. On first deploy, allocates a port (9000-9999), starts the container. On subsequent deploys, performs a **blue/green switch**: new versioned container starts on a new port, readiness is checked, traffic is routed to the new container atomically via the proxy admin API, then the old container is stopped and removed. Deployment history is recorded in `~/.tengiz/deployments.json`. If no `.tengiz.yaml` exists, uses the directory name as app name with serverless defaults.
+| Flag | Description |
+|------|-------------|
+| `--builder` | Build strategy: `auto` (default, Dockerfile-based), `nixpacks` (uses Nixpacks CLI) |
+
+Detects the framework, builds a Docker image, and deploys. On first deploy, allocates a port (9000-9999), starts the container. On subsequent deploys, performs a **blue/green switch**: new versioned container starts on a new port, readiness is checked, traffic is routed to the new container atomically via the proxy admin API, then the old container is stopped and removed. Deployment history is recorded in `~/.tengiz/deployments.json`. If no `.tengiz.yaml` exists, uses the directory name as app name with serverless defaults. The builder type can also be set via `.tengiz.yaml`'s `build.builder` field.
 
 ### `tengiz proxy [-a <app>] [-p <port>]`
 
