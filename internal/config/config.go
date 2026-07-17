@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/spf13/viper"
@@ -59,6 +60,88 @@ func LoadWithEnv(path, env string) (*types.AppConfig, error) {
 	}
 
 	cfg.Environment = env
+	return cfg, nil
+}
+
+func LoadForEnvironment(path, env string) (*types.AppConfig, error) {
+	if env != "" {
+		if !regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(env) {
+			return nil, fmt.Errorf("invalid environment name %q: use only alphanumeric, dashes, and underscores", env)
+		}
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg.Environment = env
+
+	if env == "" {
+		return cfg, nil
+	}
+
+	envConfigPath := filepath.Join(path, fmt.Sprintf(".tengiz.%s.yaml", env))
+	if _, err := os.Stat(envConfigPath); os.IsNotExist(err) {
+		return cfg, nil
+	}
+
+	v := viper.New()
+	v.SetConfigFile(envConfigPath)
+	v.SetConfigType("yaml")
+	if err := v.ReadInConfig(); err != nil {
+		return nil, fmt.Errorf("env config read: %w", err)
+	}
+
+	var envCfg types.AppConfig
+	if err := v.Unmarshal(&envCfg); err != nil {
+		return nil, fmt.Errorf("env config unmarshal: %w", err)
+	}
+
+	if envCfg.Port != 0 {
+		cfg.Port = envCfg.Port
+	}
+	if envCfg.Build.Command != "" {
+		cfg.Build.Command = envCfg.Build.Command
+	}
+	if envCfg.Build.Output != "" {
+		cfg.Build.Output = envCfg.Build.Output
+	}
+	if envCfg.Name != "" {
+		cfg.Name = envCfg.Name
+	}
+	if envCfg.Domains != nil {
+		cfg.Domains = envCfg.Domains
+	}
+	if envCfg.HealthCheck != nil {
+		cfg.HealthCheck = envCfg.HealthCheck
+	}
+	if envCfg.Resources != nil {
+		cfg.Resources = envCfg.Resources
+	}
+	if envCfg.Serverless.Enabled != cfg.Serverless.Enabled || envCfg.Serverless.IdleTimeout != 0 {
+		if envCfg.Serverless.IdleTimeout != 0 {
+			cfg.Serverless = envCfg.Serverless
+		} else if envCfg.Serverless.Enabled != cfg.Serverless.Enabled && envCfg.Serverless.IdleTimeout == 0 {
+			cfg.Serverless = envCfg.Serverless
+		}
+	}
+	if envCfg.Git != nil {
+		cfg.Git = envCfg.Git
+	}
+	if envCfg.Volumes != nil {
+		cfg.Volumes = envCfg.Volumes
+	}
+
+	if envCfg.Env != nil {
+		if cfg.Env == nil {
+			cfg.Env = make(map[string]string)
+		}
+		for k, v := range envCfg.Env {
+			cfg.Env[k] = v
+		}
+	}
+
 	return cfg, nil
 }
 
