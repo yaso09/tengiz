@@ -115,6 +115,8 @@ var initCmd = &cobra.Command{
 		content := fmt.Sprintf(`name: %s
 environment: %s
 # port: 3000            # container internal port (auto-detected if omitted)
+# build:
+#   builder: nixpacks   # build strategy: nixpacks (default: empty = built-in)
 serverless:
   enabled: true
   idle_timeout: 5m      # scale-to-zero timeout
