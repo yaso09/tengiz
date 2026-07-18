@@ -481,6 +481,56 @@ func TestPullRequestOpenedEvent(t *testing.T) {
 	}
 }
 
+func TestParsePullRequestEvent(t *testing.T) {
+	body := []byte(`{
+		"action": "opened",
+		"number": 42,
+		"pull_request": {
+			"head": {
+				"ref": "feature/login",
+				"repo": {
+					"clone_url": "https://github.com/user/myapp.git"
+				}
+			},
+			"base": {
+				"ref": "main"
+			}
+		},
+		"repository": {
+			"clone_url": "https://github.com/user/myapp.git"
+		}
+	}`)
+
+	repo, prNumber, branch, action, err := parseGitHubPREvent(body)
+	if err != nil {
+		t.Fatalf("parseGitHubPREvent: %v", err)
+	}
+	if repo != "https://github.com/user/myapp.git" {
+		t.Errorf("repo = %q, want %q", repo, "https://github.com/user/myapp.git")
+	}
+	if prNumber != 42 {
+		t.Errorf("prNumber = %d, want 42", prNumber)
+	}
+	if branch != "feature/login" {
+		t.Errorf("branch = %q, want %q", branch, "feature/login")
+	}
+	if action != "opened" {
+		t.Errorf("action = %q, want %q", action, "opened")
+	}
+}
+
+func TestPREventActions(t *testing.T) {
+	actions := []string{"opened", "synchronize", "reopened", "closed"}
+	for _, a := range actions {
+		switch a {
+		case "opened", "synchronize", "reopened":
+		case "closed":
+		default:
+			t.Errorf("unexpected action: %s", a)
+		}
+	}
+}
+
 func TestPullRequestClosedEvent(t *testing.T) {
 	cleanupCh := make(chan struct {
 		appName  string

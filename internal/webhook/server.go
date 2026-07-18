@@ -18,6 +18,10 @@ type DeployFunc func(ctx context.Context, repoURL, branch, provider string) erro
 
 type PreviewFunc func(appName string, prNumber int, branch, repoURL string) error
 
+type PreviewDeployFunc func(ctx context.Context, repoURL string, prNumber int, branch string) error
+
+type PreviewCleanupFunc func(ctx context.Context, repoURL string, prNumber int) error
+
 type Config struct {
 	Secret          string   `yaml:"secret"`
 	AllowedBranches []string `yaml:"allowed_branches"`
@@ -25,11 +29,13 @@ type Config struct {
 }
 
 type Server struct {
-	dataDir    string
-	cfg        *Config
-	deployFn   DeployFunc
-	previewFn  PreviewFunc
-	httpServer *http.Server
+	dataDir          string
+	cfg              *Config
+	deployFn         DeployFunc
+	previewFn        PreviewFunc
+	previewDeployFn  PreviewDeployFunc
+	previewCleanupFn PreviewCleanupFunc
+	httpServer       *http.Server
 }
 
 func New(dataDir string, cfg *Config, fn DeployFunc) *Server {
@@ -38,6 +44,24 @@ func New(dataDir string, cfg *Config, fn DeployFunc) *Server {
 		cfg:      cfg,
 		deployFn: fn,
 	}
+}
+
+func NewWithPreview(dataDir string, cfg *Config, fn DeployFunc, previewDeployFn PreviewDeployFunc, previewCleanupFn PreviewCleanupFunc) *Server {
+	s := &Server{
+		dataDir:          dataDir,
+		cfg:              cfg,
+		deployFn:         fn,
+		previewDeployFn:  previewDeployFn,
+		previewCleanupFn: previewCleanupFn,
+	}
+	// Wire the new-style preview functions into the existing PreviewFunc handler
+	s.previewFn = func(appName string, prNumber int, branch, repoURL string) error {
+		if branch == "" {
+			return previewCleanupFn(context.Background(), repoURL, prNumber)
+		}
+		return previewDeployFn(context.Background(), repoURL, prNumber, branch)
+	}
+	return s
 }
 
 func (s *Server) SetPreviewFunc(fn PreviewFunc) {
@@ -350,4 +374,30 @@ func parseBitbucketEvent(r *http.Request, body []byte) (repo, ref, provider stri
 func parseGiteaEvent(r *http.Request, body []byte) (repo, ref, provider string, err error) {
 	repo, ref, _, err = parseGitHubEvent(r, body)
 	return repo, ref, "gitea", err
+}
+
+func parseGitHubPREvent(body []byte) (repo string, prNumber int, branch string, action string, err error) {
+	var payload struct {
+		Action string `json:"action"`
+		Number int    `json:"number"`
+		PullRequest struct {
+			Head struct {
+				Ref  string `json:"ref"`
+				Repo struct {
+					CloneURL string `json:"clone_url"`
+				} `json:"repo"`
+			} `json:"head"`
+		} `json:"pull_request"`
+		Repository struct {
+			CloneURL string `json:"clone_url"`
+		} `json:"repository"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", 0, "", "", fmt.Errorf("pull_request: %w", err)
+	}
+	repo = payload.Repository.CloneURL
+	if repo == "" {
+		repo = payload.PullRequest.Head.Repo.CloneURL
+	}
+	return repo, payload.Number, payload.PullRequest.Head.Ref, payload.Action, nil
 }
