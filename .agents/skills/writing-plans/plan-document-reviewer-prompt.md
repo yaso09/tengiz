@@ -1,49 +1,11 @@
-# Plan Document Reviewer Prompt Template
+# Plan Document Reviewer Prompt
 
-Use this template when dispatching a plan document reviewer subagent.
+Review the generated plan document for the following issues:
 
-**Purpose:** Verify the plan is complete, matches the spec, and has proper task decomposition.
+1. **Spec coverage:** Skim each section/requirement in the spec. Can you point to a task that implements it? List any gaps.
 
-**Dispatch after:** The complete plan is written.
+2. **Placeholder scan:** Search for red flags — TBD, TODO, "implement later", "fill in details", "Add appropriate error handling", "add validation", "handle edge cases", "Write tests for the above" (without actual test code), "Similar to Task N" (repeat the code instead).
 
-```
-Subagent (general-purpose):
-  description: "Review plan document"
-  prompt: |
-    You are a plan document reviewer. Verify this plan is complete and ready for implementation.
+3. **Type consistency:** Do the types, method signatures, and property names used in later tasks match what was defined in earlier tasks?
 
-    **Plan to review:** [PLAN_FILE_PATH]
-    **Spec for reference:** [SPEC_FILE_PATH]
-
-    ## What to Check
-
-    | Category | What to Look For |
-    |----------|------------------|
-    | Completeness | TODOs, placeholders, incomplete tasks, missing steps |
-    | Spec Alignment | Plan covers spec requirements, no major scope creep |
-    | Task Decomposition | Tasks have clear boundaries, steps are actionable |
-    | Buildability | Could an engineer follow this plan without getting stuck? |
-
-    ## Calibration
-
-    **Only flag issues that would cause real problems during implementation.**
-    An implementer building the wrong thing or getting stuck is an issue.
-    Minor wording, stylistic preferences, and "nice to have" suggestions are not.
-
-    Approve unless there are serious gaps — missing requirements from the spec,
-    contradictory steps, placeholder content, or tasks so vague they can't be acted on.
-
-    ## Output Format
-
-    ## Plan Review
-
-    **Status:** Approved | Issues Found
-
-    **Issues (if any):**
-    - [Task X, Step Y]: [specific issue] - [why it matters for implementation]
-
-    **Recommendations (advisory, do not block approval):**
-    - [suggestions for improvement]
-```
-
-**Reviewer returns:** Status, Issues (if any), Recommendations
+If you find issues, flag them for the plan author to fix.
