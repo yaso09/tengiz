@@ -342,3 +342,12 @@ func TestAdminUnregisterEndpoint(t *testing.T) {
 		t.Error("route still registered after unregister")
 	}
 }
+
+func TestExtractAppPreviewViaDomainMap(t *testing.T) {
+	p := New(nil, 8080)
+	p.RegisterDomain("pr-42.myapp.tengiz.local", "myapp-pr-42")
+	app := p.extractApp("pr-42.myapp.tengiz.local:8080")
+	if app != "myapp-pr-42" {
+		t.Errorf("extractApp(pr-42.myapp.tengiz.local) = %q, want %q", app, "myapp-pr-42")
+	}
+}
