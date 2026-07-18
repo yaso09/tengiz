@@ -63,6 +63,8 @@ type IdleResetter interface {
 }
 
 func (p *Proxy) SetIdleManager(im IdleResetter) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.idleManager = im
 }
 
@@ -165,8 +167,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if p.idleManager != nil {
-		p.idleManager.Reset(app)
+	p.mu.RLock()
+	idleManager := p.idleManager
+	p.mu.RUnlock()
+	if idleManager != nil {
+		idleManager.Reset(app)
 	}
 
 	rt.proxy.ServeHTTP(w, r)

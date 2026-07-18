@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/yaso09/tengiz/internal/runtime"
@@ -341,4 +342,38 @@ func TestAdminUnregisterEndpoint(t *testing.T) {
 	if ok {
 		t.Error("route still registered after unregister")
 	}
+}
+
+type fakeIdleResetter struct{}
+
+func (fakeIdleResetter) Reset(string) {}
+
+// TestSetIdleManagerRace exercises the previously unsynchronized access to
+// Proxy.idleManager: SetIdleManager writes it while ServeHTTP reads it. Run
+// with `-race` to detect the data race this guards against.
+func TestSetIdleManagerRace(t *testing.T) {
+	mock := &mockRuntime{active: true}
+	p := New(mock, 8080)
+	p.Register("testapp", 19999)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			p.SetIdleManager(fakeIdleResetter{})
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			req := httptest.NewRequest("GET", "/", nil)
+			req.Host = "testapp.tengiz.local"
+			p.ServeHTTP(httptest.NewRecorder(), req)
+		}
+	}()
+
+	wg.Wait()
 }
