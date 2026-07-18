@@ -75,6 +75,8 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	webhookCmd.Flags().Bool("preview", true, "enable preview deployments on pull_request events")
+	webhookCmd.Flags().Bool("preview-cleanup", true, "enable automatic preview cleanup on PR close")
 }
 
 var rootCmd = &cobra.Command{

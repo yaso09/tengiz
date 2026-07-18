@@ -376,3 +376,14 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestWebhookCmdHasPreviewFlag(t *testing.T) {
+	flag := webhookCmd.Flags().Lookup("preview")
+	if flag == nil {
+		t.Error("webhookCmd missing --preview flag")
+	}
+	flag = webhookCmd.Flags().Lookup("preview-cleanup")
+	if flag == nil {
+		t.Error("webhookCmd missing --preview-cleanup flag")
+	}
+}
