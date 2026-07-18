@@ -1578,3 +1578,83 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Each datastore collection can be configured with a memory type: `Heap` (fast, volatile — data lost on canister upgrade) or `Stable` (persistent across upgrades, slightly slower). This lets developers make performance/cost trade-offs per collection: cache/session data goes in Heap for speed, user profiles go in Stable for durability. Collections default to Heap for maximum performance. The memory type affects both read/write latency and upgrade behavior — Stable collections survive platform upgrades, Heap collections are re-initialized.
 - **Why add to Tengiz:** Tengiz's planned Built-in NoSQL Datastore (#1) needs a similar performance/storage trade-off. Some data is ephemeral (sessions, cache, rate limit counters) — stored in-memory for speed and automatically reset on restart. Other data is persistent (user profiles, settings, content) — written to SQLite or disk-backed storage for durability. A `db.<collection>.memory: ephemeral | persistent` setting in `.tengiz.yaml` lets developers choose: ephemeral collections use Go maps (fast, lost on container restart), persistent collections use embedded SQLite tables (durable, survives restarts). This is particularly important for scale-to-zero — ephemeral collections naturally reset on cold start (good for session data that should force re-login), persistent collections survive scale-to-zero cycles (good for app state). Implementation: two store backends (`MemoryStore` and `SQLiteStore`) implementing the same `DocStore` interface, selected per-collection at deploy time. Low-medium effort, fits Tengiz's embedded database philosophy. Complements the NoSQL Datastore with production-grade configurability.
 - **Detected:** 2026-07-17
+
+---
+
+## Wildcard Domain Support (Auto-Generated Subdomains)
+- **Source:** Coolify
+- **Description:** Auto-generate wildcard DNS entries for all deployed apps using the server's wildcard DNS record (`*.tengiz.local`). When configured, every app automatically gets a subdomain without manual domain setup. Coolify uses the server's wildcard DNS (or sslip.io fallback) to provide each app with a unique FQDN immediately on deploy. No DNS configuration needed by the user.
+- **Why add to Tengiz:** Currently each app needs either manual domain configuration or the default `appname.tengiz.local`. Wildcard domain support means every deploy gets an instant, routable URL with zero configuration. Essential for preview deployments (#2) and auto-created apps. Implementation: detect if the server has a wildcard DNS configured (`*.tengiz.local` → `*.<server-ip>.sslip.io`), auto-assign domains to new apps, and handle the wildcard certificate for HTTPS. `.tengiz.yaml`'da `wildcard_domain: *.example.com` veya auto-detected from DNS. Low-medium effort, high UX impact.
+- **Detected:** 2026-07-18
+
+## sslip.io Fallback Domains (Zero-Config DNS)
+- **Source:** Coolify
+- **Description:** When no wildcard DNS is configured, Coolify automatically provisions domains using sslip.io — a free DNS service that resolves `<anything>-<ip>.sslip.io` to the given IP address. Each app gets a domain like `myapp-192-168-1-100.sslip.io` that works immediately without any DNS configuration. Combined with self-signed or Let's Encrypt certificates.
+- **Why add to Tengiz:** Users should get a working URL immediately after `tengiz deploy` without owning a domain or configuring DNS. sslip.io provides instant, zero-config domain resolution. Perfect for: evaluation/demo, LAN deployments, preview environments, and development. Implementation: detect server IP, auto-generate domain as `<app>-<ip-with-dashes>.sslip.io`, inject into proxy routing. `.tengiz.yaml`'da `domain.sslip: true` to enable. Complements Wildcard Domain Support by providing a fallback when no wildcard is configured. Low effort, high first-deploy satisfaction.
+- **Detected:** 2026-07-18
+
+## www / non-www Redirect Management
+- **Source:** Coolify
+- **Description:** Per-app redirect preference between `www` and `non-www` URL formats. Coolify's `redirect` enum supports three modes: `www` (redirect `example.com` → `www.example.com`), `non-www` (redirect `www.example.com` → `example.com`), and `both` (both formats serve). Redirects are 301 permanent, implemented at the proxy level, and applied immediately on config change.
+- **Why add to Tengiz:** Domain canonicalization is a standard requirement — search engines treat `example.com` and `www.example.com` as separate sites. Currently Tengiz has no redirect logic; both domains serve content independently. `.tengiz.yaml`'da `domain.canonical: www | non-www | both` ile yapılandırılır. Forces a single canonical domain via 301 redirect in proxy middleware. Low effort (proxy middleware + config), high SEO/professional value. Complements Custom Domain Management (implemented).
+- **Detected:** 2026-07-18
+
+## Domain Conflict Detection on Deploy
+- **Source:** Coolify
+- **Description:** Before assigning a domain to an app, Coolify checks if the domain is already in use by another app. If a conflict is detected, the deploy fails with a 409 response showing which app currently owns the domain and the conflicting domain name. Prevents accidental domain hijacking and routing conflicts.
+- **Why add to Tengiz:** With shared proxy routing, two apps claiming the same domain causes undefined behavior — traffic may route to either app nondeterministically. Domain conflict detection at deploy time and at `tengiz domain add` time prevents this. Implementation: check `domains` across all AppEntries before adding a new domain. If duplicate found, error with the conflicting app name and the matching domain string. Low effort (in-memory map lookup + validation), prevents a class of hard-to-debug production issues. Complements Custom Domain Management (implemented).
+- **Detected:** 2026-07-18
+
+## Memory Swap Limit (Memory + Swap Resource Control)
+- **Source:** Coolify
+- **Description:** Per-container memory swap limit (`--memory-swap`) alongside the memory limit. Controls the total amount of memory and swap a container can use. Setting `--memory-swap` equal to `--memory` disables swap entirely. Leaving it unset allows unlimited swap (up to the host's available swap). Coolify stores this as `limits_memory_swap` per app.
+- **Why add to Tengiz:** Existing Resource Limits (implemented) support `--memory` and `--cpus`. Adding swap control completes the memory resource model: production apps should have swap disabled (`memory = memory_swap`) to prevent performance degradation from swapping. Memory-intensive batch jobs may need extra swap. `.tengiz.yaml`'da `resources.memory_swap: 0` (disable swap) veya `resources.memory_swap: 1g` (soft limit). Implementation: pass `--memory-swap` to `docker run` alongside `--memory`. Low effort, fills a gap in production-grade resource control.
+- **Detected:** 2026-07-18
+
+## Memory Swappiness Tuning (Page Cache Reclaim Behavior)
+- **Source:** Coolify
+- **Description:** Per-container memory swappiness (`--memory-swappiness`) — a value from 0 to 100 that controls the tendency to swap out anonymous pages versus reclaiming page cache. A low value (0) keeps anonymous pages in memory (reduces swap jitter), a high value (100) is more aggressive about swapping. Coolify stores this as `limits_memory_swappiness`.
+- **Why add to Tengiz:** Tunable performance for different workload types: databases (Postgres, MySQL) benefit from low swappiness (0) to avoid swapping critical data pages, while batch processors can tolerate higher values. Paired with Memory Swap Limit for complete memory control. `.tengiz.yaml`'da `resources.memory_swappiness: 0` (or `10`). Implementation: pass `--memory-swappiness` to `docker run`. Low effort, enables workload-specific tuning. Complements Memory Swap Limit for production-grade memory management.
+- **Detected:** 2026-07-18
+
+## CPU Set Pinning (CPU Affinity Control)
+- **Source:** Coolify
+- **Description:** Pin containers to specific CPU cores using `--cpuset-cpus` (comma-separated CPU IDs or ranges like `0,2,4-6`). Ensures containers only execute on designated physical/virtual cores. Useful for: latency-sensitive apps that need dedicated cores, isolating noisy workloads, and predictable NUMA performance.
+- **Why add to Tengiz:** Existing CPU limit (`--cpus`) controls CPU time share but doesn't control WHICH cores a container uses. CPU pinning guarantees: a noisy neighbor can't steal L1/L2 cache from your app, latency-critical apps get dedicated cores, NUMA-aware placement for memory bandwidth. `.tengiz.yaml`'da `resources.cpu_set: "0-3"` veya `resources.cpuset_cpus: "0,2"`. Implementation: pass `--cpuset-cpus` to `docker run`. Complements CPU limit and CPU shares for complete CPU resource control.
+- **Detected:** 2026-07-18
+
+## CPU Shares (Relative CPU Weight)
+- **Source:** Coolify
+- **Description:** Per-container CPU shares (`--cpu-shares`) — relative CPU weight compared to other containers on the same host. Default 1024. A container with 2048 gets ~2× the CPU time of a default container during contention. Does NOT reserve CPU — only matters when CPU is contended. Unlike `--cpus` which is a hard limit, `--cpu-shares` is a soft weighting.
+- **Why add to Tengiz:** CPU shares provide fair scheduling without hard caps. An app can burst to 100% CPU when idle, but during contention gets its proportional share. Ideal for: development environments, internal tools, and any workload where you want fairness without throttling idle resources. `.tengiz.yaml`'da `resources.cpu_shares: 2048`. Complements CPU limit (hard cap) and CPU set (pinning) to cover the full Docker CPU resource model. Low effort.
+- **Detected:** 2026-07-18
+
+## Custom Docker Labels Per App
+- **Source:** Coolify
+- **Description:** Per-app custom Docker labels applied to running containers. Coolify stores `custom_labels` as a JSON object (`key: value`) appended via `--label` flags on `docker run`. Labels are user-defined metadata that propagate to Docker's label system, enabling: external tool integration (traefik, prometheus, cAdvisor), cost allocation tracking, organization-specific tagging, and Docker event filtering.
+- **Why add to Tengiz:** Tengiz already uses its own labels (`tengiz-app=<appname>`, `tengiz-env=<env>`). Adding user-defined labels enables: integration with Docker-aware monitoring tools, billing/cost tracking per team/project, custom metadata for organizational workflows. `.tengiz.yaml`'da `docker.labels: { "team": "backend", "cost-center": "1234", "traefik.enable": "true" }`. Implementation: merge custom labels with Tengiz's own labels before passing to `docker run --label`. Low effort, high flexibility value for power users.
+- **Detected:** 2026-07-18
+
+## Shared Environment Variables Across Apps
+- **Source:** Coolify
+- **Description:** Environment variables that are defined once and shared across multiple apps. Coolify's `SharedEnvironmentVariable` model supports team/project/environment scoping. Changes to a shared variable propagate to all apps referencing it. Supports bulk operations: add a variable once, all apps in a project see it immediately.
+- **Why add to Tengiz:** Many env vars are identical across apps: `TENGIZ_URL`, `INTERNAL_DOCKER_HOST`, shared API endpoints, common feature flags. Currently users must duplicate these in every app's config. Shared env vars reduce duplication and ensure consistency. Implementation: a `shared_env` section in `.tengiz.yaml` (global level) referenced by apps, or a `tengiz config shared set/list/unset` command family. Variables resolved at deploy time by merging global + app-level scopes. `.tengiz.yaml`'da `shared_env:` bölümü ve `env.from_shared: [DATABASE_URL, API_ENDPOINT]` per-app. Medium-low effort, high operational value for multi-app instances.
+- **Detected:** 2026-07-18
+
+## Database Init Scripts (Custom SQL on First Start)
+- **Source:** Coolify
+- **Description:** Per-database init scripts that execute custom SQL or commands on first container start. Postgres: `init.sql` with schema creation, seed data, extension installation. MySQL: `init.sql` for database/user creation. Redis: `.conf` directives. Init scripts are mounted into the Docker entrypoint directory and executed automatically by the database image's init mechanism.
+- **Why add to Tengiz:** Managed databases (#2 on roadmap) need initialization — creating tables, setting up schemas, installing extensions, seeding data. Without init scripts, users must connect and run setup commands manually after DB provision. `.tengiz.yaml`'da `database.init_script: ./db/init.sql` or inline SQL. Implementation: volume mount the init script to the database container's init directory (e.g., `/docker-entrypoint-initdb.d/` for PostgreSQL/MySQL). Low effort, high value for making managed databases actually usable. Complements Managed Database Provisioning (#63).
+- **Detected:** 2026-07-18
+
+## Application Configuration Snapshots (Config Change Audit Trail)
+- **Source:** Coolify
+- **Description:** Snapshot of app configuration captured on every change (deploy, env var update, domain change, resource limit change). Coolify's `ApplicationConfigurationSnapshot` model stores the full config as JSON at the time of the change. `ConfigurationDiff` tracks what specifically changed between snapshots. Enables: point-in-time config recovery, change auditing ("who changed which env var when?"), and rollback of config changes independent of code rollback.
+- **Why add to Tengiz:** Currently there's no audit trail for configuration changes. If someone changes an env var or resource limit, there's no record of what the previous value was or when it changed. Config snapshots provide: a full history of every app's configuration over time, diff-based change visibility, and the ability to revert config changes independently of container rollback. Implementation: before any config-modifying operation (deploy, config set, domain add, resource change), JSON-serialize the full AppEntry to a timestamped file in `~/.tengiz/snapshots/<app>/`. `tengiz config history <app>` shows the snapshot timeline. `tengiz config diff <app> --from v3 --to v5` shows what changed. Low-medium effort, fills the audit gap in the existing state store.
+- **Detected:** 2026-07-18
+
+## Docker Cleanup Execution History
+- **Source:** Coolify
+- **Description:** Coolify tracks every Docker cleanup operation: timestamp, what was pruned (containers/images/volumes/networks/build cache), space reclaimed, exit status, and duration. Results stored in `DockerCleanupExecution` model. Failed cleanups trigger notifications. History enables: tracking disk space recovery trends, identifying cleanup failures, auditing when/what was pruned.
+- **Why add to Tengiz:** Without cleanup history, users can't tell: "what did that cleanup actually free?", "did the scheduled cleanup run successfully?", "is disk space decreasing or increasing over time?". Implementation: `tengiz cleanup history` shows recent cleanups with space-reclaimed metrics. Record cleanup results to `~/.tengiz/cleanup_history.json` (bounded, auto-pruned). Complements Docker Housekeeping (#6) and Granular Docker Prune Operations (#159) by adding observability to cleanup operations.
+- **Detected:** 2026-07-18
