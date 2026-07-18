@@ -89,6 +89,12 @@ func TestDetectNode(t *testing.T) {
 	}
 }
 
+func TestFrameworkNixpacksConstant(t *testing.T) {
+	if FrameworkNixpacks != "nixpacks" {
+		t.Errorf("expected nixpacks, got %q", FrameworkNixpacks)
+	}
+}
+
 func TestGenerateDockerfileNextJS(t *testing.T) {
 	df := generateDockerfile(&Detection{Framework: FrameworkNextJS, InternalPort: 3000})
 	if !contains(df, "nextjs") && !contains(df, "FROM node") {
