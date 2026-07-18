@@ -6,6 +6,7 @@ type PreviewStatus string
 
 const (
 	PreviewActive   PreviewStatus = "active"
+	PreviewCleanup  PreviewStatus = "cleanup"
 	PreviewDeleting PreviewStatus = "deleting"
 	PreviewFailed   PreviewStatus = "failed"
 )

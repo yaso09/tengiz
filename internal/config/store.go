@@ -418,8 +418,12 @@ func (s *Store) savePreviews(previews map[string]types.PreviewEntry) error {
 	return os.WriteFile(s.previewsFile(), data, 0644)
 }
 
-func previewKey(appName string, prNumber int) string {
+func PreviewKey(appName string, prNumber int) string {
 	return fmt.Sprintf("%s/pr-%d", appName, prNumber)
+}
+
+func previewKey(appName string, prNumber int) string {
+	return PreviewKey(appName, prNumber)
 }
 
 func (s *Store) AddPreview(p types.PreviewEntry) error {
@@ -431,6 +435,17 @@ func (s *Store) AddPreview(p types.PreviewEntry) error {
 	if _, exists := previews[key]; exists {
 		return fmt.Errorf("preview %s already exists", key)
 	}
+	previews[key] = p
+	return s.savePreviews(previews)
+}
+
+// SavePreview creates or updates a preview deployment.
+func (s *Store) SavePreview(p types.PreviewEntry) error {
+	previews, err := s.loadPreviews()
+	if err != nil {
+		return err
+	}
+	key := PreviewKey(p.AppName, p.PRNumber)
 	previews[key] = p
 	return s.savePreviews(previews)
 }
@@ -461,6 +476,22 @@ func (s *Store) ListPreviews(appName string) ([]types.PreviewEntry, error) {
 		}
 	}
 	return result, nil
+}
+
+// RemovePreview removes a preview without error if not found.
+func (s *Store) RemovePreview(appName string, prNumber int) error {
+	previews, err := s.loadPreviews()
+	if err != nil {
+		return err
+	}
+	key := previewKey(appName, prNumber)
+	delete(previews, key)
+	return s.savePreviews(previews)
+}
+
+// ListPreviewsForApp returns all previews for a given app.
+func (s *Store) ListPreviewsForApp(appName string) ([]types.PreviewEntry, error) {
+	return s.ListPreviews(appName)
 }
 
 func (s *Store) ListAllPreviews() ([]types.PreviewEntry, error) {

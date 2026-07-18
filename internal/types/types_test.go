@@ -91,3 +91,38 @@ func TestVolumeConfigDefaults(t *testing.T) {
 		t.Fatal("expected Volumes to be nil by default")
 	}
 }
+
+func TestPreviewEntrySerialization(t *testing.T) {
+	pe := PreviewEntry{
+		AppName:       "myapp",
+		PRNumber:      42,
+		Branch:        "feature/login",
+		ImageTag:      "tengiz-apps/myapp:pr-42-1704067200",
+		ContainerName: "tengiz-myapp-pr-42",
+		Port:          9001,
+		Status:        string(PreviewActive),
+	}
+	data, err := json.Marshal(pe)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var decoded PreviewEntry
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if decoded.PRNumber != 42 {
+		t.Errorf("PRNumber = %d, want 42", decoded.PRNumber)
+	}
+	if decoded.Status != string(PreviewActive) {
+		t.Errorf("Status = %q, want %q", decoded.Status, PreviewActive)
+	}
+}
+
+func TestPreviewConstants(t *testing.T) {
+	if PreviewActive != "active" {
+		t.Errorf("PreviewActive = %q, want %q", PreviewActive, "active")
+	}
+	if PreviewCleanup != "cleanup" {
+		t.Errorf("PreviewCleanup = %q, want %q", PreviewCleanup, "cleanup")
+	}
+}
