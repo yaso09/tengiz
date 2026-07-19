@@ -91,3 +91,34 @@ func TestVolumeConfigDefaults(t *testing.T) {
 		t.Fatal("expected Volumes to be nil by default")
 	}
 }
+
+func TestNixpacksConfigDefaults(t *testing.T) {
+	cfg := BuildConfig{}
+	if cfg.Builder != "" {
+		t.Errorf("expected empty builder, got %q", cfg.Builder)
+	}
+	if cfg.NixpacksConfig != nil {
+		t.Error("expected nil NixpacksConfig")
+	}
+}
+
+func TestNixpacksConfigFields(t *testing.T) {
+	cfg := BuildConfig{
+		Builder: "nixpacks",
+		NixpacksConfig: &NixpacksConfig{
+			Packages:    []string{"ffmpeg"},
+			AptPackages: []string{"libssl-dev"},
+			Cmd:         "node app.js",
+			PkgManager:  "yarn",
+		},
+	}
+	if cfg.Builder != "nixpacks" {
+		t.Errorf("expected nixpacks, got %q", cfg.Builder)
+	}
+	if len(cfg.NixpacksConfig.Packages) != 1 || cfg.NixpacksConfig.Packages[0] != "ffmpeg" {
+		t.Errorf("packages not set correctly: %v", cfg.NixpacksConfig.Packages)
+	}
+	if len(cfg.NixpacksConfig.AptPackages) != 1 || cfg.NixpacksConfig.AptPackages[0] != "libssl-dev" {
+		t.Errorf("apt_packages not set correctly: %v", cfg.NixpacksConfig.AptPackages)
+	}
+}
