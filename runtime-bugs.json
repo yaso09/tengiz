@@ -1,0 +1,44 @@
+[
+  {
+    "file": "internal/runtime/docker.go",
+    "lines": "664-679",
+    "title": "grepReader.Read() corrupts data on partial buffer reads",
+    "severity": "MEDIUM",
+    "description": "When Read() is called with a buffer smaller than a matching line, leftover bytes in g.buf are not drained before the next Read() advances the scanner to the next line. The leftover partial line content is concatenated with the next matching line's content, producing corrupted output."
+  },
+  {
+    "file": "internal/runtime/docker.go",
+    "lines": "158-168",
+    "title": "Start() cold-start recreate omits tengiz-env label",
+    "severity": "MEDIUM",
+    "description": "When Start() cold-starts by recreating the container (lines 158-168), the docker run command is missing --label tengiz-env=<env>. This label is set by Create() (line 99) and CreateFromImage() (line 126) but absent in the recreate path. Containers recreated via cold-start are invisible to environment-scoped label queries."
+  },
+  {
+    "file": "internal/runtime/docker.go",
+    "lines": "145, 216-227",
+    "title": "Start() cold-start re-injects all old container env vars including Docker defaults",
+    "severity": "MEDIUM",
+    "description": "getContainerConfig() captures every env var from the old container's .Config.Env, including Docker-injected defaults (PATH, HOME, HOSTNAME, etc.). These are passed as explicit -e flags to docker run in the cold-start recreate path, overriding the base image's ENV defaults. If the base image is updated, the recreated container gets stale env vars from the old container."
+  },
+  {
+    "file": "internal/runtime/docker.go",
+    "lines": "157",
+    "title": "Start() cold-start silently ignores docker rm -f error",
+    "severity": "LOW",
+    "description": "exec.CommandContext(ctx, 'docker', 'rm', '-f', containerName).Run() error return is completely discarded. If docker rm -f fails (container already removed by external process, permission error), the subsequent docker run --name will fail with a confusing 'name already in use' error."
+  },
+  {
+    "file": "internal/runtime/cleanup.go",
+    "lines": "30-53",
+    "title": "KeepLastNImages may call docker rmi with empty string tag when no images match",
+    "severity": "LOW",
+    "description": "When docker images output is empty, strings.Split('', '\n') returns [''] with length 1. If n==0, len(lines) <= n is false (1 <= 0), so we enter the loop, parse '' as the tag, and call docker rmi -f '' — producing a spurious error log."
+  },
+  {
+    "file": "internal/runtime/docker.go",
+    "lines": "373-380",
+    "title": "IsActive silently swallows all Docker errors",
+    "severity": "LOW",
+    "description": "IsActive returns false, nil on ANY docker inspect failure (daemon unreachable, container not found, permission error). Callers cannot distinguish between 'container stopped' and 'Docker down'. This error is also explicitly discarded in Start() line 154 (active, _ := r.IsActive(...))."
+  }
+]
