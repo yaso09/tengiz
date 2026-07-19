@@ -1688,3 +1688,117 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Service templates define variables with default values, descriptions, types (string, number, boolean, password), and optional generators (`"generator": "secret"` for auto-generated passwords). When deploying a template, users are prompted to fill in or confirm variable values. Variables are substituted into the generated Docker Compose, env vars, and config files during deployment. Supports variable validation (min/max length, regex pattern) and required/optional flags. Template variables are fetched alongside template YAML from the template registry.
 - **Why add to Tengiz:** Existing one-click service templates (#23) and template registry (#84) define services but treat all configuration as fixed. Variables make templates reusable across environments: the same WordPress template can be deployed with different DB passwords, site titles, and admin emails. Different from Interactive Env Prompts (#38) which targets app-level env vars — this targets template-level configuration parameters. Implementation: template format supports a `variables:` section, the deploy pipeline prompts or auto-generates values, Go `text/template` substitution fills Docker Compose YAML and env files. Medium effort (template format extension + substitution engine + value resolution), significant UX improvement for template-based deployments.
 - **Detected:** 2026-07-19
+
+## Post-Create / Post-Deploy Network Attach (DNS Service Discovery)
+- **Source:** Dokku
+- **Description:** Automatically attach containers to user-defined Docker networks at two lifecycle points: (1) after container creation (`attach-post-create`) and (2) after each deploy (`attach-post-deploy`). During deploy-phase attachment, DNS-based network aliases are generated (e.g., `appname.web`, `hostname.appname.web.tld`), enabling container-to-container service discovery. Bridge and host networks are explicitly excluded — only user-defined networks.
+- **Why add to Tengiz:** Tengiz currently has no mechanism for containers to discover each other via DNS. Multi-service apps (web + database + cache) must hardcode IPs or use Docker Compose networking. Post-deploy network attach with DNS aliases enables service discovery: an app accesses its database via `mydb.tengiz.internal` without manual configuration. Complements Custom Docker Network (#30) and Docker Compose Import (#31). `.tengiz.yaml`'da `network.attach: [tengiz-internal]` ve `network.tld: internal` ile yapılandırılır. Implementation: `docker network connect --alias <alias> <network> <container>` call in the runtime package after container start.
+- **Detected:** 2026-07-19
+
+## Netrc Git Authentication (Token-Based Private Git Access)
+- **Source:** Dokku
+- **Description:** Configure `.netrc`-based authentication for Git operations: `git:auth <host> <username> <password>` stores credentials in `~/.tengiz/.netrc` with `0600` permissions. `git:auth-status` verifies the current credentials match the expected configuration. Password accepted via stdin for security. Complements SSH-based Git auth with a token-based alternative for CI/CD pipelines, personal access tokens, and environments where SSH keys are unavailable.
+- **Why add to Tengiz:** Existing SSH deploy key generation (`tengiz git connect`) handles SSH auth. Many Git providers (GitLab, Azure DevOps) use personal access tokens for automation — SSH keys have a longer setup process. Netrc auth provides: `tengiz git auth github.com <token>` for instant CI/CD configuration, HTTPS-based private repo cloning, and secure file permissions preventing credential leakage. Complements Git Provider Account Management (Coolify, above). Low effort (file write + git config), high automation value.
+- **Detected:** 2026-07-19
+
+## Git: From Archive (Deploy from Tarball/URL Without Git Repo)
+- **Source:** Dokku
+- **Description:** Deploy an application from a compressed archive without a Git repository. `git:from-archive <app> <source>` supports tar, tar.gz, and zip formats. Source can be a URL or piped via stdin. The archive is extracted into the build directory and the deploy pipeline proceeds normally. Deploy source metadata is recorded as `git:from-archive` with the URL logged in build history.
+- **Why add to Tengiz:** Enables deployment from non-Git sources: CI/CD build artifacts (GitHub Actions artifacts), release tarballs from GitHub Releases, legacy projects without version control, and one-shot deployments from local archives. `tengiz deploy --archive https://example.com/app.tar.gz` deploys without git init/clone. Complements Explicit Image Name Deploy (#13, skip build entirely) and Git-Sync Deployment (#113, pull model). Low effort (extract archive + run build pipeline), bridges the gap between "deploy from Git" and "deploy pre-built image."
+- **Detected:** 2026-07-19
+
+## Git: From Image (Extract Source from Docker Image)
+- **Source:** Dokku
+- **Description:** Deploy an app by extracting source code from a pre-built Docker image. `git:from-image <app> <docker-image>` pulls the image, extracts its filesystem, and initializes the app's build directory. `git:load-image < app.tar.gz` loads a Docker image tarball from stdin via `docker load` and extracts similarly. Supports `--build-dir` for subdirectory extraction and `--force` flag for overwriting existing source.
+- **Why add to Tengiz:** Enables a unique deployment model: build an app into a Docker image in CI, extract its source on the Tengiz server, then rebuild through Tengiz's build pipeline with different env vars or framework detection. Useful for: CI/CD pipelines that produce Docker images ("build once, deploy to multiple environments"), debugging production images locally, and migrating existing Docker workflows to Tengiz's build pipeline. Complements Explicit Image Deploy (#13, which runs the image directly) and Git: From Archive (above). Low-medium effort (docker export + extract + git init).
+- **Detected:** 2026-07-19
+
+## Git: Smart Sync with Change Detection (`--build-if-changes`)
+- **Source:** Dokku
+- **Description:** Pull-based deployment with intelligent change detection. `git:sync <app> <repo-url>` clones/fetches from remote. Three modes: (1) `--build` always triggers a build, (2) `--build-if-changes` compares the new HEAD with the current branch and only builds on difference, (3) no flag syncs code without building. `--skip-deploy-branch` prevents auto-updating the deploy branch setting.
+- **Why add to Tengiz:** Existing Git-Sync Deployment (#113) covers periodic pull-based deploy but rebuilds unconditionally. Change detection prevents wasteful rebuilds on no-op syncs — essential for scheduled sync (cron-based). Without this, a cron-based `git:sync --build` rebuilds every interval regardless of changes, wasting CPU and time. `.tengiz.yaml`'da `git.sync.build_if_changes: true` ile yapılandırılır. Low effort (HEAD SHA comparison before triggering build), high efficiency value for pull-based deployments.
+- **Detected:** 2026-07-19
+
+## App Lock/Unlock (Manual Deploy Prevention During Maintenance)
+- **Source:** Dokku
+- **Description:** File-based lock mechanism that prevents all deployment activity for a specific app. `apps:lock <app>` creates `~/.tengiz/locks/<app>.lock`. `apps:unlock <app>` removes it (with warning that in-progress deploys won't be stopped). `apps:locked? <app>` checks lock status. When locked, any deploy/git-push/webhook-triggered deployment fails with "app is locked" message. Used to prevent deploys during maintenance, debugging, or incident response.
+- **Why add to Tengiz:** Different from Deploy Lock (#15, Kamal) which prevents concurrent deploys. This is a manual "do not touch this app" flag — operators lock an app before database migration, server maintenance, or production debugging. CI/CD pipelines check the lock and abort. Essential production safety mechanism. `tengiz app lock myapp` and `tengiz app unlock myapp`. Low effort (file-based flag, atomic create), high operational safety value.
+- **Detected:** 2026-07-19
+
+## App Disable Autocreation (Require Explicit App Create)
+- **Source:** Dokku
+- **Description:** Global setting that prevents apps from being automatically created on first `git push` or webhook event. When enabled, only explicitly pre-created apps can receive deployments. This is an access control measure — without it, anyone who can trigger a webhook can create arbitrary apps. Per-app opt-in for auto-creation.
+- **Why add to Tengiz:** In team/multi-tenant environments, auto-creation is a security risk. A misconfigured CI/CD pipeline or malicious actor could create hundreds of apps. `tengiz config set --global autocreate disabled` enforces a "create first, deploy second" workflow. Complements App Auto-Creation on Git Push (Coolify, this file) which enables zero-setup — this adds the security guardrail. Low effort (global boolean checked before auto-create in deploy pipeline).
+- **Detected:** 2026-07-19
+
+## Ports: Full CRUD with Scheme-Based Port Mapping
+- **Source:** Dokku
+- **Description:** Complete port mapping lifecycle with scheme-based mapping format (`scheme:hostPort:containerPort`). `ports:add <app> http:80:5000` appends a mapping, `ports:remove <app> http:80:5000` removes specific one, `ports:set <app> http:80:5000 https:443:5000` replaces all mappings, `ports:clear <app>` removes all, `ports:list <app>` displays. Validates no duplicate scheme:host-port combinations. Auto-detected mappings (from framework detection) are stored separately from user-specified ones, preventing overwrites.
+- **Why add to Tengiz:** Existing Port Mapping Protocol Selection (#111) covers protocol selection but lacks full CRUD. The auto-detected vs user-specified distinction is important — framework detection can set default ports without overwriting manual configuration. Scheme-based mapping (`http`, `https`, `tcp`) enables multi-protocol services. `.tengiz.yaml`'da `ports: [{scheme: http, host: 80, container: 5000}]`. Low-medium effort, complete port management UX.
+- **Detected:** 2026-07-19
+
+## PS: Retire Old Containers (Orphaned Container Cleanup After Deploy)
+- **Source:** Dokku
+- **Description:** `ps:retire <app>` retires old container versions and their images after zero-downtime deployments. Uses a file-based lock (`flock`) to prevent concurrent retire operations. Also retires expired one-off run containers (TTL-expired). Can run per-app or globally. Separately tracks old containers (left behind by blue/green swap) vs old images (previous deploy versions).
+- **Why add to Tengiz:** Zero-downtime deploy (#1) launches new containers before removing old ones. If cleanup fails (timeout, crash, race condition), orphaned containers accumulate and consume disk/ports. `tengiz retire myapp` is a surgical cleanup command that only targets old-version containers — unlike general Docker prune which is broader. Different from Container Retention Policy (#22, keeps N old intentionally) and Stale Container Detection (#153, detects orphans) — this actively cleans them. Low effort (docker rm by label query + docker rmi).
+- **Detected:** 2026-07-19
+
+## PS: Inspect Container (Docker Inspect via CLI)
+- **Source:** Dokku
+- **Description:** `ps:inspect <app> [process-type]` runs `docker inspect` through the scheduler and displays sanitized container information: env vars, mounts, network settings, resource limits, health status, and labels. Filters sensitive information (secrets) from output.
+- **Why add to Tengiz:** Debugging tool for inspecting container configuration without leaving the Tengiz CLI or remembering `docker inspect` flags. Particularly useful for verifying that env vars, volumes, and network settings were applied correctly. `tengiz inspect myapp` shows: image tag, entrypoint, env (redacted), mounts, ports, networks, restart policy, resource limits, health check status. Low effort (docker inspect wrapper + field filter).
+- **Detected:** 2026-07-19
+
+## Resource: Network Bandwidth Limits (Ingress/Egress)
+- **Source:** Dokku
+- **Description:** Per-process-type network bandwidth limits via Docker's traffic control. `resource:limit --network-ingress 1g` limits incoming bandwidth to 1 Gbps, `--network-egress 500m` limits outgoing to 500 Mbps. Stored per-process-type alongside CPU/memory limits. Prevents noisy neighbor scenarios where one app's network usage starves others on the same host.
+- **Why add to Tengiz:** Existing Resource Limits (#6, implemented) cover CPU and memory only. Network bandwidth is an ungoverned resource — a single app serving large files (video, downloads, streaming) can saturate the host's network interface and impact all other apps. `.tengiz.yaml`'da `resources.network_ingress: 100m` and `resources.network_egress: 100m`. Implementation: Docker's `--network-ingress`/`--network-egress` flags in `runtime.Run()`. Low effort (Docker CLI passthrough), high multi-tenant value.
+- **Detected:** 2026-07-19
+
+## Checks: Per-Process-Type Health Check Control
+- **Source:** Dokku
+- **Description:** Three distinct states for zero-downtime deploy health checks, configurable per process type: `checks:disable <app> [proctypes]` completely disables checks for specified process types, `checks:skip <app> [proctypes]` creates but skips execution (lighter than disable), `checks:enable <app>` re-enables. Supports `_all_` wildcard and comma-separated process type lists. Different from `checks:disable` (removes completely) vs `checks:skip` (defined but not run).
+- **Why add to Tengiz:** Not all process types need zero-downtime checks. Worker processes may not have HTTP endpoints; cron processes start and exit immediately. Per-process-type check control enables: web processes get full health checks, worker processes get skipped or disabled. `.tengiz.yaml`'da `checks.web: { disabled: false, skipped: false }`, `checks.worker: { disabled: true }`. Low effort (per-process bool in deploy check pipeline).
+- **Detected:** 2026-07-19
+
+## Domains: Global Domain CRUD with App Inheritance
+- **Source:** Dokku
+- **Description:** Full CRUD for global domains that all apps inherit. `domains:add-global <domain>` appends a global domain, `domains:set-global <domain> [domains...]` replaces all, `domains:clear-global` removes all, `domains:remove-global <domain>` removes one. New apps without explicit domains auto-inherit global domains. `domains:reset <app>` re-derives an app's domains from global config. IP addresses and hostnames are filtered out — only valid hostnames become subdomains.
+- **Why add to Tengiz:** Simplifies multi-app domain management. Set `tengiz.local` once globally, and every new app automatically gets `appname.tengiz.local`. Adding a new global domain propagates to all existing apps via `domains:reset --all`. Different from existing per-app domain management (implemented) which requires per-app configuration. Implementation: `~/.tengiz/vhost` file with global domain list, inherited by all AppEntries without explicit domains. Low effort (one-time setup in proxy and app creation), dramatically simpler multi-app UX.
+- **Detected:** 2026-07-19
+
+## Domains: Accessible URL Generation
+- **Source:** Dokku
+- **Description:** Generate accessible URLs for an app considering all configuration: custom domains, SSL certificate status, proxy state, port mappings, and proxy SSL port. Scheme-aware: `http://` when no SSL cert exists, `https://` when cert exists. Smart port suppression: omits port 80 for HTTP, port 443 for HTTPS. `domains:urls <app>` or `tengiz urls <app>` shows all reachable URLs.
+- **Why add to Tengiz:** Currently users must manually construct URLs by checking app state, SSL cert existence, and custom domains. `tengiz urls myapp` shows: `https://myapp.tengiz.local`, `https://myapp.com`, `http://localhost:9000`. Essential for the App Report command (#10). Low effort (existing data aggregation + scheme logic).
+- **Detected:** 2026-07-19
+
+## Config: Bundle Export (Tar Archive Backup)
+- **Source:** Dokku
+- **Description:** `config:bundle <app>` creates a tar archive where each env var key becomes a filename and the value is the file content. Outputs to stdout for piping. Supports `--merged` flag to include global env vars. Useful for backup, migration, and feeding into Docker `--env-file` via extraction (`tar xf`). Each file is named by the env var key, making inspection and modification straightforward.
+- **Why add to Tengiz:** Existing Config Export/Import (#36) supports 8 formats but not tar bundle. The bundle format is particularly useful for: `tengiz config bundle myapp > myapp-env.tar` (full backup), `tar tf myapp-env.tar` (list all keys with sizes), and extracting specific values (`tar xf myapp-env.tar DATABASE_URL`). Implementation: Go `archive/tar` writer. Low effort, unique use case beyond existing export formats.
+- **Detected:** 2026-07-19
+
+## Config: Base64-Encoded Value Setting
+- **Source:** Dokku
+- **Description:** `config:set --encoded <app> <key> <base64-value>` accepts base64-encoded values and decodes them before storing. Useful for binary values, secrets with special characters that are hard to escape in shell, and CI/CD systems that encode values to avoid shell interpretation issues (dollar signs, quotes, newlines).
+- **Why add to Tengiz:** Shell escaping is a persistent pain point in CLI env var management. `tengiz config set myapp API_KEY "$(echo -n 'complex!value' | base64)" --encoded` solves this. Combined with Literal Variables Mode (#215, Coolify), users have complete control over value encoding. Low effort (base64.StdEncoding.DecodeString + validation), eliminates a common user frustration.
+- **Detected:** 2026-07-19
+
+## Config: Merged Environment Display
+- **Source:** Dokku
+- **Description:** `config:show --merged <app>` displays the effective environment by merging app-level and global-level env vars. App-level vars override global vars. Shows exactly what the running container will receive. Viewable per-key: `config:get --merged <app> <key>` shows which level provides the value. Useful for debugging when users don't realize a global env var affects their app.
+- **Why add to Tengiz:** Existing Config Display (#48, Kamal) shows resolved config; this shows env-var-specific merging. Users often set env vars globally and can't find them per-app. `--merged` reveals the full effective env. Implementation: merge app env over global env, display with origin annotation (`*global`, `*app`). Low effort (existing merge logic + display formatting).
+- **Detected:** 2026-07-19
+
+## Run: TTL, Concurrency Control, and Lifecycle Management for One-Off Containers
+- **Source:** Dokku
+- **Description:** Advanced one-off execution beyond basic `tengiz run`. Features: (1) `--ttl-seconds=N` (default 86400/24h) — auto-retires expired containers via `run:retire`, (2) `--concurrency-policy=allow|deny` — prevents running duplicate containers with the same `--cron-id`, (3) `--cron-id=ID` — associates a run container with a specific cron job for dedup and tracking, (4) `run:list` — lists all one-off containers, (5) `run:logs --container <name>` — views log output for specific run containers, (6) `run:retire` — stops all TTL-expired run containers globally or per-app.
+- **Why add to Tengiz:** Existing `tengiz run` (implemented) blocks the terminal and auto-removes on exit. These advanced features turn one-off execution into a production-grade task runner: cron jobs with concurrency policy prevent duplicate executions, TTL-based auto-retirement prevents zombie containers, and run lifecycle management provides visibility. Foundation for the scheduled tasks/cron system (#74). Medium effort (container tracking + TTL goroutine + lifecycle commands), transforms `run` from a debugging tool into a worker platform.
+- **Detected:** 2026-07-19
+
+## Git: Allow Host (SSH Host Key Verification for Custom Git Servers)
+- **Source:** Dokku
+- **Description:** `git:allow-host <host>` runs `ssh-keyscan -t rsa <host>` and appends the host key to the known_hosts file. This enables SSH-based Git operations against custom/self-hosted Git servers (GitHub Enterprise, self-hosted GitLab, Gitea, Bitbucket Server) without manual `ssh-keyscan` or `StrictHostKeyChecking=no` hacks.
+- **Why add to Tengiz:** SSH-based Git deployment (#5, implemented) requires the server's SSH host key to be verified. For public hosts (github.com, gitlab.com), keys are typically pre-trusted. For custom/self-hosted Git servers, users currently must SSH in and run `ssh-keyscan` manually. `tengiz git allow-host git.internal.example.com` is one command. Low effort (os/exec ssh-keyscan + append to known_hosts), solves a common setup friction point.
+- **Detected:** 2026-07-19
