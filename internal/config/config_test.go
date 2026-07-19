@@ -321,6 +321,42 @@ webhook:
 	}
 }
 
+func TestLoadForEnvironmentMergesBuilderConfig(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), []byte(`
+name: testapp
+build:
+  builder: docker
+`), 0644)
+	os.WriteFile(filepath.Join(dir, ".tengiz.staging.yaml"), []byte(`
+build:
+  builder: nixpacks
+  nixpacks:
+    packages:
+      - ffmpeg
+    apt_packages:
+      - libssl-dev
+    cmd: node app.js
+`), 0644)
+
+	cfg, err := LoadForEnvironment(dir, "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Build.Builder != "nixpacks" {
+		t.Errorf("expected 'nixpacks', got %q", cfg.Build.Builder)
+	}
+	if cfg.Build.NixpacksConfig == nil {
+		t.Fatal("expected NixpacksConfig to be set")
+	}
+	if len(cfg.Build.NixpacksConfig.Packages) != 1 || cfg.Build.NixpacksConfig.Packages[0] != "ffmpeg" {
+		t.Errorf("expected [ffmpeg], got %v", cfg.Build.NixpacksConfig.Packages)
+	}
+	if cfg.Build.NixpacksConfig.Cmd != "node app.js" {
+		t.Errorf("expected cmd 'node app.js', got %q", cfg.Build.NixpacksConfig.Cmd)
+	}
+}
+
 func TestLoadForEnvironment_envMergePreservesBase(t *testing.T) {
 	dir := t.TempDir()
 	base := `
