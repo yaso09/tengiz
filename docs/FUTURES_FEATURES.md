@@ -1820,3 +1820,113 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Automatic generation of 2048-bit Diffie-Hellman (DH) parameters for nginx SSL configuration. CapRover's `LoadBalancerManager.ensureDhParamFileExists()` runs `openssl dhparam -out <path> 2048` on first boot, storing the generated params at a well-known path. Generated DH params are injected into the base nginx configuration via `ssl_dhparam` directive, enabling Perfect Forward Secrecy (PFS) for all TLS connections. PFS ensures that if the server's private key is compromised in the future, past TLS sessions cannot be decrypted — each session uses ephemeral key exchange.
 - **Why add to Tengiz:** SSL/TLS support (#51, Let's Encrypt / autocert) is a higher priority, but once Tengiz has built-in TLS termination, DH param generation is a small but critical security hardening step. Go's `crypto/tls` supports DH params via `tls.Config.CurvePreferences` — while Go's modern TLS uses ECDHE (Elliptic Curve Diffie-Hellman Ephemeral) by default (providing PFS without custom DH params), adding explicit DH params enables legacy client compatibility and defense-in-depth. For users deploying Tengiz behind a proxy that terminates TLS (nginx, Caddy), a `tengiz ssl dhparam generate` command generates the params and stores them at `~/.tengiz/ssl/dhparam.pem`. Implementation: generate during `tengiz server init --ssl` or `tengiz domain add --ssl`, using `crypto/rand` + Go BigInt math or shelling out to `openssl dhparam` via `os/exec`. Low effort (~50 lines), adds a checkmark to the enterprise security checklist.
 - **Detected:** 2026-07-19
+
+---
+
+## Full Lifecycle Setup Command (One-Command Platform Initialization)
+- **Source:** Kamal
+- **Description:** Single `tengiz setup` command that bootstraps the entire platform in one invocation: checks Docker availability, creates Docker network, starts the reverse proxy, pushes env vars, boots accessory services (databases, cache), and deploys the target app. Kamal's `kamal setup` is the first command new users run — it replaces a multi-step manual process with a single orchestrated workflow. Idempotent: re-running setup skips already-completed steps.
+- **Why add to Tengiz:** Currently first-time setup requires: Docker install (manual), `tengiz proxy`, `tengiz deploy` for each app, manual accessory management. A `tengiz setup` command is the single most impactful UX improvement for new users — it transforms Tengiz from a "collection of commands" into a "platform you set up and go." Implementation: orchestration of existing commands in `internal/cli/setup.go`, step status tracking in `~/.tengiz/setup.json` for idempotency and resume capability. Differs from Server Bootstrap (#40, server installation only) and Guided Onboarding (#214, interactive wizard) — this is the actual production initialization command.
+- **Detected:** 2026-07-19
+
+## Builder Lifecycle Management (Docker Buildx Builder CRUD)
+- **Source:** Kamal
+- **Description:** Full lifecycle management for Docker Buildx builder instances via a `tengiz builder` command family. Subcommands: `tengiz builder create <name> [--driver docker-container] [--platform linux/amd64,linux/arm64]` creates a new Buildx builder, `tengiz builder details <name>` inspects builder config, `tengiz builder ls` lists all builders, `tengiz builder rm <name>` removes one. Kamal's `kamal build create/remove/details` manage builders separately from the deploy flow. Builder instances can target remote Docker hosts via SSH (`ssh://user@host`) for offloaded builds.
+- **Why add to Tengiz:** Current `docker build` inline approach works for simple cases but lacks multi-arch support, remote builders, and build cache persistence. Managing builders as a separate concern (not hidden inside deploy) gives users explicit control over build infrastructure — essential for CI/CD pipelines, Apple Silicon → Intel cross-compilation, and production build farms. Complements Multi-Architecture Builds (#212) and Remote Docker Builder (#213) which are build-time features — this is the builder lifecycle that enables them. Different from Builder Resource (#195, Komodo) which is a higher-level build server abstraction — this is Docker Buildx builder management.
+- **Detected:** 2026-07-19
+
+## Proxy Full Lifecycle Commands (Boot, Reboot, Logs, Details)
+- **Source:** Kamal
+- **Description:** Complete reverse proxy lifecycle management via `tengiz proxy` subcommands: `tengiz proxy boot` (first-time start), `tengiz proxy reboot` (restart with brief outage), `tengiz proxy start/stop/restart`, `tengiz proxy logs` (view proxy container logs), `tengiz proxy details` (show proxy configuration, version, health), `tengiz proxy remove` (stop and delete proxy container). Kamal's proxy commands give operators full control over the traffic gateway — essential for maintenance, debugging, and upgrades.
+- **Why add to Tengiz:** Current `tengiz proxy -a <app>` only starts the proxy with a single-app flag. No stop, restart, logs, or removal. Operators need to: restart proxy after config change, check proxy logs for routing issues, inspect proxy health during incident response, and cleanly remove during teardown. Implementation: manage kamal-proxy container (or Tengiz's own proxy process) with PID/state tracking in `~/.tengiz/proxy.json`. Medium effort (~400 lines), fills a critical operational gap.
+- **Detected:** 2026-07-19
+
+## Comprehensive Destroy Command (Full Environment Cleanup)
+- **Source:** Kamal
+- **Description:** `tengiz destroy` (or `tengiz remove --all`) performs complete platform teardown: removes all app containers + images, stops the proxy, removes accessory containers, logs out of registry, and optionally prunes state files. Kamal's `kamal remove` is a comprehensive cleanup — not just per-app removal but full environment teardown with confirmation prompts. Contrasts with per-app `tengiz rm` which only removes a single app.
+- **Why add to Tengiz:** Currently no way to cleanly tear down the entire Tengiz environment. Users switching servers, decommissioning instances, or resetting for testing must manually `tengiz rm` each app, `docker stop` remaining containers, clean images, and remove state files. `tengiz destroy` with `--force` and `--keep-state` flags provides safe, complete teardown. Implementation: orchestrate existing rm/stop/remove operations with confirmation prompt and progress output. Low effort (~150 lines), essential for operational hygiene.
+- **Detected:** 2026-07-19
+
+## Env Tags (Per-Host/Per-Role Environment Variables)
+- **Source:** Kamal
+- **Description:** Environment variables that can be tagged per host or per role, enabling different configuration for different server groups within the same app. Kamal's `env.tags.<tag_name>` syntax assigns env vars to specific hosts based on server tags. Example: canary servers get a different `DATABASE_URL` pointing to a read replica, production servers get the primary. Supports env var overrides at the tag level while inheriting base env vars.
+- **Why add to Tengiz:** As Tengiz gains multi-server and multi-role support (web/workers/jobs), env vars must be configurable per target. Without tags, operators duplicate app configs for different environments or use complex conditional logic. `.tengiz.yaml`'da `env.tags: { canary: { DATABASE_URL: "postgres://read-replica/db" }, production: { DATABASE_URL: "postgres://primary/db" } }` ile yapılandırılır. Implementation: tag resolution in the deploy pipeline — merge base env → tag env → container env. Low-medium effort, foundation for staged rollouts and canary deployments.
+- **Detected:** 2026-07-19
+
+## App Exec in Running Container (`--reuse` Flag)
+- **Source:** Kamal
+- **Description:** Execute commands inside an already-running container (not a temporary one-off container) via a `--reuse` flag on `tengiz run`. Kamal's `kamal app exec --reuse <cmd>` runs inside the currently deployed container — useful for inspecting live environment variables, checking running processes, testing connectivity from inside, and debugging transient issues that don't exist in fresh containers. Shares the same container filesystem, network, and process namespace.
+- **Why add to Tengiz:** Current `tengiz run <app> <cmd>` creates a new temporary container from the app image — this has a different filesystem state, different process tree, and may not reproduce live issues. `tengiz run --reuse myapp "env | grep DATABASE"` checks actual runtime env. `tengiz run --reuse myapp "netstat -tlnp"` checks live port bindings. Implementation: `docker exec <container> <cmd>` instead of `docker run --rm <image> <cmd>`. Low effort (~30 lines), high debugging value. Complements Container Entering (#140, interactive shell) with non-interactive command execution.
+- **Detected:** 2026-07-19
+
+## Build to Local Docker Store (Dev Build)
+- **Source:** Kamal
+- **Description:** Build and output the Docker image to the local Docker image store instead of pushing to a registry. `kamal build dev` builds using `docker build --output=type=docker` (or `docker build -t <tag> .` locally), tagging the image and making it available for `tengiz run` testing and `tengiz deploy` on the same machine. Useful for development workflows where registry push is unnecessary overhead.
+- **Why add to Tengiz:** Current build pipeline always pushes to a registry (or builds inline for deploy). For local development and testing, a `tengiz build --local` or `tengiz build dev` command builds the image and stores it locally — enabling faster iteration, offline development, and CI testing on the same machine. `.tengiz.yaml`'da `build.dev: true` skips registry push. Implementation: conditional `--output=type=docker` or simple `docker build -t <tag>` without push step. Low effort (~50 lines), speeds up local development loops.
+- **Detected:** 2026-07-19
+
+## YAML Extension Blocks Support (`x-` Anchors)
+- **Source:** Kamal
+- **Description:** Support for YAML extension blocks (keys prefixed with `x-`) in `.tengiz.yaml`. Kamal explicitly ignores `x-` prefixed keys during config parsing, enabling users to define reusable YAML anchors and extension blocks. Complex configs can define: `x-base-app: &base-app { image: "node:20", env: { NODE_ENV: production } }` and reference with `<<: *base-app` across multiple app definitions. This is standard YAML functionality — Kamal's contribution is ensuring it doesn't break parsing.
+- **Why add to Tengiz:** Complex `.tengiz.yaml` files with multiple apps, environments, and roles can benefit from YAML anchors to eliminate repetition. Currently Tengiz's viper-based config may reject or misparse `x-` prefixed keys. Ensuring viper ignores them (or configuring the YAML parser to allow them) enables users to leverage standard YAML features. Low effort (~10 lines of config), high value for multi-app/manual config management.
+- **Detected:** 2026-07-19
+
+## Per-Role Custom Stop Timeout
+- **Source:** Kamal
+- **Description:** Configurable stop timeout per server role (web, workers, jobs) for graceful shutdown of different process types. Kamal's `servers.workers.stop_timeout: 30` allows workers more time to drain job queues before SIGKILL, while web processes stop in the default 10s. Without role-specific timeouts, operators must choose a single value that fits all — too short kills workers mid-job, too long delays web rollouts.
+- **Why add to Tengiz:** Tengiz's scale-to-zero and zero-downtime deploy both depend on stop timeouts. Background workers (Sidekiq, Celery, Bull) need 30-60s to finish in-flight jobs. Web processes can stop in 5-10s. `.tengiz.yaml`'da `roles.worker.stop_timeout: 30s` ile yapılandırılır. Implementation: `docker stop -t <timeout>` with role-specific value from config. Low effort (~50 lines), extends existing per-role config with the stop timeout dimension.
+- **Detected:** 2026-07-19
+
+## Healthcheck Barrier Pattern (Sequential Boot Verification)
+- **Source:** Kamal
+- **Description:** Sequential boot with a health check barrier between groups of servers. Kamal's `Healthcheck::Barrier` ensures that a primary group of hosts boots first and passes health checks before secondary hosts begin deployment. This prevents "deploy succeeded but all traffic is hitting failed containers" scenarios. The barrier waits for the new container on primary hosts to pass its health check (HTTP `/up` returning 200) before proceeding to the next group.
+- **Why add to Tengiz:** Tengiz's zero-downtime deploy launches a new container and swaps traffic when it's healthy. The barrier pattern adds sequentiality: boot primary host's new container → wait for health → boot secondary host's new container → swap traffic. Without a barrier, if the new container fails health checks on all hosts, traffic may be routed to a mix of old and new containers — causing partial outages. Implementation: goroutine barrier with channel-based signaling between the container start and proxy update phases. Low-medium effort (~150 lines), critical for multi-server deployments but valuable even in single-server mode for zero-downtime reliability.
+- **Detected:** 2026-07-19
+
+## Per-Role Custom Start Command
+- **Source:** Kamal
+- **Description:** Different Docker entrypoint/command per server role within the same app. Kamal's `servers.workers.cmd: "bin/jobs"` overrides the default start command for worker processes, `servers.web.cmd: "bin/rails server"` for web. Each role runs a different process type from the same Docker image — essential for polyglot/multi-process applications that have web, background worker, and scheduled job containers.
+- **Why add to Tengiz:** Currently Tengiz runs a single command per app. Apps with multiple process types (Rails web + Sidekiq + cron) need per-role commands. This is the foundation for Process Scaling (#34, multi-container) and Procfile Support (#136, Heroku-style). `.tengiz.yaml`'da `roles.web.command: "node server.js"`, `roles.worker.command: "node worker.js"` ile yapılandırılır. Implementation: pass configured command as `docker run` entrypoint override in `runtime.Run()`. Low effort (~50 lines), enables multi-process apps on Tengiz.
+- **Detected:** 2026-07-19
+
+## `minimum_version` Config Guard (Version Compatibility Check)
+- **Source:** Kamal
+- **Description:** `minimum_version: 1.3.0` in `.tengiz.yaml` ensures that the running Tengiz binary meets a minimum version requirement before any operation. Kamal's minimum version guard prevents deploys from older CLI versions that may produce incompatible state files, use different image naming conventions, or miss required security features. Version comparison uses semver, failing with a clear upgrade message.
+- **Why add to Tengiz:** As Tengiz evolves, state file formats, container naming conventions, and API contracts may change. An older Tengiz binary deploying to a server with newer state files could corrupt data or leave containers in an inconsistent state. `.tengiz.yaml`'da `tengiz_version: ">= 0.5.0"` veya `minimum_version: "0.5.0"` ile yapılandırılır. Implementation: semver comparison using Go's `golang.org/x/mod/semver` or a simple string comparison. Low effort (~50 lines), important for team environments where developers may be on different Tengiz versions. Complements Self-Upgrade (#138) — auto-upgrade to meet minimum version.
+- **Detected:** 2026-07-19
+
+## Custom Secrets Path & Hooks Path Configuration
+- **Source:** Kamal
+- **Description:** Configurable file paths for secrets and hooks directories in `.tengiz.yaml`. Kamal supports `secrets_path: .kamal/secrets` (default) and `hooks_path: .kamal/hooks` (default), with custom paths allowing teams to: share secrets across projects via a common path, use alternative hook directories for different environments, keep secrets outside the project tree for security compliance (`secrets_path: /etc/tengiz/secrets`), and maintain separate hook sets for staging vs production.
+- **Why add to Tengiz:** Currently Tengiz hardcodes secrets and hooks locations. Teams need flexibility: secret files may need to live outside the repo (security policy), hooks may be shared across multiple apps, and different environments may use different hook directories. `.tengiz.yaml`'da `paths.secrets: /etc/tengiz/secrets` ve `paths.hooks: /etc/tengiz/hooks` ile yapılandırılır. Low effort (~30 lines), unblocks enterprise deployment patterns.
+- **Detected:** 2026-07-19
+
+## Init with Hooks Scaffolding (Sample Hook Generation)
+- **Source:** Kamal
+- **Description:** `tengiz init` creates the `.tengiz.yaml` config file AND scaffolds a complete `.tengiz/hooks/` directory with sample hook scripts. Kamal's `kamal init` creates `.kamal/hooks/` with executable sample hooks for pre-build, post-build, pre-deploy, post-deploy, pre-app-boot, and post-app-boot events. Each sample hook is a commented shell script showing available env vars, common patterns, and usage examples. Users learn the hook system by example.
+- **Why add to Tengiz:** Current `tengiz init` creates only `.tengiz.yaml`. Most users don't know Tengiz has a hook system — sample hooks in `tengiz init` surface this capability naturally. The scaffolded hooks serve as both documentation and starting templates: a Slack notification hook, a pre-deploy migration runner, and a post-deploy smoke test. Implementation: embed sample hook scripts via Go's `embed.FS` and extract them during init. Low effort (~100 lines of template scripts), significantly improves discoverability of the hook system.
+- **Detected:** 2026-07-19
+
+## App Version Display (Currently Running Version)
+- **Source:** Kamal
+- **Description:** Simple `tengiz version <app>` or `tengiz ps --version` that shows the currently deployed version (image tag, git SHA, deploy timestamp) for a running app. Kamal's `kamal app version` outputs the version on all hosts — a one-line answer to "what is running right now?" Essential for operations: before rolling back, check what version is in production; after deploy, confirm the new version is serving traffic.
+- **Why add to Tengiz:** Currently no quick way to see what version is deployed. Users must `tengiz inspect` the container image, parse the tag, and cross-reference with deploy history. `tengiz version myapp` shows: `v3 (sha: abc123, deployed: 2h ago)`. Implementation: read the image tag from the running container label, lookup deploy record for timestamp. Low effort (~50 lines), addresses a fundamental operational question.
+- **Detected:** 2026-07-19
+
+## Lock with Descriptive Message (Deploy Lock Context)
+- **Source:** Kamal
+- **Description:** Enhance the existing deploy lock mechanism with descriptive messages showing who acquired the lock, why, and when. Kamal's `kamal lock acquire --message "Deploying v2.1 - ETA 5min"` stores the message alongside the lock. `kamal lock status` shows: `Lock acquired by user@host at 2026-07-19 14:30 UTC: "Deploying v2.1 - ETA 5min"`. Helps team members understand why a deploy is blocked without interrupting the lock holder.
+- **Why add to Tengiz:** Existing "Deploy Lock Mekanizması" (#16, P0) prevents concurrent deploys but provides no context. A lock without a message is confusing: "who locked it? why? when will it be free?" Adding a descriptive message turns the lock from a roadblock into a communication tool. Implementation: extend the lock file format to include JSON fields: `{holder, hostname, timestamp, message}`, accessible via `tengiz lock status`. Low effort (~30 lines), significantly improves team coordination.
+- **Detected:** 2026-07-19
+
+## `require_destination` + `allow_empty_roles` Config Safety Checks
+- **Source:** Kamal
+- **Description:** Two safety configuration options in `.tengiz.yaml`: `require_destination: true` forces the user to specify `--env` (destination) on every deploy — prevents accidental production deploys when the user forgets the flag. `allow_empty_roles: true` permits defining roles without servers — useful for template configs shared across environments where some roles may not apply (e.g., no workers in staging).
+- **Why add to Tengiz:** Accidental production deployment is a classic ops failure mode. `require_destination` ensures deploy commands always require an explicit environment flag — no default "guess the environment." `allow_empty_roles` prevents validation errors when template configs define roles that aren't used in every environment. Implementation: check in the deploy pipeline before any state modification. Low effort (~30 lines), high production safety value.
+- **Detected:** 2026-07-19
+
+## `--hosts` / `--roles` Targeting Flags for Operations
+- **Source:** Kamal
+- **Description:** Per-operation targeting flags: `tengiz deploy --hosts 192.168.1.10,192.168.1.11` limits deploy to specific hosts, `tengiz logs --roles workers` shows logs only from worker containers. Kamal's `--hosts` and `--roles` flags on every command give operators surgical control over multi-server operations. Flags accept comma-separated lists and glob patterns.
+- **Why add to Tengiz:** As Tengiz gains multi-server and multi-role support, operators need to target specific hosts/roles for operations. Restart only web processes, not workers. View logs from a single host during incident response. Deploy to a canary host first for smoke testing. Implementation: `--hosts` and `--roles` flags on `deploy`, `logs`, `run`, `stop`, `start`, `restart`, `rm` commands. Filter applied in the command execution loop. Low-medium effort, forward-looking preparation for multi-server architecture.
+- **Detected:** 2026-07-19
