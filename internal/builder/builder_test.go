@@ -181,6 +181,48 @@ func TestFrameworkNixpacksConstant(t *testing.T) {
 	}
 }
 
+func TestNixpacksDispatchWhenFrameworkSet(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "main.rs"), []byte("fn main() {}"), 0644)
+
+	detection := &Detection{
+		Framework:    FrameworkNixpacks,
+		InternalPort: 8080,
+	}
+
+	b := New(t.TempDir())
+	tag, logs, err := b.Build(context.Background(), dir, "testapp", "production", detection, "v1")
+	if err != nil {
+		if strings.Contains(err.Error(), "nixpacks not found") {
+			t.Skip("nixpacks CLI not available, skipping integration test")
+		}
+		t.Fatalf("Build() unexpected error: %v", err)
+	}
+	if tag == "" {
+		t.Error("expected non-empty tag")
+	}
+	_ = logs
+}
+
+func TestNixpacksConfigSetterAndField(t *testing.T) {
+	b := New(t.TempDir())
+	b.SetNixpacksConfig(&types.NixpacksConfig{
+		Packages: []string{"curl"},
+	})
+	if b.nixpacksCfg == nil {
+		t.Error("expected nixpacksCfg to be set")
+	}
+	if len(b.nixpacksCfg.Packages) != 1 || b.nixpacksCfg.Packages[0] != "curl" {
+		t.Error("expected 1 package: curl")
+	}
+}
+
+func TestNixpacksAvailableCheck(t *testing.T) {
+	b := New(t.TempDir())
+	available := b.nixpacksAvailable()
+	_ = available
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }
