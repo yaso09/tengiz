@@ -99,6 +99,15 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		if existingApp.Config.Port != 0 {
 			cfg.Port = existingApp.Config.Port
 		}
+		cfg.Build = existingApp.Config.Build
+	}
+
+	// Override detection framework when nixpacks builder is configured
+	if cfg.Build.Builder == "nixpacks" {
+		detection.Framework = builder.FrameworkNixpacks
+	}
+	if cfg.Build.NixpacksConfig != nil {
+		p.b.SetNixpacksConfig(cfg.Build.NixpacksConfig)
 	}
 
 	deploymentID := fmt.Sprintf("%d", time.Now().Unix())
