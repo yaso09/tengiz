@@ -7,232 +7,281 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 
 ✅ Implemented, ⬜ Pending. Each feature evaluated on **Impact (I)**, **Effort (E)**, **Alignment (A)** to Tengiz's architecture (Go, CLI-first, Docker exec, scale-to-zero).
 
-### P0 — Critical (Must-Have for Vercel Alternative)
+Features re-evaluated Jul 2026: Priority = f(Impact × Alignment / Effort), where Impact weights very-high=5, high=4, medium=3, low=2, very-low=1.
+
+### P0 — Critical Path (Must-Have for Vercel Alternative)
 
 | # | Feature | I | E | A | Rationale |
 |---|---------|---|---|---|-----------|
-| 1 | **Webhook ile Otomatik Deploy** ✅ | Çok Yüksek | Düşük | Mükemmel | Push-to-deploy is the fundamental PaaS workflow. Without it, every deploy requires manual CLI invocation. Lightweight HTTP server + git hook handler. |
-| 2 | **Preview Deployments** ✅ | Çok Yüksek | Orta | Mükemmel | Vercel's most-loved feature — ephemeral PR environments with auto-cleanup. Core differentiator from Dokku/Kamal. |
-| 3 | **Nixpacks Build Sistemi** ⬜ | Çok Yüksek | Orta | Mükemmel | Expands framework support from 6 to hundreds (Ruby, Rust, PHP, Java, Elixir). Single `builder` package integration. |
-| 4 | **Secrets Management** ⬜ | Yüksek | Orta-Yüksek | Mükemmel | Production security fundamental. No platform without encrypted DB passwords, API keys. Vault/1Password/Doppler integration. |
-| 5 | **Notification System** ⬜ | Yüksek | Orta | Mükemmel | Production operations require alerts for deploy failures, SSL expiry, disk filling. Discord/Slack/Telegram/Email. |
-| 6 | **Docker Housekeeping** ⬜ | Yüksek | Düşük | Mükemmel | Disk space is the #1 production issue on single-server deployments. Label-based `docker system prune`. `tengiz cleanup`. |
-| 7 | **Event Logging & Audit Trail** ⬜ | Yüksek | Düşük | Mükemmel | Who deployed what, when? Why did a container stop? Multi-developer audit trail via `log/slog` + JSON Lines. |
-| 8 | **REST API + OpenAPI Spec** ⬜ | Yüksek | Yüksek | Orta | Unlocks CI/CD integration, programmatic access, and future web UI. Must-have for platform growth despite deviating from CLI-first. |
-| 9 | **Pre-Deploy Hooks** ⬜ | Yüksek | Düşük | Mükemmel | Migration runner before deploy is table stakes. `.tengiz.yaml` `pre_deploy` command list. Failed hook aborts deploy. |
-| 10 | **App Report (Detailed Status)** ⬜ | Yüksek | Düşük | Mükemmel | `tengiz ps` is too minimal. Need deploy history, image tags, env vars, resource limits, domains in one command. |
-| 11 | **Monorepo Support (Base Directory)** ⬜ | Yüksek | Düşük | Mükemmel | Turborepo/Nx/Lerna users are a large segment. `base_dir` override for framework detection. |
-| 12 | **Custom Build Commands** ⬜ | Yüksek | Düşük | Mükemmel | Framework detection must be overridable. `commands.install/build/start` in `.tengiz.yaml`. Essential for custom toolchains. |
-| 13 | **Explicit Image Name Deploy** ⬜ | Orta | Düşük | Mükemmel | Deploy pre-built images (Postgres, Redis, CI/CD output) without build step. `tengiz deploy --image nginx:alpine`. |
-| 14 | **Build Arguments from Env** ⬜ | Orta | Düşük | Mükemmel | NEXT_PUBLIC_*, NPM_TOKEN need `--build-arg` passthrough during build. Critical for framework builds. |
-| 15 | **Deploy Lock Mekanizması** ⬜ | Orta | Düşük | Mükemmel | Prevent concurrent deploy collisions in team environments. File-based lock + `--lock-wait`. |
-| 16 | **App Deploy Tokens** ⬜ | Orta | Düşük | Mükemmel | CI/CD authentication without user credentials. `tengiz token create --app myapp`. Token rotation. |
-| 17 | **Headless CI/CD Mode** ⬜ | Orta | Düşük | Mükemmel | `TENGIZ_TOKEN` + `--headless` for GitHub Actions, GitLab CI. Non-interactive, no TTY required. |
-| 18 | **Config Export/Import** ⬜ | Orta | Düşük | Mükemmel | Disaster recovery and app migration. Export env vars as shell/dotenv/Docker args/JSON. |
+| 1 | **Nixpacks Build System** ⬜ | 5 | 3 | 5 | Expands framework support from 6 to hundreds (Ruby, Rust, PHP, Java, Elixir). Single `builder` package integration. Largest single user-base expansion. |
+| 2 | **Secrets Management** ⬜ | 5 | 3 | 5 | Production security fundamental. No platform without encrypted DB passwords, API keys. Vault/1Password/Doppler integration. |
+| 3 | **Secret Interpolation System** ⬜ | 4 | 4 | 5 | `[[secret.name]]` syntax. AES-GCM encrypted storage. No external vault needed for single-server. Ships alongside secrets management. |
+| 4 | **Notification System** ⬜ | 4 | 3 | 5 | Production ops require alerts for deploy failures, SSL expiry, disk filling. Discord/Slack/Telegram/Email. |
+| 5 | **Docker Housekeeping** ⬜ | 5 | 5 | 5 | Disk space is #1 production issue on single-server. Label-based `docker system prune`. `tengiz cleanup`. Highest ROI per line of code. |
+| 6 | **Event Logging & Audit Trail** ⬜ | 4 | 5 | 5 | Who deployed what, when? Why did container stop? Multi-developer audit trail via `log/slog` + JSON Lines. Low effort, high ops value. |
+| 7 | **Pre-Deploy Hooks** ⬜ | 4 | 5 | 5 | Migration runner before deploy is table stakes. `.tengiz.yaml` `pre_deploy` command list. Failed hook aborts deploy. |
+| 8 | **Monorepo Support (Base Directory)** ⬜ | 4 | 5 | 5 | Turborepo/Nx/Lerna users are a large segment locked out without it. Simple `base_dir` override. |
+| 9 | **Custom Build Commands** ⬜ | 4 | 5 | 5 | Framework detection must be overridable. `commands.install/build/start` in `.tengiz.yaml`. Essential for custom toolchains. |
+| 10 | **App Report (Detailed Status)** ⬜ | 4 | 5 | 5 | `tengiz ps` too minimal. Need deploy history, image tags, env vars, resource limits, domains in one command. |
+| 11 | **Build Arguments from Env** ⬜ | 3 | 5 | 5 | NEXT_PUBLIC_*, NPM_TOKEN need `--build-arg` passthrough during build. Critical for framework builds. |
+| 12 | **Zero-Downtime Deploy Health Checks** ⬜ | 4 | 5 | 5 | App-level health verification before traffic migration. Auto-rollback on failure. Prevents "deployed but broken" scenarios. |
+| 13 | **Commit Status Reporting** ⬜ | 4 | 5 | 5 | Report deploy result back to GitHub/GitLab commit status API. Green checkmark/red X on PRs. Closes git push → deploy → confidence loop. |
+| 14 | **One-Line Install Script** ⬜ | 5 | 5 | 5 | `curl -fsSL https://tengiz.dev/install.sh \| bash`. Cross-compile binaries, detect platform, verify checksum. #1 adoption friction reducer. |
+| 15 | **Container Registry Integration** ⬜ | 4 | 4 | 5 | Build → push pipeline. Image storage for rollback + multi-node deployment. `docker tag && docker push`. |
+| 16 | **Variable Resource (Global Interpolation)** ⬜ | 4 | 5 | 5 | Define `[[database_url]]` once, reference across all apps. Eliminates env var duplication. Ships well with secrets interpolation. |
+| 17 | **Explicit Image Name Deploy** ⬜ | 3 | 5 | 5 | Deploy pre-built images (Postgres, Redis, CI/CD output) without build step. `tengiz deploy --image nginx:alpine`. |
+| 18 | **App Deploy Tokens** ⬜ | 3 | 5 | 5 | CI/CD authentication without user credentials. `tengiz token create --app myapp`. Token rotation. |
+| 19 | **Headless CI/CD Mode** ⬜ | 3 | 5 | 5 | `TENGIZ_TOKEN` + `--headless` for GitHub Actions, GitLab CI. Non-interactive, no TTY. |
+| 20 | **Deploy Lock Mekanizması** ⬜ | 3 | 5 | 5 | Prevent concurrent deploy collisions in team environments. File-based lock + `--lock-wait`. |
+| 21 | **Config Export/Import** ⬜ | 3 | 5 | 5 | Disaster recovery and app migration. Export env vars as shell/dotenv/Docker args/JSON. |
+| 22 | **HMAC-Signed Webhook Payloads** ⬜ | 3 | 5 | 5 | Verify GitHub/GitLab webhook signatures. Prevent unauthorized deploy triggers. Low effort, high security impact. |
+| 23 | **App Auto-Creation on Git Push** ⬜ | 3 | 5 | 5 | Zero-setup deploy: `git push tengiz main` auto-creates app. Removes `tengiz create` step. |
+| 24 | **Server Reboot Recovery** ⬜ | 4 | 4 | 5 | Auto-restart all apps after host reboot. Systemd unit + `ps:restore` on boot. Without this, host reboot = manual recovery. |
+| 25 | **Container Restart Policy Management** ⬜ | 3 | 5 | 5 | Per-app Docker restart policy: `no/always/unless-stopped/on-failure`. Crash behavior control. Essential for production. |
+| 26 | **Config Display Command** ⬜ | 3 | 5 | 5 | `tengiz config` shows merged config after env override + template resolution. Debugging essential. |
+| 27 | **Deploy Source Metadata Recording** ⬜ | 3 | 5 | 5 | Record GIT_SHA, branch, deploy source (git-hook/cli/webhook). Env vars + build record. |
+| 28 | **Webhook Event Filtering** ⬜ | 3 | 5 | 5 | Branch/tag/path filtering. Prevents wasteful deploys from docs changes or WIP branches. |
+| 29 | **Per-Container Resource Metrics** ⬜ | 3 | 5 | 5 | Live CPU/memory/network from `docker stats`. `tengiz ps --stats` or `tengiz stats <app>`. |
+| 30 | **Parallel Bulk Operations** ⬜ | 3 | 5 | 5 | `tengiz rebuild --all`, `tengiz restart --all` with `--parallelism N`. Goroutine pool. |
+| 31 | **Granular Docker Prune Operations** ⬜ | 3 | 5 | 5 | Per-category prune: containers/networks/images/volumes/buildx cache. Surgical disk management. |
+| 32 | **Auth Rate Limiting** ⬜ | 3 | 5 | 5 | Per-IP brute force protection on auth/webhook endpoints. Low effort, essential security. |
+| 33 | **Well-Known Paths Automatic Handling** ⬜ | 3 | 5 | 5 | `/.well-known/` for ACME HTTP-01, Apple Universal Links, security.txt. Critical for domain verification. |
+| 34 | **Custom HTTP Headers per URL Path** ⬜ | 3 | 5 | 5 | Per-path Cache-Control, CORS, security headers. Vercel/Netlify `_headers` style. Proxy middleware. |
+| 35 | **Private Registry Authentication** ⬜ | 3 | 5 | 5 | GHCR, GitLab Registry, AWS ECR pull support. Enterprise prerequisite. |
+| 36 | **Error Pages** ⬜ | 3 | 5 | 5 | Cold start or container-down UX: user-friendly error pages instead of raw HTTP errors. Proxy middleware. |
+| 37 | **Container Retention Policy** ⬜ | 3 | 5 | 5 | Rollback companion. Keep N old containers, prune rest. Default: retain 5. |
+| 38 | **Scheduled Deployments** ⬜ | 3 | 4 | 5 | Cron-based auto-deploy. Nightly rebuilds, dependency updates. Built on `robfig/cron`. |
 
-### P1 — High (Production-Ready Platform)
-
-| # | Feature | I | E | A | Rationale |
-|---|---------|---|---|---|-----------|
-| 19 | **Container Registry Integration** ⬜ | Yüksek | Düşük-Orta | Mükemmel | Build → push pipeline. Image storage for rollback + multi-node deployment. `docker tag && docker push`. |
-| 20 | **Private Registry Authentication** ⬜ | Orta | Düşük | Mükemmel | GHCR, GitLab Registry, AWS ECR pull support. Enterprise prerequisite. |
-| 21 | **Error Pages** ⬜ | Orta | Düşük | Mükemmel | Cold start or container-down UX: user-friendly error pages instead of raw HTTP errors. Proxy middleware. |
-| 22 | **Container Retention Policy** ⬜ | Orta | Düşük | Mükemmel | Rollback companion. Keep N old containers, prune rest. Default: retain 5. |
-| 23 | **Full System Backup & Restore** ⬜ | Orta | Orta | Mükemmel | `tengiz backup create` archives `~/.tengiz/` state. `tengiz backup restore` for DR. |
-| 24 | **Extended Hook System** ⬜ | Orta | Düşük-Orta | Mükemmel | Pre-build (secret injection), post-deploy (notifications), app-boot (cache warming). Rich hook env context. |
-| 25 | **Maintenance Mode** ⬜ | Orta | Düşük | Mükemmel | Proxy draining for planned maintenance. `tengiz maintenance:on --message "Upgrading..."`. |
-| 26 | **Prometheus Metrics** ⬜ | Orta | Düşük | Mükemmel | Proxy HTTP metrics: request count, latency, error rate, cold start count. Grafana + alerting foundation. |
-| 27 | **Readiness Delay & Deploy Timeouts** ⬜ | Orta | Düşük | Mükemmel | Per-operation timeouts for deploy/drain/stop. Accommodates both fast Go apps and slow Node.js. |
-| 28 | **Zero-Downtime Deploy Health Checks** ⬜ | Orta | Düşük | Mükemmel | App-level health verification before traffic migration. Auto-rollback on check failure. |
-| 29 | **Node.js Multi-Core Scaling (PM2/Cluster)** ⬜ | Orta | Düşük | Mükemmel | 4-8x performance improvement for Node.js apps via PM2 cluster mode. `.tengiz.yaml` toggle. |
-| 30 | **Custom Docker Network** ⬜ | Orta | Düşük | Mükemmel | Isolated networks for multi-service apps. `docker run --network` flag support. |
-| 31 | **Server Bootstrap** ⬜ | Orta | Orta | Mükemmel | `tengiz server init` + `tengiz setup` — one-command Docker + Tengiz installation. |
-| 32 | **HTTP Basic Auth (Staging Protection)** ⬜ | Orta | Düşük | Mükemmel | Password-protect staging/pre-production environments. Proxy middleware. |
-| 33 | **GitOps / Declarative ResourceSync** ⬜ | Yüksek | Yüksek | Mükemmel | Declare apps/env/domains as git-managed YAML. `tengiz sync` reconciles. IaC for Tengiz. |
-| 34 | **Embedded Serverless Functions (goja)** ⬜ | Yüksek | Yüksek | Mükemmel | Biggest differentiator. Dockerless <10ms function runtime. TypeScript → Go `goja`. No other Docker-based alt has this. |
-| 35 | **App Renaming** ⬜ | Düşük | Düşük | Mükemmel | `tengiz rename <old> <new>`. Full state migration. Currently only rm + redeploy. |
-| 36 | **Custom Docker Options** ⬜ | Düşük-Orta | Düşük | Mükemmel | Power user escape hatch: `--shm-size`, `--sysctl`, `--cap-add` for any Docker flag. |
-| 37 | **One-Line Install Script** ⬜ | Yüksek | Düşük | Mükemmel | `curl -fsSL https://tengiz.dev/install.sh | bash`. Cross-compile binaries, detect platform, verify checksum. |
-| 38 | **Commit Status Reporting** ⬜ | Yüksek | Düşük | Mükemmel | Report deploy result back to GitHub/GitLab commit status API. Green checkmark/red X on PRs. |
-| 39 | **Environment Variable Locking** ⬜ | Orta | Düşük | Mükemmel | Prevent accidental `tengiz config unset DATABASE_URL`. Locked vars require confirmation. |
-| 40 | **HMAC-Signed Webhook Payloads** ⬜ | Orta | Düşük | Mükemmel | Verify GitHub/GitLab webhook signatures. Prevent unauthorized deploy triggers. |
-| 41 | **Per-Container Resource Metrics** ⬜ | Orta | Düşük | Mükemmel | Live CPU/memory/network from `docker stats`. `tengiz ps --stats` or `tengiz stats <app>`. |
-| 42 | **Scheduled Deployments** ⬜ | Orta | Düşük | Mükemmel | Cron-based auto-deploy. Nightly rebuilds, dependency updates. Built on `robfig/cron`. |
-| 43 | **App Auto-Creation on Git Push** ⬜ | Orta | Düşük | Mükemmel | Zero-setup deploy: `git push tengiz main` auto-creates app. Removes `tengiz create` step. |
-| 44 | **Container Restart Policy Management** ⬜ | Orta | Düşük | Mükemmel | Per-app Docker restart policy: `no/always/unless-stopped/on-failure`. Crash behavior control. |
-| 45 | **Server Reboot Recovery** ⬜ | Orta | Düşük | Mükemmel | Auto-restart all apps after host reboot. Systemd unit + `ps:restore` on boot. |
-| 46 | **Build-Time Secrets (Docker Build Secrets)** ⬜ | Orta | Düşük | Mükemmel | NPM_TOKEN, signing keys passed via `--secret` (not `--build-arg`). Excluded from image history. |
-| 47 | **Stale Container Detection** ⬜ | Orta | Düşük | Mükemmel | Detect orphaned old-version containers after zero-downtime deploy. Auto-cleanup or report. |
-| 48 | **Config Display Command** ⬜ | Orta | Düşük | Mükemmel | `tengiz config` shows merged config after env override + template resolution. Debugging essential. |
-| 49 | **Deploy Source Metadata Recording** ⬜ | Orta | Düşük | Mükemmel | Record GIT_SHA, branch, deploy source (git-hook/cli/webhook). Env vars + build record. |
-| 50 | **Webhook Event Filtering** ⬜ | Orta | Düşük | Mükemmel | Branch/tag/path filtering. `--only-branch main`, `--ignore-paths docs/*`. Prevent wasteful deploys. |
-| 51 | **App Repository Lifecycle Management** ⬜ | Orta | Düşük | Mükemmel | Per-app git repo management: `git:lock/unlock/status`. Prevent pushes during maintenance. |
-| 52 | **Custom Image Repository Naming** ⬜ | Orta | Düşük | Mükemmel | Go template-based image naming. `ghcr.io/myorg/{{ .AppName }}`. Collision avoidance. |
-| 53 | **Variable Resource (Global Interpolation)** ⬜ | Orta | Düşük | Mükemmel | Define `[[database_url]]` once, reference across all apps. Eliminates env var duplication. |
-| 54 | **Secret Interpolation System** ⬜ | Orta | Düşük | Mükemmel | `[[secret.name]]` syntax. AES-GCM encrypted storage. No external vault needed for single-server. |
-| 55 | **Parallel Bulk Operations** ⬜ | Orta | Düşük | Mükemmel | `tengiz rebuild --all`, `tengiz restart --all` with `--parallelism N`. Goroutine pool. |
-| 56 | **Granular Docker Prune Operations** ⬜ | Orta | Düşük | Mükemmel | Per-category prune: containers/networks/images/volumes/buildx cache. Surgical disk management. |
-| 57 | **Background Monitoring Scheduler** ⬜ | Orta | Düşük | Mükemmel | Proactive health checks, disk usage tracking, container status monitoring. Feeds alert system. |
-| 58 | **Auth Rate Limiting** ⬜ | Orta | Düşük | Mükemmel | Per-IP brute force protection on auth/webhook endpoints. 5 attempts/300s window. |
-| 59 | **Well-Known Paths Automatic Handling** ⬜ | Orta | Düşük | Mükemmel | `/.well-known/` for ACME HTTP-01, Apple Universal Links, security.txt. Critical for domain verification. |
-| 60 | **Custom HTTP Headers per URL Path** ⬜ | Orta | Düşük | Mükemmel | Per-path Cache-Control, CORS, security headers. Vercel/Netlify `_headers` style. Proxy middleware. |
-| 61 | **KEDA-based Autoscaling** ⬜ | Orta-Yüksek | Yüksek | Mükemmel | Scale 0→N based on HTTP rate, queue depth, CPU. Transforms idle timer into real serverless. |
-| 62 | **Accessory Services (Sidecar Containers)** ⬜ | Orta | Orta | Mükemmel | Postgres/Redis/Search alongside app. Scale-to-zero only affects app, not accessories. |
-| 63 | **Managed Database Provisioning** ⬜ | Yüksek | Çok Yüksek | Orta | Vercel Postgres/KV equivalent. `tengiz db create postgres --name mydb`. High effort, high impact. |
-| 64 | **One-Click Service Templates** ⬜ | Yüksek | Yüksek | Orta | 361 Docker Compose templates (WordPress, N8N, MinIO). `tengiz service create <template>`. |
-| 65 | **Otomatik SSL/TLS (Let's Encrypt)** ⬜ | Yüksek | Orta | Düşük | Important but external proxy (Caddy/Nginx) handles this. `autocert` integration medium effort. |
-| 66 | **Build Pipeline with Auto-Versioning** ⬜ | Orta | Orta | Mükemmel | Source → versioned image → multi-registry push. Auto-tag: semver/commit-sha/timestamp. |
-| 67 | **Build-to-Deploy Trigger Chain** ⬜ | Orta | Orta | Mükemmel | Build completes → linked deployment auto-redeploys. Full CI/CD without external tools. |
-| 68 | **Herokuish Buildpacks** ⬜ | Orta | Orta | Mükemmel | Heroku's entire buildpack ecosystem. Zero-config migration from Heroku. Complements Nixpacks. |
-| 69 | **Multi-Architecture Builds (Buildx)** ⬜ | Orta | Orta | Mükemmel | `linux/amd64 + linux/arm64` multi-arch manifests. Apple Silicon → Intel server. |
-| 70 | **Remote Docker Builder** ⬜ | Orta | Orta | Mükemmel | SSH-based remote buildx builder. Offload heavy builds from production server. |
-| 71 | **Multi-Architecture Builds (Buildx)** ⬜ | Orta | Orta | Mükemmel | `linux/amd64 + linux/arm64` multi-arch manifests. Apple Silicon → Intel server. |
-
-### P2 — Medium (Significant Differentiators)
+### P1 — Production Platform (Team-Ready)
 
 | # | Feature | I | E | A | Rationale |
 |---|---------|---|---|---|-----------|
-| 72 | **Process Scaling (Multi-Container)** ⬜ | Orta | Yüksek | Orta | HA + background workers (Sidekiq, Celery). Combines with idle timeout for serverless model. |
-| 73 | **Server Monitoring** ⬜ | Orta | Orta | Mükemmel | Disk, container states, backup status. `tengiz status` + threshold alert. |
-| 74 | **Scheduled Tasks / Cron Jobs** ⬜ | Düşük-Orta | Orta | Mükemmel | Vercel Cron Jobs equivalent. `.tengiz.yaml` `cron:` + `robfig/cron`. `docker exec` execution. |
-| 75 | **Force HTTPS Redirect** ⬜ | Orta | Düşük | Mükemmel | HTTP→HTTPS 301 redirect in proxy. `.tengiz.yaml` `force_https: true`. |
-| 76 | **Gelişmiş Proxy Konfigürasyonu** ⬜ | Orta | Orta | Mükemmel | Path prefix, buffering, timeout, X-Forwarded-* header control. Production-grade proxy. |
-| 77 | **Pattern-Based Watch Paths** ⬜ | Orta | Düşük-Orta | Mükemmel | `tengiz deploy --watch` with glob patterns. Auto-redeploy on file changes. `fsnotify`. |
-| 78 | **WebSocket Support Per App** ⬜ | Orta | Düşük | Mükemmel | Per-app WebSocket toggle in proxy. `.tengiz.yaml` `proxy.websocket: true`. |
-| 79 | **Event-Driven Data Hooks (Trigger System)** ⬜ | Orta | Orta | Mükemmel | `container:start`, `deploy:success`, `idle:timeout` events. Makes Tengiz programmable. |
-| 80 | **Container Snapshot System** ⬜ | Orta | Düşük | Mükemmel | `docker commit`-based stateful snapshot. Risk mitigation before risky deploys. |
-| 81 | **Built-in Platform Analytics** ⬜ | Orta | Orta | Mükemmel | HTML injection + Web Vitals tracking. SQLite storage. Vercel Analytics-level feature. |
-| 82 | **Built-in Authentication Service** ⬜ | Yüksek | Yüksek | Mükemmel | Platform-level auth-as-a-service. Google/GitHub/Passkey. Proxy auth intercept + header injection. |
-| 83 | **Built-in NoSQL Datastore** ⬜ | Yüksek | Yüksek | Mükemmel | Zero-config document store. Embedded SQLite + proxy `/__tengiz/db/` API. |
-| 84 | **Built-in File/Blob Storage** ⬜ | Yüksek | Yüksek | Mükemmel | Platform-level asset hosting. URL-based access control. Upload/serve/delete API. |
-| 85 | **Framework Plugins (Next.js/Vite)** ⬜ | Orta | Orta | Mükemmel | `@tengiz/nextjs` npm package. Auto-inject env + API routes. Differentiator from Coolify/Dokku. |
-| 86 | **Build Precompression** ⬜ | Orta | Düşük | Mükemmel | Gzip/Brotli pre-compression at build time. Zero-CPU asset serving. |
-| 87 | **Staged Deployments (Change Sets)** ⬜ | Orta | Orta | Mükemmel | `tengiz deploy --no-apply` → `tengiz changes apply <id>`. Deploy on Friday, apply on Monday. |
-| 88 | **Project Scaffolding with Starter Templates** ⬜ | Orta | Orta | Mükemmel | `tengiz create <template>`. React/Vite/Next.js/Go API templates. Minutes to first deploy. |
-| 89 | **Change Approval Workflow** ⬜ | Orta | Orta | Mükemmel | Submit → Review → Apply. Team governance for deployments. |
-| 90 | **Procfile Support** ⬜ | Orta | Düşük | Mükemmel | Heroku-style process type definition. Zero-config Heroku migration. |
-| 91 | **Docker Compose Import** ⬜ | Orta | Orta | Mükemmel | Convert existing `docker-compose.yml` to Tengiz containers. Multi-service deploy. |
-| 92 | **Global/Per-App Property Cascade** ⬜ | Orta | Orta | Mükemmel | Global defaults → app overrides. Reduce per-app config overhead for multi-app instances. |
-| 93 | **Per-Process-Type Resource Limits** ⬜ | Orta | Düşük | Mükemmel | Separate CPU/memory for web/worker/scheduler. Extends existing resource limits. |
-| 94 | **Build Tracking with Retention** ⬜ | Orta | Orta | Mükemmel | Structured deploy history: JSON records, status tracking, build logs retention. |
-| 95 | **Git Provider OAuth App Integration** ⬜ | Orta | Yüksek | Mükemmel | One-click GitHub/GitLab App connection. Auto-configure webhooks + deploy keys. |
-| 96 | **Magic Environment Variables** ⬜ | Orta | Orta | Mükemmel | Auto-generated service URLs, DB connection strings, passwords for linked services. |
-| 97 | **Centralized Multi-Server Management** ⬜ | Orta | Yüksek | Mükemmel | Control-plane model: one Tengiz instance manages remote Docker hosts via SSH. |
-| 98 | **MCP Server for AI Integration** ⬜ | Orta | Orta | Mükemmel | Model Context Protocol server. AI assistants can query/list/manage Tengiz via natural language. |
-| 99 | **Local Development Emulator** ⬜ | Yüksek | Orta | Mükemmel | `tengiz emulator start` runs full platform stack locally. Hot-reload. Match Vercel local dev. |
-| 100 | **Client SDK Ecosystem** ⬜ | Yüksek | Orta | Mükemmel | `@tengiz/core` npm package for auth/datastore/storage. Makes platform services feel built-in. |
-| 101 | **Concurrency Control (Operation Locking)** ⬜ | Orta | Düşük | Mükemmel | File-based mutex per app for state-modifying operations. Prevents corrupting state files. |
-| 102 | **Docker Network & Volume CRUD** ⬜ | Orta | Düşük | Mükemmel | `tengiz network create/ls/rm`, `tengiz volume create/ls/rm`. No raw Docker CLI needed. |
-| 103 | **Build Cache Management & Git GC** ⬜ | Orta | Düşük | Mükemmel | `tengiz cleanup --cache --gc`. Per-app build cache + git repo pruning. |
-| 104 | **One-Click Service Templates** ⬜ | Yüksek | Yüksek | Orta | 361 Docker Compose templates. `tengiz service create <template>`. |
+| 39 | **Extended Hook System** ⬜ | 3 | 4 | 5 | Pre-build (secret injection), post-deploy (notifications), app-boot (cache warming). Rich hook env context. |
+| 40 | **Maintenance Mode** ⬜ | 3 | 5 | 5 | Proxy draining for planned maintenance. `tengiz maintenance:on --message "Upgrading..."`. |
+| 41 | **Prometheus Metrics** ⬜ | 3 | 5 | 5 | Proxy HTTP metrics: request count, latency, error rate, cold start count. Grafana + alerting foundation. |
+| 42 | **Readiness Delay & Deploy Timeouts** ⬜ | 3 | 5 | 5 | Per-operation timeouts for deploy/drain/stop. Accommodates both fast Go apps and slow Node.js. |
+| 43 | **Node.js Multi-Core Scaling (PM2/Cluster)** ⬜ | 3 | 5 | 5 | 4-8x performance improvement for Node.js apps via PM2 cluster mode. `.tengiz.yaml` toggle. |
+| 44 | **Custom Docker Network** ⬜ | 3 | 5 | 5 | Isolated networks for multi-service apps. `docker run --network` flag support. |
+| 45 | **Server Bootstrap** ⬜ | 3 | 4 | 5 | `tengiz server init` + `tengiz setup` — one-command Docker + Tengiz installation. |
+| 46 | **HTTP Basic Auth (Staging Protection)** ⬜ | 3 | 5 | 5 | Password-protect staging/pre-production environments. Proxy middleware. |
+| 47 | **Build-Time Secrets (Docker Build Secrets)** ⬜ | 3 | 5 | 5 | NPM_TOKEN, signing keys passed via `--secret` (not `--build-arg`). Excluded from image history. |
+| 48 | **Stale Container Detection** ⬜ | 3 | 5 | 5 | Detect orphaned old-version containers after zero-downtime deploy. Auto-cleanup or report. |
+| 49 | **Environment Variable Locking** ⬜ | 3 | 5 | 5 | Prevent accidental `tengiz config unset DATABASE_URL`. Locked vars require confirmation. |
+| 50 | **Background Monitoring Scheduler** ⬜ | 3 | 5 | 5 | Proactive health checks, disk usage tracking, container status monitoring. Feeds alert system. |
+| 51 | **Full System Backup & Restore** ⬜ | 3 | 4 | 5 | `tengiz backup create` archives `~/.tengiz/` state. `tengiz backup restore` for DR. |
+| 52 | **App Repository Lifecycle Management** ⬜ | 3 | 5 | 5 | Per-app git repo management: `git:lock/unlock/status`. Prevent pushes during maintenance. |
+| 53 | **Custom Image Repository Naming** ⬜ | 3 | 5 | 5 | Go template-based image naming. `ghcr.io/myorg/{{ .AppName }}`. Collision avoidance. |
+| 54 | **Concurrency Control (Operation Locking)** ⬜ | 3 | 5 | 5 | File-based mutex per app for state-modifying ops. Prevents state file corruption. |
+| 55 | **Per-App Proxy Toggle** ⬜ | 3 | 5 | 5 | `tengiz proxy:disable/enable <app>`. Internal-only services that shouldn't be internet-facing. |
+| 56 | **Linux Capabilities Management** ⬜ | 3 | 5 | 5 | Per-app `--cap-add`/`--cap-drop`. Principle of least privilege for containers. |
+| 57 | **Persistent App Mode (Stateful vs Stateless)** ⬜ | 4 | 5 | 5 | Mark DBs/caches as persistent → skip scale-to-zero, idle timeout, multi-replica. Prevents data-loss. |
+| 58 | **Auto-SSL/TLS (Let's Encrypt)** ⬜ | 4 | 4 | 4 | Important but external proxy (Caddy/Nginx) handles this today. `autocert` integration medium effort. |
+| 59 | **One-Click Service Templates** ⬜ | 4 | 3 | 4 | 361 Docker Compose templates (WordPress, N8N, MinIO). `tengiz service create <template>`. Medium alignment due to Docker Compose dependency. |
+| 60 | **Managed Database Provisioning** ⬜ | 4 | 2 | 4 | Vercel Postgres/KV equivalent. `tengiz db create postgres --name mydb`. Very high effort but high impact. |
+| 61 | **Accessory Services (Sidecar Containers)** ⬜ | 3 | 4 | 5 | Postgres/Redis/Search alongside app. Scale-to-zero only affects app, not accessories. Pragmatic alternative to managed DBs. |
+| 62 | **Procfile Support** ⬜ | 3 | 5 | 5 | Heroku-style process type definition. Zero-config Heroku migration. `web/worker/clock` process types. |
+| 63 | **Force HTTPS Redirect** ⬜ | 3 | 5 | 5 | HTTP→HTTPS 301 redirect in proxy. `.tengiz.yaml` `force_https: true`. SEO + security. |
+| 64 | **Build Tracking with Retention** ⬜ | 3 | 4 | 5 | Structured deploy history: JSON records, status tracking, build logs retention. |
+| 65 | **Git-Based Image Version Tagging** ⬜ | 3 | 5 | 5 | Auto-tag images with git commit SHA. Foundation for rollback and deploy history. |
+| 66 | **Config Validation** ⬜ | 3 | 5 | 5 | `tengiz config validate`. Pre-deploy config sanity check. Catches errors before build. |
+| 67 | **Magic Environment Variables** ⬜ | 3 | 4 | 5 | Auto-generated service URLs, DB connection strings, passwords for linked services. |
+| 68 | **Log Drains (External Log Streaming)** ⬜ | 3 | 4 | 5 | Axiom, New Relic, Loki log forwarding. Structured metadata. Production observability. |
+| 69 | **Rate Limiting** ⬜ | 3 | 5 | 5 | Webhook/API rate limiting. `golang.org/x/time/rate`. HTTP 429. |
+| 70 | **Server Security Hardening** ⬜ | 3 | 4 | 5 | UFW firewall, Fail2ban, Docker TLS during `tengiz server init`. |
+| 71 | **Database Connection String Auto-Injection** ⬜ | 3 | 4 | 5 | Auto-inject `DATABASE_URL` when DB accessory linked to app. |
+| 72 | **Docker Network & Volume CRUD** ⬜ | 3 | 5 | 5 | `tengiz network create/ls/rm`, `tengiz volume create/ls/rm`. No raw Docker CLI needed. |
+| 73 | **Build Cache Management & Git GC** ⬜ | 3 | 5 | 5 | `tengiz cleanup --cache --gc`. Per-app build cache + git repo pruning. |
+| 74 | **Herokuish Buildpacks** ⬜ | 3 | 4 | 5 | Heroku's entire buildpack ecosystem. Zero-config migration from Heroku. Complements Nixpacks. |
+| 75 | **Multi-Architecture Builds (Buildx)** ⬜ | 3 | 4 | 5 | `linux/amd64 + linux/arm64` multi-arch manifests. Apple Silicon → Intel server. |
+| 76 | **Docker Buildx Builder Lifecycle Management** ⬜ | 3 | 4 | 5 | Auto-create/inspect/remove buildx builders for multi-arch and build cache. Prerequisite for #75. |
+| 77 | **Network Aliases for Container Connectivity** ⬜ | 3 | 5 | 5 | Custom Docker network aliases for inter-container communication in multi-service apps. |
+| 78 | **Deploy Source Metadata Recording** ⬜ | 3 | 5 | 5 | Record GIT_SHA, branch, deploy source (git-hook/cli/webhook). Env vars + build record. |
+| 79 | **Zip Archive Direct Deployment** ⬜ | 3 | 5 | 5 | Deploy from .zip archive without git. CI/CD artifacts, quick demos. |
+| 80 | **Free Development Domain Provisioning** ⬜ | 4 | 5 | 5 | `*.sslip.io` or `*.tengiz.dev` subdomain for instant public URLs. Core PaaS promise: "deploy and get a URL." |
+| 81 | **Healthcheck Barrier for Coordinated Multi-Server Boot** ⬜ | 3 | 4 | 5 | Batch health gating during rolling deployment. Prevents cascading failures in multi-server rollout. |
 
-### P3 — Lower (Niche / Enhancement / Enterprise)
+### P2 — Differentiators (Vercel-Level Features)
 
 | # | Feature | I | E | A | Rationale |
 |---|---------|---|---|---|-----------|
-| 105 | **SSH Tabanlı Remote Deployment** | Orta | Yüksek | Orta | Multi-server support. High effort, Tengiz built as single-node. `golang.org/x/crypto/ssh`. |
-| 106 | **Role Tabanlı Sunucu Grupları** | Orta | Orta | Orta | Web/worker/job role separation. Different cmd/env per role. |
-| 107 | **Redeploy** | Düşük | Düşük | Mükemmel | Skip bootstrap/prune steps, just build/push/restart. |
-| 108 | **Rolling Boot / Canary Deployment** | Düşük | Yüksek | Düşük | Multi-server only. Gradual deployment to limit blast radius. |
-| 109 | **Encryption at Rest** | Orta | Orta | Mükemmel | AES-256 encryption of env vars in `apps.json`. Enterprise security. |
-| 110 | **Safe Volume Deletion** | Düşük | Düşük | Mükemmel | `tengiz volume rm` cross-app check. Protect shared volumes. |
-| 111 | **Port Mapping Protocol Selection** | Düşük-Orta | Düşük | Mükemmel | TCP/UDP/both protocol selection. Non-HTTP services (DNS, gRPC, DB). |
-| 112 | **Project-Based App Organization** | Düşük | Düşük | Mükemmel | `tengiz project create`, `tengiz ps --project`. Group related apps. |
-| 113 | **App Tags** | Düşük | Düşük | Mükemmel | `tengiz tag add myapp staging`. `tengiz ps --tag`. Ad-hoc grouping. |
-| 114 | **Pre-Install Env Validation (tengiz doctor)** | Düşük | Düşük | Mükemmel | Docker version, port availability, disk space check before deploy. |
-| 115 | **Git Commit Hash Auto-Injection** | Düşük | Düşük | Mükemmel | `TENGIZ_COMMIT_SHA` env var. Shown in `tengiz ps --verbose`. |
-| 116 | **Root Domain Change** | Düşük | Düşük | Mükemmel | `tengiz proxy --domain production.com`. Atomic domain + SSL update. |
-| 117 | **Interactive Env Prompts** | Düşük | Düşük | Mükemmel | TTY prompts for required env vars on first deploy. `"generator": "secret"`. |
-| 118 | **Patches (Build-Time File Overrides)** | Düşük | Düşük-Orta | Mükemmel | Environment-specific `.env`, `robots.txt` injected during build. |
-| 119 | **Cloudflare Tunnel Support** | Düşük-Orta | Orta | Mükemmel | Zero-trust exposure via Cloudflare edge. `cloudflared` CLI wrapper. |
-| 120 | **S3-Compatible Backup Storage** | Orta | Orta | Mükemmel | Database backups to S3. Scheduled + retention policy. |
-| 121 | **Outgoing Webhook Payloads** | Düşük | Düşük | Mükemmel | POST deploy events to external URLs. CI/CD pipeline integration. |
-| 122 | **Custom Compose Overrides** | Düşük | Düşük | Mükemmel | `docker-compose.override.yml` merge support for templates. |
-| 123 | **App Cloning** | Düşük | Düşük | Mükemmel | `tengiz apps:clone <old> <new>`. Full config copy for staging/preview. |
-| 124 | **Build Queue with Dedup** | Düşük | Düşük | Mükemmel | Per-app channel-based queue. Last-one-wins dedup for rapid-fire CI/CD. |
-| 125 | **GoAccess Real-Time Log Analytics** | Düşük | Düşük | Mükemmel | Optional analytics container. `tengiz analytics enable` → dashboard. |
-| 126 | **Container Real-Time Metrics** | Orta | Düşük | Mükemmel | `docker stats` live CPU/memory/network. `tengiz ps --stats`. |
-| 127 | **Automated Database Backups** | Orta | Orta | Mükemmel | `docker exec <container> pg_dump`. Cron-based, S3 storage. |
-| 128 | **SSH Key Management** | Orta | Orta | Mükemmel | Per-server SSH key pairs. `tengiz ssh-key generate/add/list/remove`. |
-| 129 | **Rate Limiting** | Orta | Düşük | Mükemmel | Webhook/API rate limiting. `golang.org/x/time/rate`. HTTP 429. |
-| 130 | **Service Template Registry** | Orta | Orta | Mükemmel | Central template registry with CDN auto-update. |
-| 131 | **Log Drains (External Log Streaming)** | Orta | Orta | Mükemmel | Axiom, New Relic, Loki log forwarding. Structured metadata. |
-| 132 | **AI-Powered Deployment Assistant** | Orta | Düşük | Mükemmel | `tengiz ai "deploy WordPress with Redis"` → LLM-generated compose. |
-| 133 | **GPU Passthrough (NVIDIA/CUDA)** | Orta | Orta | Mükemmel | `--gpus all` flag. AI/ML workloads (Ollama, vLLM). |
-| 134 | **URL Redirect & Rewrite Rules** | Orta | Düşük | Mükemmel | Per-app 301/302 redirects, URL rewrites at proxy level. |
-| 135 | **Proxy Security Middleware** | Orta | Düşük | Mükemmel | IP allow/deny (CIDR), security headers (HSTS, CSP), per-app basic auth. |
-| 136 | **CDN Provider Detection** | Orta | Düşük | Mükemmel | Cloudflare/Fastly IP range detection. Correct client IP extraction. |
-| 137 | **Email Notification Engine** | Orta | Düşük | Mükemmel | SMTP-based alerts for deploy failure, SSL expiry, backup notification. |
-| 138 | **Real-Time WebSocket for Deploy Logs** | Orta | Orta | Mükemmel | Live deploy log streaming. `tengiz deploy --stream`. Web UI foundation. |
-| 139 | **Lambda Builder (Docker-Based FaaS)** | Düşük | Orta | Mükemmel | AWS Lambda-compatible functions on Tengiz. `lambda.yml` manifest. |
-| 140 | **Container Entering (tengiz enter)** | Düşük | Düşük | Mükemmel | `tengiz enter <app>` → `docker exec -it`. Interactive debug shell. |
-| 141 | **Trace/Debug Mode** | Düşük | Düşük | Mükemmel | `--debug` flag → slog LevelDebug. Verbose logging across all packages. |
-| 142 | **Git-Sync Deployment** | Düşük | Düşük | Mükemmel | `tengiz deploy --sync <repo> --interval 5m`. Pull-based deployment. |
-| 143 | **Railpack Builder** | Düşük | Düşük | Mükemmel | Alternative build system alongside Nixpacks/CNB. |
-| 144 | **Null Builder** | Düşük | Düşük | Mükemmel | Skip build permanently. Pre-built images only. |
-| 145 | **Failed Deploy Logs** | Düşük | Düşük | Mükemmel | `tengiz logs --failed <app>`. Retrieve last failed deploy logs. |
-| 146 | **Vector Log Shipping** | Düşük | Orta | Mükemmel | Log aggregator companion container. Loki/Datadog/Axiom sinks. |
-| 147 | **Config Validation** | Düşük | Düşük | Mükemmel | `tengiz config validate`. Pre-deploy config sanity check. |
-| 148 | **Git-Based Image Version Tagging** | Düşük | Düşük | Mükemmel | Auto-tag images with git commit SHA. `tengiz-<app>:<sha>`. |
-| 149 | **SSH Key Management for Deploy Access** | Düşük | Düşük | Mükemmel | Per-developer SSH key deploy access control. |
-| 150 | **Web Dashboard (Admin UI)** | Yüksek | Yüksek | Orta | Highest impact for non-CLI users but high effort and deviates from CLI-first. |
-| 151 | **NetData Integration** | Düşük | Düşük | Mükemmel | Real-time system monitoring companion container. |
-| 152 | **Platform Self-Health Check** | Düşük | Düşük | Mükemmel | Background goroutine + `/healthz` endpoint. Auto-restart on failure. |
-| 153 | **Self-Hosted Docker Registry** | Düşük | Düşük | Mükemmel | Built-in `registry:2` container. `tengiz registry enable`. |
-| 154 | **Service Update Strategy** | Düşük | Düşük | Mükemmel | `startFirst` vs `stopFirst` deploy strategy. Resource-constrained environments. |
-| 155 | **Persistent Docker BuildKit Cache** | Düşük | Düşük | Mükemmel | Per-app build cache volume. 60-90% build time reduction. |
-| 156 | **TypeScript Action Automation (Deno)** | Orta | Orta | Mükemmel | Embedded TS runtime for platform automation. Custom deploy logic, webhook transforms. |
-| 157 | **OIDC/OAuth Single Sign-On** | Orta | Orta | Mükemmel | Google/GitHub OAuth + generic OIDC. Team auth for shared servers. |
-| 158 | **Output/Telemetry Loggers** | Düşük | Orta | Orta | OpenTelemetry/file logger. Centralized log collection (Loki, Datadog). |
-| 159 | **CLI Alias Tanımlama** | Çok Düşük | Çok Düşük | Mükemmel | `.tengiz.yaml` `aliases:` section for command shortcuts. |
-| 160 | **Alternative ACME Providers** | Düşük | Düşük | Mükemmel | ZeroSSL, BuyPass, Google. Let's Encrypt rate limit bypass. |
-| 161 | **Staging Mode for SSL Testing** | Düşük | Düşük | Mükemmel | ACME staging endpoints for rate-limit-free SSL testing. |
-| 162 | **Pluggable Multi-Scheduler (Docker → K3s)** | Düşük | Çok Yüksek | Orta | Scheduler abstraction. Huge architectural change. |
-| 163 | **Pluggable Reverse Proxy** | Düşük | Yüksek | Orta | nginx/Caddy/HAProxy/Traefik backend option. |
-| 164 | **Custom Build Server** | Düşük | Yüksek | Orta | Separate build/deploy servers. SSH + registry push/pull. |
-| 165 | **Self-Upgrade / Auto-Update** | Düşük | Düşük-Orta | Mükemmel | `tengiz upgrade`. GitHub Releases binary download. |
-| 166 | **app.json Manifest (Heroku Compatible)** | Düşük | Orta | Mükemmel | Zero-config Heroku migration manifest. Merge with `.tengiz.yaml`. |
-| 167 | **Git Submodules & Git LFS Support** | Düşük | Düşük | Mükemmel | `git submodule update --init --recursive` + Git LFS during clone. |
-| 168 | **App-Level Lifecycle Data Hooks** | Orta | Orta | Mükemmel | Data change triggers: `onSetDoc`, `onDeleteDoc`. General trigger system. |
-| 169 | **Docker Logging Konfigürasyonu** | Düşük | Düşük | Mükemmel | Per-app Docker log driver config (json-file, loki, syslog). |
-| 170 | **Asset Path / Asset Bridging** | Düşük | Düşük | Mükemmel | Zero-downtime deploy asset co-existence for hash-based filenames. |
-| 171 | **Gelişmiş Docker Build** | Düşük | Düşük | Mükemmel | Multi-arch build, build cache, Docker driver config. |
-| 172 | **Server Exec (Host-Level Commands)** | Düşük | Düşük | Mükemmel | `tengiz server exec "df -h"`. Controlled host access without SSH. |
-| 173 | **Version Targeting** | Düşük | Düşük | Mükemmel | Deploy/exec specific previous version by tag or version ID. |
-| 174 | **Cloud Native Buildpacks (pack CLI)** | Düşük | Düşük | Mükemmel | Heroku-style buildpacks via `pack` CLI. Alternative to Nixpacks. |
-| 175 | **App Images Command** | Düşük | Düşük | Mükemmel | List Docker images per app: tag, creation time, size. |
-| 176 | **System Stats Recording** | Düşük | Düşük | Mükemmel | Historical per-container CPU, memory, network stats. JSON Lines. |
-| 177 | **Image Digest Change Detection** | Düşük | Düşük | Mükemmel | Auto-redeploy when tracked image digest changes. |
-| 178 | **Procedure Automation** | Düşük | Düşük | Mükemmel | Multi-step workflows: deploy → migrate → healthcheck → notify. |
-| 179 | **Image Digest Pinning** | Düşük | Düşük | Mükemmel | Pin deployment to specific SHA digest. Deterministic deploys. |
-| 180 | **Granular Scoped API Keys** | Düşük | Düşük | Mükemmel | API keys with Read/Write/Execute permissions per resource type. |
-| 181 | **Stack/Compose Lifecycle Management** | Düşük | Orta | Mükemmel | First-class Compose stack resource with full lifecycle. |
-| 182 | **Server Security Hardening** | Orta | Orta | Mükemmel | UFW firewall, Fail2ban, Docker TLS during `tengiz server init`. |
-| 183 | **Database Connection String Auto-Injection** | Orta | Orta | Mükemmel | Auto-inject `DATABASE_URL` when DB accessory linked to app. |
-| 184 | **Database Backup Import/Upload** | Düşük | Düşük | Mükemmel | `tengiz backup import` from external SQL dump files. |
-| 185 | **Protected Service Deletion** | Düşük | Düşük | Mükemmel | Confirmation, backup-before-delete, linked resource protection. |
-| 186 | **Reusable External Storage Destinations** | Düşük | Düşük | Mükemmel | First-class S3 destination management for backups. |
-| 187 | **Platform Admin Settings** | Düşük | Düşük | Mükemmel | Centralized server URL, Docker config, default resource limits. |
-| 188 | **Manual SSL Certificate Management** | Orta | Orta | Mükemmel | Import/generate/inspect/remove SSL certs. Enterprise cert management. |
-| 189 | **Per-App Proxy Toggle** | Düşük | Düşük | Mükemmel | `tengiz proxy:disable/enable <app>`. Internal-only services. |
-| 190 | **Linux Capabilities Management** | Düşük | Düşük | Mükemmel | Per-app `--cap-add`/`--cap-drop`. Principle of least privilege. |
-| 191 | **Pluggable Event/Trigger Architecture** | Orta | Yüksek | Mükemmel | 40+ lifecycle trigger points. Community plugin ecosystem. |
-| 192 | **Build-Time Secrets (Docker Build Secrets)** | Düşük | Düşük | Mükemmel | `--secret` flag for npm tokens, signing keys. Not in image history. |
-| 193 | **Config Format Self-Documentation** | Düşük | Düşük | Mükemmel | `tengiz config docs` shows valid keys, types, defaults inline. |
-| 194 | **Multi-Server Architecture with Periphery Agent** | Düşük | Çok Yüksek | Mükemmel | Core↔Periphery distributed model. High effort, transformative. |
-| 195 | **Builder Resource (URL/Server/AWS EC2)** | Düşük | Yüksek | Mükemmel | Decoupled build targets. Ephemeral AWS EC2 builders. |
-| 196 | **User Group Resource (RBAC)** | Düşük | Orta | Mükemmel | Group-based permissions for team management. |
-| 197 | **Alert System with Severity Levels** | Orta | Orta | Mükemmel | 5 severity levels, resolved/unresolved tracking, auto-pruning. |
-| 198 | **Multi-Channel Alerters** | Düşük | Düşük | Mükemmel | Slack/Discord/Pushover/ntfy with severity-based formatting. |
-| 199 | **Docker Swarm Resource Management** | Düşük | Yüksek | Mükemmel | Multi-node HA via Docker Swarm mode. Lighter than K3s. |
-| 200 | **Git Provider Account Management** | Düşük | Düşük | Mükemmel | Store GitHub/GitLab tokens for private repo clone access. |
-| 201 | **Docker Registry Account Management** | Düşük | Düşük | Mükemmel | Multi-registry auth management for push/pull. |
-| 202 | **WebSocket Interactive Terminal** | Düşük | Orta | Mükemmel | PTY allocation + WebSocket streaming. Beyond simple `docker exec`. |
-| 203 | **Batch Operations Across Resource Types** | Düşük | Düşük | Mükemmel | Filter by tag/project/status, concurrent execution. |
-| 204 | **Two-Factor Authentication (2FA)** | Orta | Orta | Mükemmel | TOTP-based 2FA for admin accounts. `github.com/pquerna/otp`. |
-| 205 | **Private Asset Access Tokens** | Düşük | Düşük | Mükemmel | Token-gated private file URLs. Shareable without auth. |
-| 206 | **Granular Per-Operation Rate Limiting** | Düşük | Orta | Mükemmel | Per-operation-type limits: reads vs writes, uploads vs downloads. |
-| 207 | **Collection Memory Type Configuration** | Düşük | Düşük | Mükemmel | Ephemeral (Go map) vs persistent (SQLite) per datastore collection. |
+| 82 | **REST API + OpenAPI Spec** ⬜ | 4 | 3 | 4 | Unlocks CI/CD integration, programmatic access, and future web UI. Must-have for growth despite deviating from CLI-first. Higher effort. |
+| 83 | **Embedded Serverless Functions (goja)** ⬜ | 4 | 3 | 5 | Biggest potential differentiator. Dockerless <10ms function runtime. TypeScript → Go `goja`. No other Docker-based alt offers this. |
+| 84 | **GitOps / Declarative ResourceSync** ⬜ | 4 | 3 | 5 | Declare apps/env/domains as git-managed YAML. `tengiz sync` reconciles. IaC for Tengiz. High effort but transformative for team ops. |
+| 85 | **Local Development Emulator** ⬜ | 4 | 4 | 5 | `tengiz emulator start` runs full platform stack locally. Hot-reload. Match Vercel local dev experience. |
+| 86 | **Client SDK Ecosystem** ⬜ | 4 | 4 | 5 | `@tengiz/core` npm package for auth/datastore/storage. Makes platform services feel built-in. |
+| 87 | **Web Dashboard (Admin UI)** ⬜ | 4 | 3 | 4 | Highest impact for non-CLI users but high effort and deviates from CLI-first. Embed SPA in binary via `embed.FS`. |
+| 88 | **WebSocket Support Per App** ⬜ | 3 | 5 | 5 | Per-app WebSocket toggle in proxy. `.tengiz.yaml` `proxy.websocket: true`. |
+| 89 | **Pattern-Based Watch Paths** ⬜ | 3 | 4 | 5 | `tengiz deploy --watch` with glob patterns. Auto-redeploy on file changes. `fsnotify`. |
+| 90 | **Event-Driven Data Hooks (Trigger System)** ⬜ | 3 | 4 | 5 | `container:start`, `deploy:success`, `idle:timeout` events. Makes Tengiz programmable. |
+| 91 | **Container Snapshot System** ⬜ | 3 | 5 | 5 | `docker commit`-based stateful snapshot. Risk mitigation before risky deploys. |
+| 92 | **Built-in Platform Analytics** ⬜ | 3 | 4 | 5 | HTML injection + Web Vitals tracking. SQLite storage. Vercel Analytics-level feature. |
+| 93 | **Built-in Authentication Service** ⬜ | 4 | 3 | 5 | Platform-level auth-as-a-service. Google/GitHub/Passkey. Proxy auth intercept + header injection. |
+| 94 | **Built-in NoSQL Datastore** ⬜ | 4 | 3 | 5 | Zero-config document store. Embedded SQLite + proxy `/__tengiz/db/` API. |
+| 95 | **Built-in File/Blob Storage** ⬜ | 4 | 3 | 5 | Platform-level asset hosting. URL-based access control. Upload/serve/delete API. |
+| 96 | **Framework Plugins (Next.js/Vite)** ⬜ | 3 | 4 | 5 | `@tengiz/nextjs` npm package. Auto-inject env + API routes. Differentiator from Coolify/Dokku. |
+| 97 | **Build Precompression** ⬜ | 3 | 5 | 5 | Gzip/Brotli pre-compression at build time. Zero-CPU asset serving. |
+| 98 | **Staged Deployments (Change Sets)** ⬜ | 3 | 4 | 5 | `tengiz deploy --no-apply` → `tengiz changes apply <id>`. Deploy on Friday, apply on Monday. |
+| 99 | **Project Scaffolding with Starter Templates** ⬜ | 3 | 4 | 5 | `tengiz create <template>`. React/Vite/Next.js/Go API templates. Minutes to first deploy. |
+| 100 | **Change Approval Workflow** ⬜ | 3 | 4 | 5 | Submit → Review → Apply. Team governance for deployments. |
+| 101 | **Docker Compose Import** ⬜ | 3 | 4 | 5 | Convert existing `docker-compose.yml` to Tengiz containers. Multi-service deploy. |
+| 102 | **Global/Per-App Property Cascade** ⬜ | 3 | 4 | 5 | Global defaults → app overrides. Reduce per-app config overhead for multi-app instances. |
+| 103 | **Per-Process-Type Resource Limits** ⬜ | 3 | 5 | 5 | Separate CPU/memory for web/worker/scheduler. Extends existing resource limits. |
+| 104 | **Git Provider OAuth App Integration** ⬜ | 3 | 3 | 5 | One-click GitHub/GitLab App connection. Auto-configure webhooks + deploy keys. |
+| 105 | **Centralized Multi-Server Management** ⬜ | 3 | 3 | 5 | Control-plane model: one Tengiz instance manages remote Docker hosts via SSH. |
+| 106 | **MCP Server for AI Integration** ⬜ | 3 | 4 | 5 | Model Context Protocol server. AI assistants query/manage Tengiz via natural language. |
+| 107 | **Process Scaling (Multi-Container)** ⬜ | 3 | 3 | 4 | HA + background workers (Sidekiq, Celery). Combines with idle timeout for serverless model. |
+| 108 | **Server Monitoring** ⬜ | 3 | 4 | 5 | Disk, container states, backup status. `tengiz status` + threshold alert. |
+| 109 | **Scheduled Tasks / Cron Jobs** ⬜ | 3 | 4 | 5 | Vercel Cron Jobs equivalent. `.tengiz.yaml` `cron:` + `robfig/cron`. `docker exec` execution. |
+| 110 | **Gelişmiş Proxy Konfigürasyonu** ⬜ | 3 | 4 | 5 | Path prefix, buffering, timeout, X-Forwarded-* header control. Production-grade proxy. |
+| 111 | **KEDA-based Autoscaling** ⬜ | 3 | 3 | 5 | Scale 0→N based on HTTP rate, queue depth, CPU. Transforms idle timer into real serverless. |
+| 112 | **Build Pipeline with Auto-Versioning** ⬜ | 3 | 4 | 5 | Source → versioned image → multi-registry push. Auto-tag: semver/commit-sha/timestamp. |
+| 113 | **Build-to-Deploy Trigger Chain** ⬜ | 3 | 4 | 5 | Build completes → linked deployment auto-redeploys. Full CI/CD without external tools. |
+| 114 | **Remote Docker Builder** ⬜ | 3 | 4 | 5 | SSH-based remote buildx builder. Offload heavy builds from production server. |
+| 115 | **Forward Auth / SSO Gate for Deployed Apps** ⬜ | 4 | 4 | 5 | Protect deployed apps behind enterprise SSO (Google/GitHub/OIDC) without app code changes. Proxy-level auth intercept. |
+| 116 | **Multi-Tenancy with Team Management & RBAC** ⬜ | 4 | 3 | 5 | Team scoping, invitations, MEMBER/ADMIN/OWNER roles. Required for shared server deployments. |
+| 117 | **Service Users (Built-in System Automation Accounts)** ⬜ | 3 | 5 | 5 | Internal identities for webhooks/procedures/cron. Audit trail with actor attribution. |
+| 118 | **TypeScript Action Automation (Deno)** ⬜ | 3 | 4 | 5 | Embedded TS runtime for platform automation. Custom deploy logic, webhook transforms. |
+| 119 | **OIDC/OAuth Single Sign-On** ⬜ | 3 | 4 | 5 | Google/GitHub OAuth + generic OIDC. Team auth for shared servers. |
+| 120 | **Two-Factor Authentication (2FA)** ⬜ | 3 | 4 | 5 | TOTP-based 2FA for admin accounts. `github.com/pquerna/otp`. |
+| 121 | **Granular Scoped API Keys** ⬜ | 3 | 5 | 5 | API keys with Read/Write/Execute permissions per resource type. |
+| 122 | **Collection Memory Type Configuration** ⬜ | 3 | 5 | 5 | Ephemeral (Go map) vs persistent (SQLite) per datastore collection. |
+| 123 | **Persistent Docker BuildKit Cache** ⬜ | 3 | 5 | 5 | Per-app build cache volume. 60-90% build time reduction. |
+| 124 | **Private Asset Access Tokens** ⬜ | 3 | 5 | 5 | Token-gated private file URLs. Shareable without auth. |
+| 125 | **Granular Per-Operation Rate Limiting** ⬜ | 3 | 4 | 5 | Per-operation-type limits: reads vs writes, uploads vs downloads. |
+| 126 | **Platform Self-Health Check** ⬜ | 3 | 5 | 5 | Background goroutine + `/healthz` endpoint. Auto-restart on failure. |
+| 127 | **Server Exec (Host-Level Commands)** ⬜ | 3 | 5 | 5 | `tengiz server exec "df -h"`. Controlled host access without SSH. |
+| 128 | **Self-Upgrade / Auto-Update** ⬜ | 3 | 4 | 5 | `tengiz upgrade`. GitHub Releases binary download. |
+| 129 | **Trace/Debug Mode** ⬜ | 3 | 5 | 5 | `--debug` flag → slog LevelDebug. Verbose logging across all packages. |
+| 130 | **Failed Deploy Logs** ⬜ | 3 | 5 | 5 | `tengiz logs --failed <app>`. Retrieve last failed deploy logs. |
+| 131 | **Container Entering (tengiz enter)** ⬜ | 2 | 5 | 5 | `tengiz enter <app>` → `docker exec -it`. Interactive debug shell. |
+| 132 | **Git-Sync Deployment** ⬜ | 3 | 5 | 5 | `tengiz deploy --sync <repo> --interval 5m`. Pull-based deployment. |
+| 133 | **Scoped Shared Environment Variables** ⬜ | 3 | 4 | 5 | `{{team.*}}`, `{{project.*}}`, `{{environment.*}}`, `{{server.*}}` scope levels. Eliminates env var duplication. |
+| 134 | **Environment Variable Advanced Flags** ⬜ | 3 | 5 | 5 | `is_buildtime`, `is_runtime`, `is_preview`, `is_shown_once`, `is_required` per env var. |
+| 135 | **File-Based Storage Mounts** ⬜ | 3 | 5 | 5 | Mount individual files into containers with encrypted content tracking. |
+| 136 | **Deployment Queue with Concurrency Control** ⬜ | 3 | 4 | 5 | Per-server concurrent builds limit + queued deployments. Provenance tracking with config snapshots. |
+| 137 | **Resource Move Between Environments/Servers** ⬜ | 3 | 4 | 5 | `tengiz move myapp --from staging --to production`. Promote or migrate apps. |
+| 138 | **Preview URL Template Customization** ⬜ | 2 | 5 | 5 | `{{domain}}`, `{{pr_id}}`, `{{random}}` in preview URL templates. |
+| 139 | **DNS Validation with Custom DNS Servers** ⬜ | 3 | 5 | 5 | Validate DNS before SSL issuance. Custom DNS for air-gapped deployments. |
+| 140 | **Custom Docker Labels Per App** ⬜ | 2 | 5 | 5 | Custom Docker labels for metadata tagging (service discovery, monitoring, billing). |
+| 141 | **www ↔ non-www Redirect Configuration** ⬜ | 2 | 5 | 5 | Per-app canonical domain redirect. SEO best practice. |
+| 142 | **API-Level Sensitive Data Masking** ⬜ | 3 | 5 | 5 | API responses mask sensitive fields unless elevated permissions. |
+| 143 | **Multi-Provider Webhook Secrets** ⬜ | 3 | 5 | 5 | Per-provider webhook secrets (GitHub, GitLab, Bitbucket, Gitea). |
+| 144 | **Application-Level Restart Tracking** ⬜ | 2 | 5 | 5 | Restart count, max allowed, type, timestamp. Prevents crash loops. |
+| 145 | **Application Settings Toggles (SPA Mode, Gzip, Grace Period, etc.)** ⬜ | 3 | 5 | 5 | `is_spa`, `is_gzip_enabled`, `stop_grace_period`, etc. Power-user toggles, nearly zero cost. |
+| 146 | **Procedure Automation (Multi-Step Workflows)** ⬜ | 3 | 5 | 5 | Define repeatable procedures: deploy → migrate → healthcheck → notify. |
+| 147 | **Image Digest Change Detection & Auto-Redeploy** ⬜ | 2 | 5 | 5 | Auto-redeploy when tracked image digest changes. Keeps third-party images updated. |
+| 148 | **Image Digest Pinning** ⬜ | 2 | 5 | 5 | Pin deployment to specific SHA digest. Deterministic deploys. |
+| 149 | **System Stats Recording** ⬜ | 3 | 4 | 5 | Historical per-container CPU, memory, network stats. JSON Lines. |
+| 150 | **Stack/Compose Lifecycle Management** ⬜ | 3 | 4 | 5 | First-class Compose stack resource with full lifecycle. Beyond one-time import. |
+| 151 | **Alert System with Severity Levels** ⬜ | 3 | 4 | 5 | 5 severity levels, resolved/unresolved tracking, auto-pruning. |
+| 152 | **Multi-Channel Alerters** ⬜ | 3 | 5 | 5 | Slack/Discord/Pushover/ntfy with severity-based formatting. |
+| 153 | **Maintenance Windows for Alert Suppression** ⬜ | 3 | 4 | 5 | Suppress alerts during planned maintenance. Prevent alert fatigue. |
+| 154 | **Stack File Dependency Tracking** ⬜ | 3 | 4 | 5 | Granular diff-based compose redeploy: only affected services restart. |
+
+### P3 — Enterprise & Niche (Enhancement)
+
+| # | Feature | I | E | A | Rationale |
+|---|---------|---|---|---|-----------|
+| 155 | **SSH Tabanlı Remote Deployment** ⬜ | 3 | 3 | 4 | Multi-server support via SSH. High effort, Tengiz built as single-node. `golang.org/x/crypto/ssh`. |
+| 156 | **Multi-Server Architecture with Periphery Agent** ⬜ | 3 | 1 | 5 | Core↔Periphery distributed model via WebSocket. Transformative but very high effort. |
+| 157 | **Docker Swarm Resource Management** ⬜ | 3 | 3 | 5 | Multi-node HA via Docker Swarm mode. Lighter than K3s. |
+| 158 | **Onboarding Keys for Zero-Config Server Registration** ⬜ | 2 | 4 | 5 | Pre-shared keys for auto-registration of new servers. |
+| 159 | **Role Tabanlı Sunucu Grupları** ⬜ | 3 | 4 | 4 | Web/worker/job role separation. Different cmd/env per role. |
+| 160 | **Cloud Provider Server Provisioning** ⬜ | 3 | 2 | 3 | One-click Hetzner/Vultr/DO server creation. `tengiz server create --provider hetzner`. |
+| 161 | **Cloud-Init Script Automation** ⬜ | 2 | 4 | 5 | Reusable cloud-init scripts for first-boot automation. |
+| 162 | **Sentinel Push-Based Monitoring Agent** ⬜ | 3 | 4 | 5 | Dedicated monitoring agent container. Push-based metrics collection. |
+| 163 | **Server Patch/Update Health Monitoring** ⬜ | 2 | 4 | 5 | Check for available OS package updates. Report via notifications. |
+| 164 | **Version Mismatch Detection** ⬜ | 2 | 5 | 5 | Component compatibility checking between CLI, proxy, runtime. |
+| 165 | **System Maintenance Operations** ⬜ | 2 | 4 | 5 | `ClearRepoCache`, `BackupCoreDatabase`, `RotateKeys`, `GlobalAutoUpdate`. |
+| 166 | **User Group Resource (RBAC)** ⬜ | 3 | 4 | 5 | Group-based permissions for team management. |
+| 167 | **Encryption at Rest** ⬜ | 3 | 4 | 5 | AES-256 encryption of env vars in `apps.json`. Enterprise security. |
+| 168 | **Manual SSL Certificate Management** ⬜ | 3 | 4 | 5 | Import/generate/inspect/remove SSL certs. Enterprise cert management. |
+| 169 | **MySQL/PostgreSQL Automated Database Backups** ⬜ | 3 | 4 | 5 | `docker exec <container> pg_dump`. Cron-based, S3 storage. |
+| 170 | **Reusable External Storage Destinations** ⬜ | 3 | 4 | 5 | First-class S3 destination management for backups. |
+| 171 | **Platform Admin Settings** ⬜ | 2 | 5 | 5 | Centralized server URL, Docker config, default resource limits. |
+| 172 | **Git Provider Account Management** ⬜ | 3 | 5 | 5 | Store GitHub/GitLab tokens for private repo clone access. |
+| 173 | **Docker Registry Account Management** ⬜ | 2 | 5 | 5 | Multi-registry auth management for push/pull. |
+| 174 | **SSH Key Management for Servers and Git** ⬜ | 3 | 4 | 5 | Per-server SSH key pairs. `tengiz ssh-key generate/add/list/remove`. |
+| 175 | **SSH Key Management for Deploy Access** ⬜ | 2 | 5 | 5 | Per-developer SSH key deploy access control. |
+| 176 | **Pluggable Event/Trigger Architecture** ⬜ | 3 | 3 | 5 | 40+ lifecycle trigger points. Community plugin ecosystem. High effort, transformative. |
+| 177 | **Pluggable Multi-Scheduler (Docker → K3s)** ⬜ | 2 | 1 | 4 | Scheduler abstraction. Very high architectural change. |
+| 178 | **Pluggable Reverse Proxy** ⬜ | 2 | 3 | 4 | nginx/Caddy/HAProxy/Traefik backend option. |
+| 179 | **Custom Build Server** ⬜ | 2 | 3 | 4 | Separate build/deploy servers. SSH + registry push/pull. |
+| 180 | **Builder Resource (URL/Server/AWS EC2)** ⬜ | 2 | 3 | 5 | Decoupled build targets. Ephemeral AWS EC2 builders. |
+| 181 | **Rolling Boot / Canary Deployment** ⬜ | 2 | 3 | 4 | Multi-server only. Gradual deployment to limit blast radius. |
+| 182 | **Version Targeting** ⬜ | 2 | 5 | 5 | Deploy/exec specific previous version by tag or version ID. |
+| 183 | **App Images Command** ⬜ | 2 | 5 | 5 | List Docker images per app: tag, creation time, size. |
+| 184 | **App Cloning** ⬜ | 2 | 5 | 5 | `tengiz apps:clone <old> <new>`. Full config copy for staging/preview. |
+| 185 | **App Renaming** ⬜ | 2 | 5 | 5 | `tengiz rename <old> <new>`. Full state migration. |
+| 186 | **Docker Compose Service Update Strategy** ⬜ | 2 | 5 | 5 | `startFirst` vs `stopFirst` deploy strategy. Resource-constrained environments. |
+| 187 | **Safe Volume Deletion** ⬜ | 2 | 5 | 5 | `tengiz volume rm` cross-app check. Protect shared volumes. |
+| 188 | **Protected Service Deletion** ⬜ | 2 | 5 | 5 | Confirmation, backup-before-delete, linked resource protection. |
+| 189 | **Port Mapping Protocol Selection** ⬜ | 2 | 5 | 5 | TCP/UDP/both protocol selection. Non-HTTP services (DNS, gRPC, DB). |
+| 190 | **Project-Based App Organization** ⬜ | 2 | 5 | 5 | `tengiz project create`, `tengiz ps --project`. Group related apps. |
+| 191 | **App Tags** ⬜ | 2 | 5 | 5 | `tengiz tag add myapp staging`. `tengiz ps --tag`. Ad-hoc grouping. |
+| 192 | **Pre-Install Env Validation (tengiz doctor)** ⬜ | 2 | 5 | 5 | Docker version, port availability, disk space check before deploy. |
+| 193 | **Interactive Env Prompts & Auto-Generated Secrets** ⬜ | 2 | 5 | 5 | TTY prompts for required env vars on first deploy. `"generator": "secret"`. |
+| 194 | **Patches (Build-Time File Overrides)** ⬜ | 2 | 4 | 5 | Environment-specific `.env`, `robots.txt` injected during build. |
+| 195 | **Cloudflare Tunnel Support** ⬜ | 2 | 4 | 5 | Zero-trust exposure via Cloudflare edge. `cloudflared` CLI wrapper. |
+| 196 | **S3-Compatible Backup Storage** ⬜ | 3 | 4 | 5 | Database backups to S3. Scheduled + retention policy. |
+| 197 | **Outgoing Webhook Payloads** ⬜ | 2 | 5 | 5 | POST deploy events to external URLs. CI/CD pipeline integration. |
+| 198 | **Custom Compose Overrides** ⬜ | 2 | 5 | 5 | `docker-compose.override.yml` merge support for templates. |
+| 199 | **Build Queue with Dedup** ⬜ | 2 | 5 | 5 | Per-app channel-based queue. Last-one-wins dedup for rapid-fire CI/CD. |
+| 200 | **Deploy Cancellation (Build PID Kill & Lock Cleanup)** ⬜ | 2 | 5 | 5 | Cancel in-progress build by killing PID and cleaning lock. |
+| 201 | **GoAccess Real-Time Log Analytics** ⬜ | 2 | 5 | 5 | Optional analytics container. `tengiz analytics enable` → dashboard. |
+| 202 | **NetData Integration** ⬜ | 2 | 5 | 5 | Real-time system monitoring companion container. |
+| 203 | **Self-Hosted Docker Registry** ⬜ | 2 | 5 | 5 | Built-in `registry:2` container. `tengiz registry enable`. |
+| 204 | **Cloud Native Buildpacks (pack CLI)** ⬜ | 2 | 5 | 5 | Heroku-style buildpacks via `pack` CLI. Alternative to Nixpacks. |
+| 205 | **Railpack Builder** ⬜ | 2 | 5 | 5 | Alternative build system alongside Nixpacks/CNB. |
+| 206 | **Null Builder** ⬜ | 2 | 5 | 5 | Skip build permanently. Pre-built images only. |
+| 207 | **Lambda Builder (Docker-Based FaaS)** ⬜ | 2 | 4 | 5 | AWS Lambda-compatible functions on Tengiz. `lambda.yml` manifest. |
+| 208 | **WebSocket Interactive Terminal** ⬜ | 2 | 4 | 5 | PTY allocation + WebSocket streaming. Beyond simple `docker exec`. |
+| 209 | **Real-Time WebSocket for Deploy Logs** ⬜ | 2 | 4 | 5 | Live deploy log streaming. `tengiz deploy --stream`. Web UI foundation. |
+| 210 | **app.json Manifest (Heroku Compatible)** ⬜ | 2 | 4 | 5 | Zero-config Heroku migration manifest. Merge with `.tengiz.yaml`. |
+| 211 | **Git Submodules & Git LFS Support** ⬜ | 2 | 5 | 5 | `git submodule update --init --recursive` + Git LFS during clone. |
+| 212 | **App-Level Lifecycle Data Hooks** ⬜ | 3 | 4 | 5 | Data change triggers: `onSetDoc`, `onDeleteDoc`. General trigger system. |
+| 213 | **Docker Logging Konfigürasyonu** ⬜ | 2 | 5 | 5 | Per-app Docker log driver config (json-file, loki, syslog). |
+| 214 | **Asset Path / Asset Bridging** ⬜ | 2 | 5 | 5 | Zero-downtime deploy asset co-existence for hash-based filenames. |
+| 215 | **Gelişmiş Docker Build** ⬜ | 2 | 5 | 5 | Multi-arch build, build cache, Docker driver config. |
+| 216 | **Root Domain Change** ⬜ | 2 | 5 | 5 | `tengiz proxy --domain production.com`. Atomic domain + SSL update. |
+| 217 | **Git Commit Hash Auto-Injection** ⬜ | 2 | 5 | 5 | `TENGIZ_COMMIT_SHA` env var. Shown in `tengiz ps --verbose`. |
+| 218 | **Git Property Configuration** ⬜ | 2 | 5 | 5 | `deploy-branch`, `keep-git-dir`, `rev-env-var` per-app. |
+| 219 | **Procfile Path Configuration & Dockerfile CMD Override** ⬜ | 2 | 5 | 5 | Custom Procfile path for monorepo. Dockerfile CMD override. |
+| 220 | **App-Level Deploy Lock** ⬜ | 2 | 5 | 5 | `tengiz apps:lock/unlock <app>`. Prevent deploys during active debugging. |
+| 221 | **Network Attachment & Security Properties** ⬜ | 2 | 4 | 5 | `bind-all-interfaces`, `tld`, `attach-post-create` per-app. |
+| 222 | **Redeploy** ⬜ | 2 | 5 | 5 | Skip bootstrap/prune steps, just build/push/restart. |
+| 223 | **Programmatic Pre-Deploy Hook** ⬜ | 2 | 4 | 5 | JavaScript hook (goja) to modify deployment object before container creation. |
+| 224 | **Metrics Endpoint Security (Token Authentication)** ⬜ | 2 | 5 | 5 | Token-protected `/metrics` endpoint. Configurable port. |
+| 226 | **Alternative Git Deploy Sources (Archive/Directory/Image)** ⬜ | 2 | 5 | 5 | Deploy from tar/tar.gz, local directory, or pre-built image. |
+| 227 | **Alternative ACME Providers** ⬜ | 2 | 5 | 5 | ZeroSSL, BuyPass, Google. Let's Encrypt rate limit bypass. |
+| 228 | **Staging Mode for SSL Testing** ⬜ | 2 | 5 | 5 | ACME staging endpoints for rate-limit-free SSL testing. |
+| 229 | **CLI Alias Tanımlama** ⬜ | 1 | 5 | 5 | `.tengiz.yaml` `aliases:` section for command shortcuts. |
+| 230 | **Output/Telemetry Loggers** ⬜ | 2 | 4 | 4 | OpenTelemetry/file logger. Centralized log collection (Loki, Datadog). |
+| 231 | **Config Format Self-Documentation** ⬜ | 2 | 5 | 5 | `tengiz config docs` shows valid keys, types, defaults inline. |
+| 232 | **Docker Helper Image Management** ⬜ | 2 | 5 | 5 | Custom helper Docker image for build operations. Auto-update tracking. |
+| 233 | **Vector Log Shipping** ⬜ | 2 | 4 | 5 | Log aggregator companion container. Loki/Datadog/Axiom sinks. |
+| 234 | **User-Facing Changelog/Activity Feed** ⬜ | 2 | 5 | 5 | Changelog from CDN + read tracking. Activity logging for all model changes. |
+| 235 | **Email Notification Engine** ⬜ | 3 | 5 | 5 | SMTP-based alerts for deploy failure, SSL expiry, backup notification. |
+| 236 | **CDN Provider Detection** ⬜ | 3 | 5 | 5 | Cloudflare/Fastly IP range detection. Correct client IP extraction. |
+| 237 | **URL Redirect & Rewrite Rules** ⬜ | 3 | 5 | 5 | Per-app 301/302 redirects, URL rewrites at proxy level. |
+| 238 | **Proxy Security Middleware** ⬜ | 3 | 5 | 5 | IP allow/deny (CIDR), security headers (HSTS, CSP), per-app basic auth. |
+| 239 | **GPU Passthrough (NVIDIA/CUDA)** ⬜ | 3 | 4 | 5 | `--gpus all` flag. AI/ML workloads (Ollama, vLLM). |
+| 240 | **AI-Powered Deployment Assistant** ⬜ | 3 | 5 | 5 | `tengiz ai "deploy WordPress with Redis"` → LLM-generated compose. |
+| 241 | **Database Backup Import/Upload** ⬜ | 2 | 5 | 5 | `tengiz backup import` from external SQL dump files. |
+| 242 | **ERB Template Support in .tengiz.yaml** ⬜ | 3 | 5 | 5 | Dynamic config via Go templates: `{{ env "DATABASE_URL" }}`. |
+| 243 | **Build Provenance & SBOM Attestations** ⬜ | 2 | 5 | 5 | SLSA provenance + SBOM for supply chain security. |
+| 244 | **Pre-Connect Hooks** ⬜ | 2 | 5 | 5 | Environment setup before SSH connections (VPN, bastion). |
+| 245 | **Env Tag System (Server-Specific Env Vars via Tags)** ⬜ | 2 | 4 | 5 | Tag-based env var injection for canary/region-specific config. |
+| 246 | **Git Clone-Based Clean Builds** ⬜ | 3 | 5 | 5 | Build from clean git clone, prevent uncommitted changes in image. |
+| 247 | **Mirror-Seeded Image Pulling** ⬜ | 2 | 4 | 5 | Seed registry mirror cache first, then parallel pulls on remaining hosts. |
+| 248 | **Procedure Stage-Level Enable/Disable** ⬜ | 2 | 5 | 5 | Enable/disable individual stages without removing from definition. |
+| 249 | **Batch Operations Across Resource Types** ⬜ | 2 | 5 | 5 | Filter by tag/project/status, concurrent execution. |
+| 250 | **Callable vs Event-Driven Serverless Function Architecture** ⬜ | 3 | 3 | 5 | Query/update/event-driven split for goja runtime. Queries sub-ms, updates write, hooks async. |
+| 251 | **Function Guards (Pre-Execution Authorization)** ⬜ | 2 | 4 | 5 | Pre-execution guards for serverless functions. Auth + rate limit before function runs. |
+| 252 | **Type-Safe Serverless Function Schema** ⬜ | 2 | 4 | 5 | Zod-style schema → auto-generated client bindings. |
+| 253 | **Function Publish/Upgrade Independent Lifecycle** ⬜ | 2 | 5 | 5 | Hot-swap function source without app redeploy. Versioned, rollbackable. |
+| 254 | **HTTPS Outcalls from Embedded Functions** ⬜ | 3 | 4 | 5 | Embedded functions make external HTTP requests. `fetch(url)` in goja context. |
+| 255 | **Component-Based Platform Architecture** ⬜ | 3 | 1 | 5 | Composable service containers (satellite, orbiter, monitor). Independent lifecycle. Very high effort refactor. |
 
 ### ✅ Implemented Features (Not Pending)
 
