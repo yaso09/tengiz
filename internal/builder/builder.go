@@ -8,17 +8,28 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 type Builder struct {
-	dataDir string
+	dataDir     string
+	nixpacksCfg *types.NixpacksConfig
 }
 
 func New(dataDir string) *Builder {
 	return &Builder{dataDir: dataDir}
 }
 
+func (b *Builder) SetNixpacksConfig(cfg *types.NixpacksConfig) {
+	b.nixpacksCfg = cfg
+}
+
 func (b *Builder) Build(ctx context.Context, dir string, appName string, env string, detection *Detection, deploymentID string) (string, string, error) {
+	if detection.Framework == FrameworkNixpacks {
+		return b.buildWithNixpacks(ctx, dir, appName, env, deploymentID)
+	}
 	if detection.Framework == FrameworkDocker {
 		return b.buildWithDockerfile(ctx, dir, appName, env, deploymentID)
 	}
@@ -160,4 +171,52 @@ CMD ["echo", "no dockerfile generated for this framework"]`, port)
 	}
 
 	return df
+}
+
+func (b *Builder) nixpacksAvailable() bool {
+	_, err := exec.LookPath("nixpacks")
+	return err == nil
+}
+
+func (b *Builder) buildWithNixpacks(ctx context.Context, dir, appName, env, deploymentID string) (string, string, error) {
+	if !b.nixpacksAvailable() {
+		return "", "", fmt.Errorf("nixpacks not found in PATH: install with 'npm install -g nixpacks' or 'brew install nixpacks'")
+	}
+
+	if env == "" {
+		env = "production"
+	}
+	tag := fmt.Sprintf("tengiz-apps/%s:%s-%s", appName, env, deploymentID)
+
+	args := []string{"build", dir, "--name", tag}
+	if b.nixpacksCfg != nil {
+		if len(b.nixpacksCfg.Packages) > 0 {
+			args = append(args, "--pkgs", strings.Join(b.nixpacksCfg.Packages, ","))
+		}
+		if len(b.nixpacksCfg.AptPackages) > 0 {
+			args = append(args, "--apt-pkgs", strings.Join(b.nixpacksCfg.AptPackages, ","))
+		}
+		if b.nixpacksCfg.Cmd != "" {
+			args = append(args, "--cmd", b.nixpacksCfg.Cmd)
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, "nixpacks", args...)
+
+	var logBuf bytes.Buffer
+	logWriter := io.MultiWriter(os.Stdout, &logBuf)
+	cmd.Stdout = logWriter
+	cmd.Stderr = logWriter
+
+	if err := cmd.Run(); err != nil {
+		return "", logBuf.String(), fmt.Errorf("nixpacks build: %w", err)
+	}
+
+	latestTag := fmt.Sprintf("tengiz-apps/%s:%s-latest", appName, env)
+	tagCmd := exec.CommandContext(ctx, "docker", "tag", tag, latestTag)
+	if out, err := tagCmd.CombinedOutput(); err != nil {
+		return "", logBuf.String() + string(out), fmt.Errorf("docker tag latest: %w\n%s", err, string(out))
+	}
+
+	return tag, logBuf.String(), nil
 }
