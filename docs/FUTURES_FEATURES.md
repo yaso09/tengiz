@@ -334,7 +334,7 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Source:** Coolify
 - **Description:** Her Pull Request için ayrı deployment (`ApplicationPreview`). PR kapanınca `CleanupPreviewDeployment` ile otomatik temizlik. Her preview için unique FQDN ve izole Docker container.
 - **Why add to Tengiz:** Vercel'in en sevilen özelliklerinden. PR review sürecini hızlandırır. Bir Vercel alternatifi için önemli farklılaştırıcı. Container isimleri `tengiz-pr-<app>-<pr_id>` formatında olabilir.
-- **Status:** ✅ Implemented (2026-07-17)
+- **Status:** ✅ Implemented (2026-07-20)
 - **Detected:** 2026-07-14
 
 ## One-Click Service Templates (Veritabanları + Popüler Servisler)
