@@ -1578,3 +1578,133 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Each datastore collection can be configured with a memory type: `Heap` (fast, volatile — data lost on canister upgrade) or `Stable` (persistent across upgrades, slightly slower). This lets developers make performance/cost trade-offs per collection: cache/session data goes in Heap for speed, user profiles go in Stable for durability. Collections default to Heap for maximum performance. The memory type affects both read/write latency and upgrade behavior — Stable collections survive platform upgrades, Heap collections are re-initialized.
 - **Why add to Tengiz:** Tengiz's planned Built-in NoSQL Datastore (#1) needs a similar performance/storage trade-off. Some data is ephemeral (sessions, cache, rate limit counters) — stored in-memory for speed and automatically reset on restart. Other data is persistent (user profiles, settings, content) — written to SQLite or disk-backed storage for durability. A `db.<collection>.memory: ephemeral | persistent` setting in `.tengiz.yaml` lets developers choose: ephemeral collections use Go maps (fast, lost on container restart), persistent collections use embedded SQLite tables (durable, survives restarts). This is particularly important for scale-to-zero — ephemeral collections naturally reset on cold start (good for session data that should force re-login), persistent collections survive scale-to-zero cycles (good for app state). Implementation: two store backends (`MemoryStore` and `SQLiteStore`) implementing the same `DocStore` interface, selected per-collection at deploy time. Low-medium effort, fits Tengiz's embedded database philosophy. Complements the NoSQL Datastore with production-grade configurability.
 - **Detected:** 2026-07-17
+
+---
+
+## New Features from Coolify (2026-07-20 Analysis)
+
+## Multi-Tenancy with Team Management, Invitations & RBAC
+- **Source:** Coolify
+- **Description:** Full team-based multi-tenancy with three roles: `MEMBER` (view), `ADMIN` (update), `OWNER` (delete/configure). Team invitations with expiry links. Resources (apps, servers, databases) are scoped to teams. Auto-creation of notification settings per team on creation. `custom_server_limit` for subscription-based enforcement. Role comparison via `lt()`/`gt()` methods.
+- **Why add to Tengiz:** Tengiz is currently single-user — `tengiz deploy` assumes one operator. For team deployments, team scoping prevents users from seeing/modifying each other's apps. The invitation system enables "add developer to team" without sharing server credentials. RBAC with MEMBER/ADMIN/OWNER maps to `tengiz team add-user --role admin` and `tengiz ps --team`. Complements existing User Group Resource (RBAC) feature with team nesting.
+- **Detected:** 2026-07-20
+
+## Cloud Provider Server Provisioning (Hetzner, Vultr, DigitalOcean)
+- **Source:** Coolify
+- **Description:** One-click server creation from three cloud providers. Encrypted API tokens per provider. Lists regions, server types, images, SSH keys, firewalls, and networks from each provider. Provisions servers directly via provider APIs. Post-provision, installs Docker + prerequisites automatically.
+- **Why add to Tengiz:** Instead of "bring your own server," Tengiz could provision infrastructure with one command: `tengiz server create --provider hetzner --type cx22 --location nbg1`. This makes Tengiz a true Heroku alternative where infrastructure is fully managed. The architecture (API token → provider SDK → provision → install → register) is clean and extensible to AWS/GCP/Azure.
+- **Detected:** 2026-07-20
+
+## Sentinel Push-Based Monitoring Agent
+- **Source:** Coolify
+- **Description:** A dedicated monitoring agent container runs on each server. Collects container states, CPU, memory, disk usage, and network metrics. Push-based model — agent pushes data to platform on configurable intervals (default 60s). Configurable metrics history retention (days), refresh rate (seconds), and custom push URL. Token is auto-generated and encrypted. Disk usage thresholds trigger notifications.
+- **Why add to Tengiz:** A push-based agent means zero polling overhead. For Tengiz: `tengiz sentinel enable` deploys the agent, `tengiz stats` shows live data. The sentinel pattern (separate container, auto-deployed, self-configuring) fits Tengiz's Docker-first architecture. Gives concrete implementation for abstract Server Monitoring feature already on the roadmap.
+- **Detected:** 2026-07-20
+
+## Rich Application Settings Toggles (SPA Mode, Gzip, Stop Grace Period, etc.)
+- **Source:** Coolify
+- **Description:** Per-application toggles: `is_spa` (SPA mode — serve all routes to index.html), `is_gzip_enabled` (proxy-level gzip), `is_stripprefix_enabled` (strip path prefix), `is_debug_enabled`, `is_preserve_repository_enabled` (keep git repo between builds), `is_git_shallow_clone_enabled` (shallow clone), `is_consistent_container_name_enabled` (deterministic naming), `disable_build_cache` (force fresh build), `stop_grace_period` (Docker `--stop-grace-period` per app), `is_raw_compose_deployment_enabled` (deploy compose files as-is), `is_pr_deployments_public_enabled`, `docker_images_to_keep` (retention policy).
+- **Why add to Tengiz:** These are all `.tengiz.yaml` toggles that cost nearly nothing to implement but add immense power-user value. `is_spa` is critical for React/Vue/Svelte SPAs with client-side routing. `stop_grace_period` prevents "container killed during shutdown" errors. `is_git_shallow_clone_enabled` dramatically speeds up deploys on large repos.
+- **Detected:** 2026-07-20
+
+## Scoped Shared Environment Variables ({{team.*}}, {{project.*}}, {{environment.*}}, {{server.*}})
+- **Source:** Coolify
+- **Description:** Environment variables can reference shared variables at four scope levels: `{{team.VAR}}`, `{{project.VAR}}`, `{{environment.VAR}}`, `{{server.VAR}}`. Shared variables are stored encrypted, resolved at deploy time. Predefined variables (`COOLIFY_SERVER_UUID`, `COOLIFY_SERVER_IP`, `COOLIFY_SERVER_NAME`) auto-injected per server. Resolution cascades: app → environment → project → team → server.
+- **Why add to Tengiz:** Define `DATABASE_URL` once at environment scope, all apps inherit it. `tengiz config set --scope environment DATABASE_URL=postgres://...` with `{{env.DATABASE_URL}}` resolution. Eliminates env var duplication across apps. The `{{server.*}}` scope auto-injects server-specific info — critical for multi-server setups.
+- **Detected:** 2026-07-20
+
+## Environment Variable Advanced Flags (is_literal, is_buildtime, is_runtime, is_preview, is_shown_once, is_required)
+- **Source:** Coolify
+- **Description:** Each env var has granular flags: `is_buildtime` (Docker build arg only), `is_runtime` (running container only), `is_preview` (PR preview deployments only), `is_literal` (single-quoted to prevent shell interpretation), `is_multiline` (preserves newlines), `is_shown_once` (redacted from logs after first display — one-time secrets), `is_required` (validation fails if empty), `is_shared` (auto-detected `{{}}` syntax), `version` tracking.
+- **Why add to Tengiz:** The `is_buildtime` vs `is_runtime` distinction enables build-only vars (`NEXT_PUBLIC_*`) vs runtime-only vars (database URLs). `is_shown_once` is a security feature — API keys visible only at creation, never in logs. `is_required` enables `tengiz deploy --validate` to catch missing vars early. Together, these make `.tengiz.yaml`'s `env:` section far more powerful.
+- **Detected:** 2026-07-20
+
+## File-Based Storage Mounts (Individual File Mounts with Content Editing)
+- **Source:** Coolify
+- **Description:** In addition to Docker volumes, support mounting individual files into containers. File contents encrypted at rest, editable via CLI, auto-synced. Supports directories, binary files (detected by null bytes), chown/chmod permissions, and preview suffixes. 5MB content size limit. Files can be `is_host_file` (reference existing host file), `is_based_on_git` (from git repo), or `is_directory`.
+- **Why add to Tengiz:** Existing Persistent Storage covers volumes, not individual file mounts. File mounts are essential for configuration files (nginx.conf, .env, custom php.ini) that need injection into containers without rebuilding the image. `tengiz storage mount-file <app> ./config.php:/var/www/config.php` with encrypted content tracking.
+- **Detected:** 2026-07-20
+
+## Deployment Queue with Per-Server Concurrency Control
+- **Source:** Coolify
+- **Description:** Each server has `concurrent_builds` (max simultaneous builds) and `deployment_queue_limit` (max queued deployments). Full deployment tracking with: status, commit SHA/message, deployment UUID, server, deployment URL, `force_rebuild`, `restart_only`, `rollback`, `is_webhook`, `is_api`, `build_server_id`, and full configuration snapshots/diffs for rollback. Deployments are cancellable via API.
+- **Why add to Tengiz:** Existing Build Queue with Dedup is simpler. Coolify's model is more sophisticated — it tracks deployment provenance, stores configuration snapshots for diff/rollback, and supports per-server concurrency limits. For Tengiz: `tengiz deploy --queue` with `tengiz deploy:cancel`, `tengiz ps --queue` shows pending/running/failed deployments.
+- **Detected:** 2026-07-20
+
+## Resource Move Between Environments/Servers
+- **Source:** Coolify
+- **Description:** Applications, databases, and services can be moved between destinations (servers/environments) via API. Migrates container, configuration, volumes, env vars to the new destination while preserving state.
+- **Why add to Tengiz:** Enables "promote staging to production" workflows: `tengiz move myapp --from staging --to production`. Also enables disaster recovery (move app to another server if the current one fails). Complements app cloning but is a different operation (moves, doesn't copy).
+- **Detected:** 2026-07-20
+
+## Preview URL Template Customization ({{domain}}, {{pr_id}}, {{random}})
+- **Source:** Coolify
+- **Description:** Preview deployment URLs are generated from customizable templates stored per-app. Variables: `{{domain}}` (base domain), `{{pr_id}}` (PR number), `{{random}}` (random public ID). Supports multi-service compose preview domains — each service gets its own preview domain.
+- **Why add to Tengiz:** Enables patterns like `pr-{{pr_id}}-{{random}}.app.example.com` or `team-{{pr_id}}.preview.example.com`. Teams need consistent, recognizable preview URLs. The random component prevents URL guessing while PR ID enables easy identification.
+- **Detected:** 2026-07-20
+
+## DNS Validation with Custom DNS Servers
+- **Source:** Coolify
+- **Description:** Before issuing SSL certificates or enabling domains, validate DNS resolution. Configurable custom DNS servers (for air-gapped/internal deployments where public DNS isn't available). Prevents SSL issuance failures and catches domain misconfiguration early.
+- **Why add to Tengiz:** `tengiz domain add --validate myapp.com` would check DNS before attempting SSL. Custom DNS servers for internal deployments behind corporate firewalls. Saves users from Let's Encrypt rate-limit issues caused by misconfigured domains.
+- **Detected:** 2026-07-20
+
+## Cloud-Init Script Automation for Server Setup
+- **Source:** Coolify
+- **Description:** Reusable cloud-init scripts that are associated with cloud-provisioned servers. Scripts are encrypted at rest. When a server is provisioned via cloud provider, the cloud-init script is passed for first-boot automation (install packages, configure firewall, set up users).
+- **Why add to Tengiz:** `tengiz server init-script create --name "docker-node-exporter" --script "..."` creates reusable boot scripts. When provisioning via cloud provider, the script runs automatically on first boot — eliminating the gap between server provisioning and Tengiz setup.
+- **Detected:** 2026-07-20
+
+## Custom Docker Labels Per App
+- **Source:** Coolify
+- **Description:** Applications can have custom Docker labels added to containers for metadata tagging (service discovery, monitoring, billing showback). Labels are added at container creation time.
+- **Why add to Tengiz:** Custom Docker labels enable integration with external systems — Prometheus auto-discovery, cost allocation tags, monitoring tool identification. `.tengiz.yaml`'da `docker.labels: { "monitoring": "prometheus", "team": "backend" }` olarak eklenir.
+- **Detected:** 2026-07-20
+
+## Server Patch/Update Health Monitoring
+- **Source:** Coolify
+- **Description:** Periodic check on each server for available OS package updates. Reports total updates count. Sends notifications via team notification channels when updates are available. Tracks patch status per server. Configurable check frequency.
+- **Why add to Tengiz:** Keeps the host OS secure by notifying operators about available patches. `tengiz server check-updates` shows pending updates, `tengiz server patch --all` applies them. As a platform operator, knowing which servers need security patches is critical for compliance.
+- **Detected:** 2026-07-20
+
+## www ↔ non-www Redirect Configuration
+- **Source:** Coolify
+- **Description:** Per-application redirect types controlling www/non-www canonicalization: `www` (redirect non-www → www), `non-www` (redirect www → non-www), `both` (apply both redirects). Server-level toggle (default enabled).
+- **Why add to Tengiz:** Existing Force HTTPS covers HTTP→HTTPS but not www/non-www redirect. SEO best practice requires canonical domain selection. `.tengiz.yaml`'da `redirect: non-www` ensures consistency. Low effort proxy middleware.
+- **Detected:** 2026-07-20
+
+## Docker Helper Image Management
+- **Source:** Coolify
+- **Description:** Custom helper Docker image for build operations. Version-managed with auto-update tracking. Periodically verifies the helper image is current on each server and pulls updates. Cleans up stale build helper containers, skipping those belonging to active deployments.
+- **Why add to Tengiz:** A helper image provides consistent build tooling across servers (nixpacks, node, python, go) and handles multi-arch builds. For Tengiz: `tengiz helper update` pulls the latest build image. The cleanup job prevents disk bloat from orphaned build containers.
+- **Detected:** 2026-07-20
+
+## API-Level Sensitive Data Masking
+- **Source:** Coolify
+- **Description:** API responses automatically mask sensitive fields (passwords, tokens, keys, env var values) unless the caller has elevated permissions. Middleware-level enforcement — applies globally to all API responses. Environment variable values, private keys, cloud tokens hidden by default.
+- **Why add to Tengiz:** Security best practice — API responses should never leak secrets by default. For Tengiz's REST API: `GET /api/apps/myapp` returns env var keys but not values unless `--sensitive` flag is passed. Complements encryption at rest with runtime access control.
+- **Detected:** 2026-07-20
+
+## Multi-Provider Manual Webhook Secrets (Per-Git-Provider Secrets)
+- **Source:** Coolify
+- **Description:** Each application can have separate webhook secrets for GitHub, GitLab, Bitbucket, and Gitea. Secrets are auto-generated on creation (40-char random strings), encrypted at rest. Allows securing webhook endpoints per provider without sharing a single secret.
+- **Why add to Tengiz:** Existing HMAC-Signed Webhook Payloads covers webhook security generally. Per-provider secrets enable running multiple git provider integrations simultaneously without cross-provider security holes. `tengiz webhook show-secret --provider github` to retrieve the secret.
+- **Detected:** 2026-07-20
+
+## User-Facing Changelog/Activity Feed System
+- **Source:** Coolify
+- **Description:** Changelog system fetches release notes from CDN and tracks per-user read status. Full activity logging for model changes (who changed what, when, on which resource). Enables a "What's new" notification for users after platform updates.
+- **Why add to Tengiz:** Existing Event Logging covers audit trail. The changelog aspect keeps users informed about platform updates. For Tengiz: `tengiz changelog` shows recent platform changes, and all state mutations are written to a JSON Lines audit file. The read-tracking prevents showing the same changelog twice.
+- **Detected:** 2026-07-20
+
+## Application-Level Container Restart Tracking (Count, Max, Type)
+- **Source:** Coolify
+- **Description:** Per-application restart tracking: restart count, max allowed restarts (configurable), last restart timestamp, restart type (why it was restarted). `max_restart_count` prevents infinite crash loops. Status changes trigger `last_online_at` updates.
+- **Why add to Tengiz:** `max_restart_count` prevents infinite crash loops. `last_restart_type` provides diagnostics (was it a health check restart, manual restart, or crash?). For Tengiz: `.tengiz.yaml`'da `restart.max_count: 5` with `tengiz ps --restarts` showing restart history.
+- **Detected:** 2026-07-20
+
+## Network Aliases for Container Connectivity
+- **Source:** Coolify
+- **Description:** Applications can have custom Docker network aliases for inter-container communication. Enables apps to reach each other by alias names on shared Docker networks. Essential for multi-service apps where the web app needs to find the API by hostname.
+- **Why add to Tengiz:** For multi-service Tengiz deployments (web + API + worker), network aliases create predictable hostnames without Docker Compose. `.tengiz.yaml`'da `network_aliases: ["api", "backend"]` enables `curl http://api:3000` from other containers on the same network.
+- **Detected:** 2026-07-20
