@@ -175,6 +175,12 @@ func TestBuildWithDeploymentIDCompiles(t *testing.T) {
 	}
 }
 
+func TestFrameworkNixpacksConstant(t *testing.T) {
+	if FrameworkNixpacks != "nixpacks" {
+		t.Errorf("expected nixpacks, got %q", FrameworkNixpacks)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }
