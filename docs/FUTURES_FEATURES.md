@@ -13,7 +13,7 @@ Highest priority: features that are **table-stakes for any PaaS** combined with 
 
 | # | Feature | I | E | A | Rationale |
 |---|---------|---|---|---|-----------|
-| 1 | **Nixpacks Build Sistemi** ⬜ | Çok Yüksek | Orta | Mükemmel | Expands framework support 6→hundreds (Ruby, Rust, PHP, Java, Elixir). Single `builder` package integration. Single highest-impact feature for platform growth. |
+| 1 | **Nixpacks Build Sistemi** ✅ | Çok Yüksek | Orta | Mükemmel | Expands framework support 6→hundreds (Ruby, Rust, PHP, Java, Elixir). Single `builder` package integration. Single highest-impact feature for platform growth. |
 | 2 | **Secrets Management** ⬜ | Çok Yüksek | Orta-Yüksek | Mükemmel | Production security fundamental. No platform without encrypted secrets. Vault/1Password/Doppler integration. |
 | 3 | **Notification System** ⬜ | Yüksek | Orta | Mükemmel | Production ops require alerts for deploy failures, SSL expiry, disk filling. Discord/Slack/Telegram/Email. |
 | 4 | **Docker Housekeeping** ⬜ | Yüksek | Düşük | Mükemmel | Disk space is #1 production issue on single-server. Label-based `docker system prune`. `tengiz cleanup`. |
@@ -279,6 +279,7 @@ Highest priority: features that are **table-stakes for any PaaS** combined with 
 | — | **Resource Limits (CPU/Memory)** | Yüksek | Düşük | Mükemmel | ✅ Implemented (2026-07-15) |
 | — | **Persistent Storage (Volume Management)** | Yüksek | Düşük-Orta | Mükemmel | ✅ Implemented (2026-07-15) |
 | — | **Webhook ile Otomatik Deploy** | Çok Yüksek | Düşük | Mükemmel | ✅ Implemented (2026-07-17) |
+| — | **Nixpacks Build Sistemi** | Çok Yüksek | Orta | Mükemmel | ✅ Implemented (2026-07-21) |
 
 ---
 
@@ -412,6 +413,7 @@ Highest priority: features that are **table-stakes for any PaaS** combined with 
 - **Source:** Dokploy
 - **Description:** Nixpacks, Heroku buildpacks, Paketo, Railpack gibi alternatif build sistemleri. Dockerfile olmadan yüzlerce framework (Ruby, Rust, PHP, Elixir, vs.) otomatik algılanır ve image oluşturulur.
 - **Why add to Tengiz:** Tengiz şu an yalnızca 6 framework destekliyor. Nixpacks ile bu sayı yüzlerce olur. Tengiz'in `builder` paketine yeni bir `BuildStrategy` olarak eklenebilir, `.tengiz.yaml`'da `--builder nixpacks` ile seçilebilir.
+- **Status:** ✅ Implemented (2026-07-21)
 - **Detected:** 2026-07-14
 
 ## Rollback Sistemi (Versiyonlu Deploy)
