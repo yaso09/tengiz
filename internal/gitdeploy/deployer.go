@@ -99,6 +99,19 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		if existingApp.Config.Port != 0 {
 			cfg.Port = existingApp.Config.Port
 		}
+		if existingApp.Config.Build.Builder != "" {
+			cfg.Build.Builder = existingApp.Config.Build.Builder
+		}
+		if existingApp.Config.Build.NixpacksConfig != nil {
+			cfg.Build.NixpacksConfig = existingApp.Config.Build.NixpacksConfig
+		}
+	}
+
+	if existingApp.Config.Build.Builder == "nixpacks" {
+		detection.Framework = builder.FrameworkNixpacks
+	}
+	if existingApp.Config.Build.NixpacksConfig != nil {
+		p.b.SetNixpacksConfig(existingApp.Config.Build.NixpacksConfig)
 	}
 
 	deploymentID := fmt.Sprintf("%d", time.Now().Unix())
