@@ -142,6 +142,12 @@ func TestGenerateDockerfileWithoutHealthCheck(t *testing.T) {
 	}
 }
 
+func TestFrameworkNixpacksConstant(t *testing.T) {
+	if FrameworkNixpacks != "nixpacks" {
+		t.Errorf("expected nixpacks, got %q", FrameworkNixpacks)
+	}
+}
+
 func TestBuildCapturesOutput(t *testing.T) {
 	b := New(t.TempDir())
 	dir := t.TempDir()
