@@ -13,7 +13,7 @@
 | Package | Responsibility |
 |---------|---------------|
 | `runtime.Manager` | Interface for container lifecycle. `NewDocker()` = exec-based impl, `NewStub()` = test mock. Also: `CreateFromImage`, `RemoveImage`, `KeepLastNImages` for rollback + image cleanup. `ContainerName(name, env)` helper. |
-| `builder` | Framework detection (`detect.go`) + Dockerfile generation (`builder.go`). Supports: Docker, Next.js, Vite, Go, Node, Python, static. Env-aware image tags (`{env}-{deploymentID}`). |
+| `builder` | Framework detection (`detect.go`) + Dockerfile generation (`builder.go`). Supports: Docker, Next.js, Vite, Go, Node, Python, static, Nixpacks. Env-aware image tags (`{env}-{deploymentID}`). Nixpacks backend via `build.builder: nixpacks` config. `buildWithNixpacks()` dispatches to `nixpacks build` CLI. |
 | `proxy` | `httputil.ReverseProxy` with host-based routing (`appname.tengiz.local` → port 9000+) and custom domain support. Cold-starts stopped containers on demand. Env-aware via `NewWithEnv`. |
 | `idle` | Per-app timer. `Reset(name)` extends deadline. On expiry: calls `runtime.Stop()`. Default 5m timeout. Env-aware via `NewWithEnv`. |
 | `config` | Loads `.tengiz.yaml` via viper. `LoadWithEnv(path, env)` and `LoadForEnvironment(path, env)` merge `.tengiz.{env}.yaml` overrides (latter adds env name validation + comprehensive scalar merge). `Store` persists apps + port allocations in `~/.tengiz/` (env-scoped). Adds `GetEnv`/`SetEnv`/`UnsetEnv`/`ListEnv` for env var management. |
@@ -65,6 +65,7 @@ tengiz rollback <app>           → rollback to previous deployment
 - No config file = uses dir name as app name + defaults
 - Env vars stored in `AppEntry.Config.Env` → auto-persisted via JSON in `~/.tengiz/apps.json`
 - `.tengiz.yaml` `env:` section uses `KEY: value` format (map, not list)
+- `.tengiz.yaml` `build.builder` selects build backend: `"docker"` (default) or `"nixpacks"`. `build.nixpacks` block has `packages`, `apt_packages`, `cmd`, `pkg_manager`, `app_directory` fields.
 - Proxy's `extractApp()` checks custom domains first (`p.domains` map), then strips `.tengiz.local`/`.localhost` suffixes and checks the full prefix as a route key, then falls back to first subdomain part (e.g. `pr-42.myapp.tengiz.local` → `pr-42.myapp` as route key, `myapp.tengiz.local` → `myapp`)
 - Tests for `proxy` are slow (~2s each) due to TCP dial timeout on unreachable ports
 - `idle` tests are time-sensitive (use `time.Sleep` with 50ms granularity)
