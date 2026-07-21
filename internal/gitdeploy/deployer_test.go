@@ -22,6 +22,10 @@ func TestExtractAppName(t *testing.T) {
 	}
 }
 
+func TestPipelineDeployWithNixpacksDetectionOverride(t *testing.T) {
+	t.Skip("integration test requires Docker + nixpacks")
+}
+
 func TestPipelineStartsDeploy(t *testing.T) {
 	p := NewPipeline("/tmp/test-tengiz", nil, nil)
 	err := p.Deploy(context.Background(), "https://github.com/user/nonexistent.git", "main", "github")
