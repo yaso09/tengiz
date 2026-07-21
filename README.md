@@ -11,7 +11,7 @@
 
 ## Features
 
-- **Framework auto-detection** — Next.js, Vite, Go, Node.js, Python, static sites. No config needed.
+- **Framework auto-detection** — Next.js, Vite, Go, Node.js, Python, static sites, and 100s more via Nixpacks. No config needed.
 - **Scale-to-zero** — Containers stop after 5 minutes of inactivity, start on first request (cold start).
 - **Zero-downtime deployment** — Blue/green container switching: new container starts before the old one stops, traffic switches atomically at the proxy layer.
 - **On-demand reverse proxy** — Route traffic by hostname (`myapp.tengiz.local:8080`). Admin API (`127.0.0.1:9099`) for dynamic route management.
@@ -332,6 +332,13 @@ Create a `.tengiz.yaml` in your project root:
 ```yaml
 name: my-app
 port: 3000            # container internal port (auto-detected if omitted)
+# build:
+#   builder: nixpacks  # use Nixpacks build backend (default: docker)
+#   nixpacks:
+#     packages:
+#       - ffmpeg       # additional Nix packages
+#     apt_packages:
+#       - libpq-dev    # additional apt packages
 serverless:
   enabled: true
   idle_timeout: 5m    # scale-to-zero timeout
@@ -372,8 +379,9 @@ Without a config file, Tengiz uses defaults: app name = directory name, port aut
 | **Node.js** | `package.json` | 8080 |
 | **Python** | `requirements.txt` / `Pipfile` / `pyproject.toml` | 8000 |
 | **Static HTML** | `index.html` | 80 (nginx) |
+| **Nixpacks** (any framework) | `build.builder: nixpacks` in `.tengiz.yaml` | auto-detected |
 
-When no Dockerfile exists, Tengiz auto-generates one with a multi-stage build optimized for each framework.
+When no Dockerfile exists, Tengiz auto-generates one with a multi-stage build optimized for each framework. For frameworks not listed above, set `build.builder: nixpacks` in your `.tengiz.yaml` to use Nixpacks — supports 100s of frameworks (Rust, Ruby, PHP, Elixir, Deno, Bun, etc.).
 
 ## Git Auto-Deploy
 
