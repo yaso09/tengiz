@@ -10,6 +10,12 @@ import (
 	"github.com/yaso09/tengiz/internal/types"
 )
 
+func TestFrameworkNixpacksConstant(t *testing.T) {
+	if FrameworkNixpacks != "nixpacks" {
+		t.Errorf("expected nixpacks, got %q", FrameworkNixpacks)
+	}
+}
+
 func TestDetectNextJS(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "next.config.js"), []byte(""), 0644)
