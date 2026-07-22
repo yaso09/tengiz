@@ -101,6 +101,13 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		}
 	}
 
+	if lookupErr == nil && existingApp.Config.Build.Builder == "nixpacks" {
+		detection.Framework = builder.FrameworkNixpacks
+	}
+	if lookupErr == nil && existingApp.Config.Build.NixpacksConfig != nil {
+		p.b.SetNixpacksConfig(existingApp.Config.Build.NixpacksConfig)
+	}
+
 	deploymentID := fmt.Sprintf("%d", time.Now().Unix())
 	imageTag, buildLog, err := p.b.Build(ctx, cloneDir, appName, p.env, detection, deploymentID)
 	if err != nil {
