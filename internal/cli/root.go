@@ -91,6 +91,10 @@ func getEnv(cmd *cobra.Command) string {
 	return env
 }
 
+func getAppKey(cmd *cobra.Command, appName string) string {
+	return config.AppQualifiedName(appName, getEnv(cmd))
+}
+
 var initCmd = &cobra.Command{
 	Use:   "init [name]",
 	Short: "Create a .tengiz.yaml configuration file",
@@ -182,7 +186,9 @@ var deployCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Printf("[tengiz] deploying %s from %s\n", cfg.Name, projectRoot)
+		appKey := config.AppQualifiedName(cfg.Name, envFlag)
+
+		fmt.Printf("[tengiz] deploying %s (%s) from %s\n", cfg.Name, envFlag, projectRoot)
 
 		detection, err := builder.Detect(projectRoot)
 		if err != nil {
@@ -238,6 +244,7 @@ var deployCmd = &cobra.Command{
 				Name:     cfg.Name,
 				ImageTag: imageTag,
 				Port:     port,
+				Environment: envFlag,
 				Domains:  cfg.Domains,
 				Config:   *cfg,
 			})
@@ -254,12 +261,12 @@ var deployCmd = &cobra.Command{
 				log.Printf("[tengiz] warning: image cleanup: %v", err)
 			}
 
-			if err := proxy.RegisterRouteWithProxy(cfg.Name, port); err != nil {
+			if err := proxy.RegisterRouteWithProxy(appKey, port); err != nil {
 				log.Printf("[tengiz] proxy not available (route will be registered on proxy start): %v", err)
 			}
 
 			fmt.Printf("[tengiz] deployed: %s at http://%s.tengiz.local:%d\n",
-				cfg.Name, cfg.Name, port)
+				cfg.Name, appKey, port)
 			return nil
 		}
 
@@ -285,7 +292,7 @@ var deployCmd = &cobra.Command{
 		}
 
 		// Register new route with proxy (if running)
-		if err := proxy.RegisterRouteWithProxy(cfg.Name, newPort); err != nil {
+		if err := proxy.RegisterRouteWithProxy(appKey, newPort); err != nil {
 			log.Printf("[tengiz] proxy not available (route will be registered on proxy start): %v", err)
 		}
 
@@ -327,6 +334,7 @@ var deployCmd = &cobra.Command{
 		// Update store with new app entry
 		store.SaveApp(types.AppEntry{
 			Name:             cfg.Name,
+			Environment:      envFlag,
 			ImageTag:         imageTag,
 			Port:             newPort,
 			Domains:          cfg.Domains,
@@ -339,7 +347,7 @@ var deployCmd = &cobra.Command{
 		}
 
 		fmt.Printf("[tengiz] deployed (zero-downtime): %s at http://%s.tengiz.local:%d\n",
-			cfg.Name, cfg.Name, newPort)
+			cfg.Name, appKey, newPort)
 		return nil
 	},
 }
