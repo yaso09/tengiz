@@ -139,6 +139,17 @@ func TestSubCommandsHaveEnvFlag(t *testing.T) {
 	}
 }
 
+func TestDeployWithEnvUsesQualifiedName(t *testing.T) {
+	qualified := config.AppQualifiedName("myapp", "staging")
+	if qualified != "myapp-staging" {
+		t.Errorf("expected myapp-staging, got %s", qualified)
+	}
+	prod := config.AppQualifiedName("myapp", "production")
+	if prod != "myapp" {
+		t.Errorf("expected myapp, got %s", prod)
+	}
+}
+
 func TestMultiEnvironmentStoreIsolation(t *testing.T) {
 	dir := t.TempDir()
 
