@@ -143,7 +143,7 @@ Useful for database migrations, console access, and data import tasks.
 | Flag | Description |
 |------|-------------|
 | `-i, --interactive` | Enable interactive TTY mode |
-| `-e, --env KEY=VALUE` | Set additional env vars (can be repeated) |
+| `-e, --env-var KEY=VALUE` | Set additional env vars (can be repeated) |
 
 | Argument | Description |
 |----------|-------------|
