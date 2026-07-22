@@ -11,6 +11,13 @@ import (
 	"github.com/yaso09/tengiz/internal/types"
 )
 
+func TestInitHasEnvFlag(t *testing.T) {
+	flag := initCmd.Flags().Lookup("env")
+	if flag == nil {
+		t.Error("initCmd missing --env flag")
+	}
+}
+
 func TestMultiEnvironmentConfigMerge(t *testing.T) {
 	dir := t.TempDir()
 
