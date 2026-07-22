@@ -11,6 +11,13 @@ import (
 	"github.com/yaso09/tengiz/internal/types"
 )
 
+func AppQualifiedName(name, env string) string {
+	if env == "" || env == "production" {
+		return name
+	}
+	return name + "-" + env
+}
+
 func LoadWithEnv(path, env string) (*types.AppConfig, error) {
 	if env == "" {
 		env = "production"
