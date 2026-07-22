@@ -42,6 +42,16 @@ type ResourceConfig struct {
 type BuildConfig struct {
 	Command string `mapstructure:"command"`
 	Output  string `mapstructure:"output"`
+	Builder string `mapstructure:"builder"`
+	NixpacksConfig *NixpacksConfig `mapstructure:"nixpacks,omitempty" json:"nixpacks,omitempty"`
+}
+
+type NixpacksConfig struct {
+	Packages     []string `mapstructure:"packages,omitempty" json:"packages,omitempty"`
+	AptPackages  []string `mapstructure:"apt_packages,omitempty" json:"apt_packages,omitempty"`
+	Cmd          string   `mapstructure:"cmd,omitempty" json:"cmd,omitempty"`
+	PkgManager   string   `mapstructure:"pkg_manager,omitempty" json:"pkg_manager,omitempty"`
+	AppDirectory string   `mapstructure:"app_directory,omitempty" json:"app_directory,omitempty"`
 }
 
 type ServerlessConfig struct {
