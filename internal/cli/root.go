@@ -64,9 +64,27 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
-	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
+	runCmd.Flags().StringArrayP("env-var", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
+	stopCmd.Flags().String("env", "production", "deployment environment")
+	startCmd.Flags().String("env", "production", "deployment environment")
+	rmCmd.Flags().String("env", "production", "deployment environment")
+	logsCmd.Flags().String("env", "production", "deployment environment")
+	healthCmd.Flags().String("env", "production", "deployment environment")
+	rollbackCmd.Flags().String("env", "production", "deployment environment")
+	buildLogsCmd.Flags().String("env", "production", "deployment environment")
+	runCmd.Flags().String("env", "production", "deployment environment")
+	configSetCmd.Flags().String("env", "production", "deployment environment")
+	configGetCmd.Flags().String("env", "production", "deployment environment")
+	configUnsetCmd.Flags().String("env", "production", "deployment environment")
+	configShowCmd.Flags().String("env", "production", "deployment environment")
+	domainAddCmd.Flags().String("env", "production", "deployment environment")
+	domainRemoveCmd.Flags().String("env", "production", "deployment environment")
+	domainListCmd.Flags().String("env", "production", "deployment environment")
+	volumeAddCmd.Flags().String("env", "production", "deployment environment")
+	volumeRemoveCmd.Flags().String("env", "production", "deployment environment")
+	volumeListCmd.Flags().String("env", "production", "deployment environment")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
 	logsCmd.Flags().Int("tail", 0, "show only last N lines of logs (0 = all)")
 	logsCmd.Flags().String("since", "", "show logs since timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
@@ -514,7 +532,7 @@ var rmCmd = &cobra.Command{
 			return err
 		}
 		store.RemoveApp(appName)
-		fmt.Printf("[tengiz] removed: %s\n", appName)
+		fmt.Printf("[tengiz] removed: %s\n", getAppKey(cmd, appName))
 		return nil
 	},
 }
@@ -986,7 +1004,7 @@ Examples:
 		fmt.Printf("[tengiz] running: %s (%s)\n", strings.Join(command, " "), imageTag)
 
 		extraEnv := make(map[string]string)
-		envFlags, _ := cmd.Flags().GetStringArray("env")
+		envFlags, _ := cmd.Flags().GetStringArray("env-var")
 		for _, e := range envFlags {
 			parts := strings.SplitN(e, "=", 2)
 			if len(parts) != 2 {

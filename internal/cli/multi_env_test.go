@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/yaso09/tengiz/internal/config"
 	"github.com/yaso09/tengiz/internal/runtime"
 	"github.com/yaso09/tengiz/internal/types"
@@ -90,6 +91,37 @@ func TestEnvQualifiedName(t *testing.T) {
 		if got != tc.expected {
 			t.Errorf("AppQualifiedName(%q, %q) = %q, want %q", tc.name, tc.env, got, tc.expected)
 		}
+	}
+}
+
+func TestNamedCommandsHaveEnvFlag(t *testing.T) {
+	commands := []*cobra.Command{
+		stopCmd, startCmd, rmCmd, logsCmd,
+		rollbackCmd, buildLogsCmd, runCmd, healthCmd,
+	}
+	for _, cmd := range commands {
+		t.Run(cmd.Use, func(t *testing.T) {
+			flag := cmd.Flags().Lookup("env")
+			if flag == nil {
+				t.Errorf("%s missing --env flag", cmd.Use)
+			}
+		})
+	}
+}
+
+func TestSubCommandsHaveEnvFlag(t *testing.T) {
+	subCommands := []*cobra.Command{
+		configSetCmd, configGetCmd, configUnsetCmd, configShowCmd,
+		domainAddCmd, domainRemoveCmd, domainListCmd,
+		volumeAddCmd, volumeRemoveCmd, volumeListCmd,
+	}
+	for _, cmd := range subCommands {
+		t.Run(cmd.Use, func(t *testing.T) {
+			flag := cmd.Flags().Lookup("env")
+			if flag == nil {
+				t.Errorf("%s missing --env flag", cmd.Use)
+			}
+		})
 	}
 }
 
