@@ -86,6 +86,7 @@ func init() {
 	volumeAddCmd.Flags().String("env", "production", "deployment environment")
 	volumeRemoveCmd.Flags().String("env", "production", "deployment environment")
 	volumeListCmd.Flags().String("env", "production", "deployment environment")
+	proxyCmd.Flags().String("env", "production", "environment for proxy routing")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
 	logsCmd.Flags().Int("tail", 0, "show only last N lines of logs (0 = all)")
 	logsCmd.Flags().String("since", "", "show logs since timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
@@ -1239,7 +1240,6 @@ func getwd() string {
 func Execute() {
 	proxyCmd.Flags().StringP("app", "a", "", "route all requests to this app (bypasses hostname routing)")
 	proxyCmd.Flags().IntP("port", "p", 8080, "proxy listen port")
-	proxyCmd.Flags().String("env", "production", "environment for proxy routing")
 	buildLogsCmd.Flags().Int("tail", 0, "show only last N lines of the latest build log")
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

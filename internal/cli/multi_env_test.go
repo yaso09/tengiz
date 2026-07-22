@@ -11,6 +11,13 @@ import (
 	"github.com/yaso09/tengiz/internal/types"
 )
 
+func TestProxyHasEnvFlag(t *testing.T) {
+	flag := proxyCmd.Flags().Lookup("env")
+	if flag == nil {
+		t.Error("proxyCmd missing --env flag")
+	}
+}
+
 func TestInitHasEnvFlag(t *testing.T) {
 	flag := initCmd.Flags().Lookup("env")
 	if flag == nil {
