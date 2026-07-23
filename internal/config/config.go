@@ -107,6 +107,12 @@ func LoadForEnvironment(path, env string) (*types.AppConfig, error) {
 	if envCfg.Build.Output != "" {
 		cfg.Build.Output = envCfg.Build.Output
 	}
+	if envCfg.Build.Builder != "" {
+		cfg.Build.Builder = envCfg.Build.Builder
+	}
+	if envCfg.Build.NixpacksConfig != nil {
+		cfg.Build.NixpacksConfig = envCfg.Build.NixpacksConfig
+	}
 	if envCfg.Name != "" {
 		cfg.Name = envCfg.Name
 	}
