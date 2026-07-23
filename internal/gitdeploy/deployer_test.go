@@ -29,3 +29,7 @@ func TestPipelineStartsDeploy(t *testing.T) {
 		t.Error("expected error for nonexistent repo")
 	}
 }
+
+func TestPipelineDeployWithNixpacksDetectionOverride(t *testing.T) {
+	t.Skip("integration test requires Docker + nixpacks")
+}
