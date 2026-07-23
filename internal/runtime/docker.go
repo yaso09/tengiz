@@ -324,16 +324,32 @@ func (r *dockerRuntime) WaitForHealth(ctx context.Context, name string, hc *type
 	client := &http.Client{Timeout: time.Duration(timeout) * time.Second}
 	var lastErr error
 	for i := 0; i <= retries; i++ {
-		resp, err := client.Get(url)
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-				return nil
-			}
-			lastErr = fmt.Errorf("health check returned HTTP %d", resp.StatusCode)
-		} else {
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
 			lastErr = err
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(200 * time.Millisecond):
+			}
+			continue
 		}
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(200 * time.Millisecond):
+			}
+			continue
+		}
+		if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+			resp.Body.Close()
+			return nil
+		}
+		lastErr = fmt.Errorf("health check returned HTTP %d", resp.StatusCode)
+		resp.Body.Close()
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
