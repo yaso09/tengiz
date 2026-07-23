@@ -1770,3 +1770,51 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Kamal 2 creates a dedicated `kamal` Docker bridge network for all containers (proxy, app, accessories). Containers communicate via hostname (container name = DNS name) instead of IP addresses. The network is created during `kamal setup` and reused across all deployments. Custom network options (subnet, gateway, IPAM, driver) are configurable. This replaces ad-hoc `--link` flags and Docker's default bridge network.
 - **Why add to Tengiz:** Without a dedicated network, Tengiz containers: (1) use Docker's default bridge which has no DNS-based service discovery, (2) can't communicate by hostname — users must use `--link` or find IPs manually, (3) mix with non-Tengiz containers and system containers on the default bridge. A dedicated `tengiz` network enables: app-to-accessory communication by hostname (`redis:6379`, `postgres:5432`), isolation from other containers on the host, consistent network config across deployments, and automatic cleanup when Tengiz removes containers. Implementation: `docker network create tengiz --driver bridge` during `tengiz setup` (if not exists). All `docker run` commands add `--network tengiz`. `.tengiz.yaml`'da `network: tengiz` (customizable name). Low effort (Docker network flag + one-time creation), high architectural value. Complements Custom Docker Network (#36) which allows arbitrary network names — this provides the default network convention.
 - **Detected:** 2026-07-23
+
+## AWS EC2 Instance Provisioning from Platform
+- **Source:** Komodo
+- **Description:** Komodo provisions AWS EC2 instances directly from the platform UI/API (1185 lines in `bin/core/src/cloud/aws/ec2.rs`). Configuration includes: AMI selection, instance type, EBS volume size/type, subnet, security groups, key pair, user data script, and tags. After provisioning, the instance is automatically onboarded as a server with its Periphery agent. The built-in AWS client uses credentials from core config (access key ID + secret access key).
+- **Why add to Tengiz:** Turns Tengiz into a complete infrastructure manager — not just deploying apps, but provisioning the servers they run on. `tengiz server create aws --type t3.medium --region us-east-1` provisions a server, installs Docker, and registers it. Ephemeral build servers: provision EC2 → run build → terminate. Auto-scaling: monitor load → provision new EC2 → deploy app. P2 feature but a significant differentiator — no other Vercel alternative provisions cloud infrastructure directly.
+- **Detected:** 2026-07-23
+
+## Onboarding Key System (Secure Server Registration)
+- **Source:** Komodo
+- **Description:** Secure key-based mechanism for adding new servers to the platform. Each `OnboardingKey` has: unique public key + one-time private key (shown at creation, not stored), expiry timestamp, enable/disable toggle, onboarded server IDs, default tags, privileged flag (re-enable servers, update keys), `copy_server` (clone config from existing server), `create_builder` flag. Onboarding process: generate key → install agent with private key → agent connects → platform verifies → server registered.
+- **Why add to Tengiz:** Currently no secure mechanism exists to add new Tengiz nodes. Onboarding keys provide: zero-trust addition (key-based auth, not IP-based), expiry for ephemeral build servers, tag inheritance, config cloning, and audit trail. `tengiz onboarding-key create --expires 24h --tags build` creates a key; `tengiz server add --onboarding-key <key>` registers. Critical enabler for Multi-Server Architecture (#194) and Builder Resource (#195).
+- **Detected:** 2026-07-23
+
+## Files on Server Mode (Host Filesystem Config Management)
+- **Source:** Komodo
+- **Description:** Stack/Deployment config files can exist directly on the server filesystem rather than being uploaded through the platform. A `files_on_host` property switches between platform-managed files (stored in state) and server-filesystem files (read from disk). The platform reads `docker-compose.yml` and env files from a specified host path, tracks which files are "config files" vs "compose files", and manages additional env files with optional platform-sync toggle.
+- **Why add to Tengiz:** Users with existing `docker-compose.yml` on their servers don't want to re-upload files through a CLI tool. `files_on_host: true` tells Tengiz to read compose files directly from the server filesystem. Use cases: migrate from Docker Compose without file migration, use external config management (Ansible) for file content while Tengiz handles lifecycle, enable GitOps where `git pull` updates the compose file and `tengiz stack deploy` applies changes.
+- **Detected:** 2026-07-23
+
+## Per-Server Alert Thresholds (Warning/Critical Dual-Level)
+- **Source:** Komodo
+- **Description:** Per-server configurable alert thresholds at two severity levels: **CPU** (warning `cpu_warning: 80%`, critical `cpu_critical: 95%`), **Memory** (`mem_warning: 80%`, `mem_critical: 95%`), **Disk** (`disk_warning: 80%`, `disk_critical: 95%`). Each threshold is per-server (not global), allowing production servers stricter thresholds than staging. Independent alert toggles per metric: `send_unreachable_alerts`, `send_cpu_alerts`, `send_mem_alerts`, `send_disk_alerts`, `send_version_mismatch_alerts`. `ignore_mounts` field filters disk mounts from monitoring.
+- **Why add to Tengiz:** Different servers have different capacity — a 2GB RAM server hits memory warning at 75%, a 32GB server at 90%. Per-server thresholds prevent alert fatigue (false alarms) and missed critical alerts (threshold too high for small servers). Complements Alert System (#197) and Background Monitoring (#208) with actionable, configurable alerting per server.
+- **Detected:** 2026-07-23
+
+## Server Enable/Disable State (Lifecycle Control)
+- **Source:** Komodo
+- **Description:** Servers have an `enabled` boolean. When disabled: no operations allowed (deploy, stop, logs, terminal), deployment status hidden, alerts suppressed, server shown as "disabled." Re-enabling restores full functionality. Disabled servers keep running containers — only platform operations are blocked. `auto_rotate_keys` controls key rotation on re-enable.
+- **Why add to Tengiz:** Operators need to take servers offline for maintenance without stopping containers (would disrupt users), removing config (would lose state), or receiving alerts. `tengiz server disable <name>` blocks new operations; existing containers keep running. Low effort (boolean check), high operational value for multi-server setups. Complements Maintenance Mode (#25, per-app) with per-server platform-level control.
+- **Detected:** 2026-07-23
+
+## Server Version Tracking & Mismatch Alerts
+- **Source:** Komodo
+- **Description:** Tracks the agent version for each connected server. When a server's agent version doesn't match the core version, a `send_version_mismatch_alerts` toggle controls alerting. Version info includes: `version` string, `public_key` fingerprint, and `attempted_public_key` (stored when auth fails, to accept later). Mismatch detection prevents API compatibility issues.
+- **Why add to Tengiz:** When Tengiz upgrades, older servers may become incompatible. Version mismatch alerts notify operators before deploy failures occur. `tengiz server list --versions` shows fleet version state. `tengiz server upgrade <name>` updates the remote agent. Complements Self-Upgrade (#165) with fleet-wide version awareness.
+- **Detected:** 2026-07-23
+
+## Auto Docker Image Prune (24h Scheduled Cleanup)
+- **Source:** Komodo
+- **Description:** Per-server `auto_prune` toggle (default: `true`) that runs `docker image prune -a -f` every 24 hours. Removes all unused images not referenced by any container. Runs as a background job, separate from explicit prune operations. Disabled servers skip auto-prune.
+- **Why add to Tengiz:** Continuous deployment generates image bloat — every deploy creates a new image. Without automatic cleanup, disk fills and deploys fail. A 24h auto-prune toggle is the simplest operational fix: no cron config, no threshold tuning. `.tengiz.yaml`'da `auto_prune: true` enables globally. Implementation: `time.Ticker` goroutine calling `docker image prune -a -f` every 24h. Complements Granular Docker Prune (#205) with automatic catch-all cleanup.
+- **Detected:** 2026-07-23
+
+## Ignore Mounts Filter (Disk Monitoring Exclusion)
+- **Source:** Komodo
+- **Description:** `ignore_mounts` configuration field — a list of filesystem mount paths to exclude from disk monitoring. Prevents: Docker overlay filesystems from generating false disk alerts, FUSE mounts from being counted toward disk usage, tmpfs from skewing totals. Stats collector already filters `overlay` by default; `ignore_mounts` extends this to user-defined exclusions.
+- **Why add to Tengiz:** Docker hosts show many pseudo-filesystems in `df`. Without filtering, disk alerts fire for overlay filesystems with no real disk backing. `tengiz server config my-server ignore_mounts /var/lib/docker/overlay2` prevents false alerts. Default ignore list: overlay, tmpfs, devtmpfs, squashfs. Low effort (path prefix matching), high accuracy value for disk monitoring.
+- **Detected:** 2026-07-23
