@@ -349,6 +349,15 @@ healthcheck:
   retries: 3
   timeout: 5
   start_period: 0
+build:
+  # builder: nixpacks       # use Nixpacks build backend (requires nixpacks CLI)
+  # nixpacks:               # Nixpacks-specific options
+  #   packages:
+  #     - ffmpeg
+  #   apt_packages:
+  #     - libssl-dev
+  #   cmd: bundle exec puma
+  #   pkg_manager: yarn
 env:
   DATABASE_URL: postgres://localhost:5432/myapp
   API_KEY: your-secret-key
@@ -372,8 +381,9 @@ Without a config file, Tengiz uses defaults: app name = directory name, port aut
 | **Node.js** | `package.json` | 8080 |
 | **Python** | `requirements.txt` / `Pipfile` / `pyproject.toml` | 8000 |
 | **Static HTML** | `index.html` | 80 (nginx) |
+| **Nixpacks** (external) | `.tengiz.yaml` `build.builder: nixpacks` | auto-detected |
 
-When no Dockerfile exists, Tengiz auto-generates one with a multi-stage build optimized for each framework.
+When no Dockerfile exists and no Nixpacks builder is configured, Tengiz auto-generates a Dockerfile with a multi-stage build optimized for each framework. Set `build.builder: nixpacks` in `.tengiz.yaml` to use Nixpacks as the build backend (supports 100+ frameworks: Rust, Ruby, PHP, Elixir, Deno, Bun, etc.). Nixpacks CLI must be installed separately (`npm install -g nixpacks` or `brew install nixpacks`).
 
 ## Git Auto-Deploy
 
