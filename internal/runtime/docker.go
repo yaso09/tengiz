@@ -327,20 +327,24 @@ func (r *dockerRuntime) WaitForHealth(ctx context.Context, name string, hc *type
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			lastErr = err
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(200 * time.Millisecond):
+			if i < retries {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(200 * time.Millisecond):
+				}
 			}
 			continue
 		}
 		resp, err := client.Do(req)
 		if err != nil {
 			lastErr = err
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(200 * time.Millisecond):
+			if i < retries {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(200 * time.Millisecond):
+				}
 			}
 			continue
 		}
@@ -350,10 +354,12 @@ func (r *dockerRuntime) WaitForHealth(ctx context.Context, name string, hc *type
 		}
 		lastErr = fmt.Errorf("health check returned HTTP %d", resp.StatusCode)
 		resp.Body.Close()
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(200 * time.Millisecond):
+		if i < retries {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(200 * time.Millisecond):
+			}
 		}
 	}
 	return fmt.Errorf("health check failed after %d retries: %w", retries, lastErr)
