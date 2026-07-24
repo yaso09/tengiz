@@ -1664,3 +1664,35 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Dokploy Enterprise provides comprehensive whitelabeling: custom app name (replaces "Dokploy" everywhere), custom logo (login page, nav bar, favicon), custom page title and meta description, custom CSS overrides for the entire UI, custom footer text and links (support URL, docs URL, terms), custom error pages (404, 500, maintenance) with the same branding. Branding config is stored as platform settings and applied globally. Dokploy's branding module spans 4 files in `packages/server/src/admin/` and 3 components in the frontend.
 - **Why add to Tengiz:** For enterprise customers self-hosting Tengiz, platform branding is about professionalism: presenting Tengiz as "our internal deployment platform" rather than "some open-source tool we run." While Tengiz is CLI-first today, as a web dashboard (#150) is developed, whitelabeling becomes important. Even CLI output can be branded: `tengiz ps` header "MyCorp Deployments", help text mentioning internal docs URL. Implementation: a `branding` section in `~/.tengiz/config.json` with logo path, name, URLs. CLI uses these in help text and command output. Medium effort, high enterprise adoption value.
 - **Detected:** 2026-07-24
+
+---
+
+## hasPersistentData Flag (Instance-Aware Scaling Guard for Stateful Apps)
+- **Source:** CapRover
+- **Description:** A boolean flag on each app definition that marks whether the app has persistent data (database, CMS, file uploads). When `true`, the platform automatically constrains the app to a single instance, preventing data corruption from multiple containers writing to the same volume simultaneously. CapRover's `AppDefinition.ts` stores this as `hasPersistentData: boolean`, enforced during `registerAppDefinition` in `AppsDataStore.ts`.
+- **Why add to Tengiz:** Tengiz has volume management and resource limits but no guardrail against running multiple replicas of a stateful app. A user could accidentally `tengiz scale my-db 3` and corrupt their database. This declarative flag provides automatic safety: when creating an app with `tengiz create --persistent-data`, Tengiz would enforce `max-instances: 1`. Complements existing volume management and process scaling. Low effort (boolean + scaling constraint), high data safety value.
+- **Detected:** 2026-07-24
+
+## Multi-Network Attachment (App Connected to Multiple Docker Networks)
+- **Source:** CapRover
+- **Description:** Each app can be attached to multiple Docker networks simultaneously via `networks: string[]` in the app definition. Default: app joins the main overlay network, but additional networks can be specified. This allows apps to be simultaneously on the proxy-facing network AND a backend/database network. CapRover's `getServiceNetworkAttachments` helper creates network attachments with DNS aliases for service discovery.
+- **Why add to Tengiz:** Tengiz currently supports only a single `--network`. Multi-network attachment enables defense-in-depth network isolation: frontend app on both the public proxy network AND a private database network, without exposing the database network to the proxy. Implementation: extend `runtime.Run()` to accept `[]string` instead of a single string, and use `docker network connect` for additional networks after container creation. `.tengiz.yaml`'da `networks: [proxy-net, db-net]` ile yapılandırılır. Low effort, important for production network security.
+- **Detected:** 2026-07-24
+
+## Proxy Status Metrics (Built-In Real-Time Connection Stats)
+- **Source:** CapRover
+- **Description:** CapRover queries an internal Nginx status endpoint (`/nginx_status`) to retrieve real-time proxy metrics: active connections, total accepted connections, total handled connections, reading/writing/waiting states. Exposed as a `LoadBalancerInfo` data structure without any external monitoring system. CapRover's `LoadBalancerManager.ts:getInfo()` implements the collection and parsing.
+- **Why add to Tengiz:** Tengiz has no proxy-level observability — users can't see traffic flow, connection backpressure, or proxy health. This differs from Prometheus Metrics (#26, external collection) and System Stats (#72, historical). A `tengiz proxy status` command showing active connections, request rates, and connection states would be immediately useful for operators without any infrastructure setup. Implementation: Tengiz's Go `httputil.ReverseProxy` can track active connections, total requests, errors, and expose them via a `/proxy-status` endpoint or in CLI output. Low effort, high operational value.
+- **Detected:** 2026-07-24
+
+## Remote Docker Daemon Connection (TCP/TLS Docker Remote API)
+- **Source:** CapRover
+- **Description:** CapRover connects to Docker via Dockerode's `DockerOptions`, configurable through `CAPTAIN_DOCKER_API` env var. This allows the management layer to run on a different machine than the containers, using Docker Remote API over TCP/TLS with client certificate authentication. The `DockerApi` class takes `DockerOptions` at construction, making it architecturally decoupled from the local Docker socket.
+- **Why add to Tengiz:** Architecturally different from SSH Remote Deployment (#105, SSH command execution). Docker Remote API over TCP/TLS means: Tengiz binary doesn't need to be installed on the target server, only Docker needs to be running, TLS client cert auth provides secure access, and it works with Docker contexts natively. Implementation: Tengiz already uses `os/exec` for Docker commands — adding support for `DOCKER_HOST=tcp://<host>:2376`, `DOCKER_TLS_VERIFY=1`, and `DOCKER_CERT_PATH=~/.docker/` environment variables (mirroring Docker's own remote connection model) enables multi-server capability without SSH. Medium effort, high architectural value for multi-server deployments.
+- **Detected:** 2026-07-24
+
+## Docker Native Secrets Management (Leveraging `docker secret`)
+- **Source:** CapRover
+- **Description:** CapRover uses Docker Swarm's built-in secret management for sensitive data (encryption salt, etc.). Secrets created via `docker secret create`, stored encrypted in Docker's internal raft store, injected into containers as in-memory tmpfs files at `/run/secrets/<name>`. API: `ensureSecret`, `checkIfSecretExist`, `ensureSecretOnService` in `DockerApi.ts`. No external vault dependency — Docker itself handles encryption and access control.
+- **Why add to Tengiz:** Different from Secrets Management (#4, external vault), Encryption at Rest (#109, local file encryption), and Secret Interpolation System (#149, built-in encrypted store). Docker native secrets provide zero-infrastructure secret management: encrypted at rest in Docker's storage, no external dependencies, automatically scoped to services, injected as tmpfs files (not env vars that leak into logs/docker inspect). For Tengiz: leverage `docker secret create` + `docker run --secret` (Docker 25+) for env vars marked `sensitive: true` in `.tengiz.yaml`. Medium effort (Docker version gate + CLI plumbing), high security value for single-server deployments without external vaults.
+- **Detected:** 2026-07-24
