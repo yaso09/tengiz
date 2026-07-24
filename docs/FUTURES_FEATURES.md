@@ -1578,3 +1578,59 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Each datastore collection can be configured with a memory type: `Heap` (fast, volatile — data lost on canister upgrade) or `Stable` (persistent across upgrades, slightly slower). This lets developers make performance/cost trade-offs per collection: cache/session data goes in Heap for speed, user profiles go in Stable for durability. Collections default to Heap for maximum performance. The memory type affects both read/write latency and upgrade behavior — Stable collections survive platform upgrades, Heap collections are re-initialized.
 - **Why add to Tengiz:** Tengiz's planned Built-in NoSQL Datastore (#1) needs a similar performance/storage trade-off. Some data is ephemeral (sessions, cache, rate limit counters) — stored in-memory for speed and automatically reset on restart. Other data is persistent (user profiles, settings, content) — written to SQLite or disk-backed storage for durability. A `db.<collection>.memory: ephemeral | persistent` setting in `.tengiz.yaml` lets developers choose: ephemeral collections use Go maps (fast, lost on container restart), persistent collections use embedded SQLite tables (durable, survives restarts). This is particularly important for scale-to-zero — ephemeral collections naturally reset on cold start (good for session data that should force re-login), persistent collections survive scale-to-zero cycles (good for app state). Implementation: two store backends (`MemoryStore` and `SQLiteStore`) implementing the same `DocStore` interface, selected per-collection at deploy time. Low-medium effort, fits Tengiz's embedded database philosophy. Complements the NoSQL Datastore with production-grade configurability.
 - **Detected:** 2026-07-17
+
+---
+
+## Team-Based Multi-Tenancy (Org Model with Roles)
+- **Source:** Coolify
+- **Description:** Full team/org model: resources (apps, env vars, domains, deployments) scoped to a team. Team members have roles: `owner` (full control), `admin` (manage members + resources), `member` (deploy + view). Team invitations via email/link with expiry. Resource isolation between teams — team A cannot see team B's apps. Optional personal team auto-created on registration. Invitation management: accept/decline/revoke.
+- **Why add to Tengiz:** Currently Tengiz is single-user — anyone with CLI access manages all apps. For team-hosted Tengiz instances (shared dev/staging server), multi-tenancy is essential: each team gets isolated app namespace, env vars, and domains. Enables shared hosting scenarios: one Tengiz instance serves multiple teams/projects with complete isolation. `tengiz team create/ls/invite/leave`, `tengiz team switch <name>` for active team selection. Implementation: `Team` + `TeamMember` types in store, `team_id` foreign key on `AppEntry`, file-per-team isolation (`~/.tengiz/teams/<id>/`). Medium-high effort (cross-cutting concern), high value for team deployments.
+- **Detected:** 2026-07-24
+
+## SPA Routing Configuration (Client-Side Routing Support)
+- **Source:** Coolify
+- **Description:** First-class Single Page Application mode: when enabled, the proxy serves `index.html` for all routes that don't match a static file — enabling client-side routing (React Router, Vue Router, SvelteKit). Coolify stores this as `ApplicationSetting.is_spa` toggle. Without this, refreshing a page on `/dashboard` returns 404 because no file exists at that path on the server.
+- **Why add to Tengiz:** Every modern frontend framework (React, Vue, Svelte, Angular) uses client-side routing. Currently Tengiz's proxy returns 404 for any non-file path — breaking browser refreshes, deep links, and direct URL access. `.tengiz.yaml`'da `spa: true` or `spa.fallback: index.html` ile etkinleştirilir. Implementation: proxy middleware that catches 404 responses and retries with `index.html` from the app's static directory. Low effort, critical for all SPA deployments.
+- **Detected:** 2026-07-24
+
+## Personal Access Tokens with Scoped Abilities (Granular API Auth)
+- **Source:** Coolify
+- **Description:** API tokens with fine-grained permission scopes: `read:apps`, `write:apps`, `deploy`, `read:sensitive` (view secrets), `read:logs`, `read:stats`, `admin` (full access). Token-to-ability mapping via middleware. Tokens have: name, description, abilities list, expiry date, last-used timestamp, rotation support. Coolify's `PersonalAccessToken` model integrates with `ApiAbility` middleware for per-route permission checks.
+- **Why add to Tengiz:** Existing "App Deploy Tokens" (#37) are deploy-only. Broader scoped tokens are needed for: CI/CD (deploy + read logs), monitoring (read stats + logs only), backup automation (read config + trigger backup), admin (full API access). `tengiz token create --name ci-bot --abilities read:apps,deploy,read:logs`. Implementation: token hashing (bcrypt or SHA256), `ApiAbility` interface in middleware, `~/.tengiz/tokens.json` store. Complements RBAC (#196) and OIDC (#157) — tokens are for machine auth, SSO/RBAC for human auth.
+- **Detected:** 2026-07-24
+
+## Configuration Change Detection (Hash-Based Skip of Unnecessary Redeploys)
+- **Source:** Coolify
+- **Description:** Before each deploy, compute a hash of the app's current configuration (env vars, domains, build settings, Docker options). If the hash matches the last-deployed hash, skip the deploy entirely (or skip container restart). Coolify's `config_hash` field on `Application` and `Service.isConfigurationChanged()` method enable this. Prevents wasteful builds and container restarts when nothing relevant changed.
+- **Why add to Tengiz:** Repeated deploys from CI/CD or webhooks often trigger rebuilds even when only documentation changed or the build output is identical. Config change detection skips the container restart phase for pure-code changes (hash the env + config, compare against stored hash). Implementation: compute SHA256 of `AppEntry` config fields, store in `DeploymentEntry`, compare on deploy. Two modes: `skip_full` (skip entire deploy if config unchanged) and `skip_restart` (rebuild image but skip container restart if config unchanged). `.tengiz.yaml`'da `deploy.skip_on_config_unchanged: true`. Low effort, saves build time for repetitive deploys.
+- **Detected:** 2026-07-24
+
+## Preview Deployment URL Customization (Template-Based URLs)
+- **Source:** Coolify
+- **Description:** Customizable preview deployment URL templates using variables like `{{pr_id}}`, `{{app_name}}`, `{{branch}}`, `{{commit_sha}}`. Coolify's `Application.preview_url_template` field enables per-app URL patterns: `pr-{{pr_id}}.{{app_name}}.example.com` or `{{branch}}--{{app_name}}.tengiz.local`. Supports conditional expressions for stable vs preview naming.
+- **Why add to Tengiz:** Currently preview deployments use a fixed URL pattern. Customizable templates enable: org-specific naming conventions, branch-based subdomains for staging, PR-number-based URLs for review apps. `.tengiz.yaml`'da `preview.url_template: "pr-{{pr_id}}.{{app_name}}.tengiz.local"`. Low effort (Go `text/template` substitution), high UX value for teams.
+- **Detected:** 2026-07-24
+
+## Preview Deployment Public/Private Toggle
+- **Source:** Coolify
+- **Description:** Per-preview toggle to make PR deployments publicly accessible or restrict to authenticated users. Coolify's `ApplicationSetting.is_pr_deployments_public_enabled` controls default visibility. Useful for: private code reviews (hide preview from public), open-source projects (show preview to everyone), internal apps (always private). Toggleable per-preview or as default app setting.
+- **Why add to Tengiz:** Preview deployments expose running code to the internet. For private repos or sensitive features, previews should be private by default. For open-source projects or public demos, previews should be public. `.tengiz.yaml`'da `preview.public: false`. Implementation: proxy checks a `preview_public` boolean in route config; if false and the request doesn't include an auth header/token, return 401. Low effort, important security control.
+- **Detected:** 2026-07-24
+
+## www/non-www Redirect Configuration (Subdomain Canonicalization)
+- **Source:** Coolify
+- **Description:** Per-app configuration for www→non-www or non-www→www redirect at the proxy level. Coolify's `Application.redirect` field with values `www`, `non-www`, `both`. Eliminates duplicate content SEO issues and ensures users always access the canonical domain. Redirect is a 301 with `Location` rewrite.
+- **Why add to Tengiz:** Every production web app needs canonical domain selection. Without it, `example.com` and `www.example.com` serve the same content — causing SEO penalties and user confusion. `.tengiz.yaml`'da `redirect.www: non-www` (redirect www to non-www) veya `redirect.www: www` (redirect non-www to www). Implementation: proxy checks the request host against the canonical domain config; if mismatched, returns 301. Complements Custom Domains (#3, implemented) and Force HTTPS (#52). Low effort, high SEO/UX value.
+- **Detected:** 2026-07-24
+
+## Container Label Customization (Custom Docker Labels)
+- **Source:** Coolify
+- **Description:** Per-app custom Docker labels for container metadata. Coolify's `Application.custom_labels` field stores key-value labels applied via `docker run --label key=value`. Labels can be used for: container discovery, billing/cost allocation tags, monitoring system identification, compliance/metadata, log routing.
+- **Why add to Tengiz:** Tengiz already adds standard labels (`tengiz-app`, `tengiz-env`). Custom labels extend this for user-defined metadata. `.tengiz.yaml`'da `labels: { team: backend, cost-center: eng-123, owner: alice }`. Implementation: `--label` flags appended to `docker run` in `runtime.Create()`. Label values can interpolate env vars: `owner: {{ .Env.DEPLOY_USER }}`. Low effort, high flexibility value for ops teams.
+- **Detected:** 2026-07-24
+
+## Consistent Container Naming Across Redeploys
+- **Source:** Coolify
+- **Description:** Keep the same container name across redeployments instead of generating new names. Coolify's `ApplicationSetting.is_consistent_container_name_enabled` controls this. Useful for: tools that depend on stable container names (monitoring agents, log shippers linked to specific container names), DNS-based service discovery, and simpler debugging.
+- **Why add to Tengiz:** Currently each deploy creates a new container with a potentially different name. Stable names simplify: `docker exec tengiz-myapp` (always the same name), log shipper configuration, monitoring tool setup. `.tengiz.yaml`'da `container.stable_name: true`. Implementation: stop old container, remove it, then create new one with the same name (instead of creating new with different name). Low effort, optional toggle for compatibility.
+- **Detected:** 2026-07-24
