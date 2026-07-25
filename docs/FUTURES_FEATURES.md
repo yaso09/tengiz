@@ -1578,3 +1578,101 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Each datastore collection can be configured with a memory type: `Heap` (fast, volatile — data lost on canister upgrade) or `Stable` (persistent across upgrades, slightly slower). This lets developers make performance/cost trade-offs per collection: cache/session data goes in Heap for speed, user profiles go in Stable for durability. Collections default to Heap for maximum performance. The memory type affects both read/write latency and upgrade behavior — Stable collections survive platform upgrades, Heap collections are re-initialized.
 - **Why add to Tengiz:** Tengiz's planned Built-in NoSQL Datastore (#1) needs a similar performance/storage trade-off. Some data is ephemeral (sessions, cache, rate limit counters) — stored in-memory for speed and automatically reset on restart. Other data is persistent (user profiles, settings, content) — written to SQLite or disk-backed storage for durability. A `db.<collection>.memory: ephemeral | persistent` setting in `.tengiz.yaml` lets developers choose: ephemeral collections use Go maps (fast, lost on container restart), persistent collections use embedded SQLite tables (durable, survives restarts). This is particularly important for scale-to-zero — ephemeral collections naturally reset on cold start (good for session data that should force re-login), persistent collections survive scale-to-zero cycles (good for app state). Implementation: two store backends (`MemoryStore` and `SQLiteStore`) implementing the same `DocStore` interface, selected per-collection at deploy time. Low-medium effort, fits Tengiz's embedded database philosophy. Complements the NoSQL Datastore with production-grade configurability.
 - **Detected:** 2026-07-17
+
+---
+
+## Configuration Differ (Pre-Deploy Change Summary)
+- **Source:** Coolify
+- **Description:** Before deploying, computes a structured diff of all configuration changes between the previous and current deploy: source changes, build config, runtime settings, domains/proxy, env vars, and storage. Each change has a key, section, label, type (added/changed/removed), build impact flag, and old/new display values.
+- **Why add to Tengiz:** Provides "what will change" transparency before deploy execution. Eliminates surprise changes — users know env var FOO changed or domain bar.com was added before deploying. `tengiz deploy --dry-run` would show the diff. Natural extension of `tengiz config show` — shows effective config AND what changed since last deploy.
+- **Detected:** 2026-07-25
+
+## Container Status Aggregator (Priority-Based Multi-Container State)
+- **Source:** Coolify
+- **Description:** Priority-based state machine that aggregates status from multiple containers into a single status string. Handles complex real-world states: `degraded:unhealthy` (crash loop, mixed running+exited, restarting), `starting:unknown` (mixed running+starting), `running:healthy/unhealthy/unknown`. Priority ordering ensures the most severe state wins.
+- **Why add to Tengiz:** Tengiz currently reports simple "running/stopped" per container. For multi-process apps (web + worker) or stack deployments, a single aggregated health status is essential. `tengiz ps` should show `myapp: healthy` not just `myapp: running` when all containers are up.
+- **Detected:** 2026-07-25
+
+## Orphaned Preview Container Cleanup (Safety Net)
+- **Source:** Coolify
+- **Description:** Scheduled job that scans all servers for containers labeled with preview deployment tags, cross-references against the database, and removes any container whose parent PR record no longer exists. Acts as a safety net when webhook-based PR cleanup fails.
+- **Why add to Tengiz:** Preview deployments can leak containers when cleanup webhooks fail (GitHub sometimes misses PR close events, webhook delivery fails). A scheduled safety-net cleanup prevents resource leakage and disk bloat. Complements existing Preview Deployments with production reliability.
+- **Detected:** 2026-07-25
+
+## Scheduled Task Log Parser & Diagnostics
+- **Source:** Coolify
+- **Description:** Reads, parses, and analyzes scheduled task execution logs. Tracks skip events with reasons (why a task didn't run), execution logs with timing/duration metrics, dispatched counts, and skipped counts. Provides health reporting for cron jobs.
+- **Why add to Tengiz:** Existing Scheduled Tasks / Cron Jobs feature needs observability. `tengiz scheduled-logs` with filtering by skip reason, `tengiz cron health` for job diagnostics. Understand why tasks were skipped (dependencies, overrun, concurrency limits).
+- **Detected:** 2026-07-25
+
+## Server OS Patch/Update Check & Notification
+- **Source:** Coolify
+- **Description:** Scheduled check for available OS security updates using `apt list --upgradable`. Generates notification when patches are pending. Separate from general server monitoring — specifically tracks OS-level security patching and unattended-upgrades status.
+- **Why add to Tengiz:** Production servers must stay patched against CVEs. A periodic patch check and notification ("3 security updates pending on server") helps operators stay current. Complements Server Security Hardening with proactive OS patching awareness.
+- **Detected:** 2026-07-25
+
+## Cleanup Stuck Resources (Transition State Recovery)
+- **Source:** Coolify
+- **Description:** Detects and recovers resources stuck in transition states (deploying, stopping, restarting, deleting). Resources stuck in these states block further operations. Checks for resources whose transition state has exceeded a timeout threshold and resets them to a stable state.
+- **Why add to Tengiz:** Sometimes deploys hang or containers fail to stop, leaving resources in "deploying" state indefinitely. A stuck resource recovery mechanism automatically detects and resets them, preventing operational deadlock. Complements Health Check and Deploy Lock with self-healing.
+- **Detected:** 2026-07-25
+
+## Changelog & Feature Update Notifications
+- **Source:** Coolify
+- **Description:** Fetches the platform's changelog from a remote source (GitHub Releases or CDN) and presents new feature announcements to users on version check. Tracks which changelog entries each user has seen. Ensures users discover new features without reading release notes manually.
+- **Why add to Tengiz:** A built-in "what's new" notification (`tengiz changelog` or displayed on version check) keeps users informed of new features. Simple: fetch versioned markdown from GitHub Releases, track seen entries. Complements Self-Upgrade/Auto-Update.
+- **Detected:** 2026-07-25
+
+## Helper Image Auto-Management (Infrastructure Image Maintenance)
+- **Source:** Coolify
+- **Description:** Periodically verifies that required infrastructure Docker images (proxy, monitoring agent, etc.) exist locally and pulls them if missing or outdated. Prevents deploy failures caused by missing or stale infrastructure images.
+- **Why add to Tengiz:** Tengiz depends on helper images for proxy or other infrastructure. If these are deleted (Docker cleanup, manual prune, cache eviction), apps stop working. A periodic helper image check ensures infrastructure images are always present. Complements Docker Housekeeping.
+- **Detected:** 2026-07-25
+
+## Volume Clone (Docker Volume Duplication)
+- **Source:** Coolify
+- **Description:** Clones a Docker volume including all data to a new volume. Uses Docker volume driver capabilities or `docker run --volumes-from` with `tar` to copy data. Supports cross-host volume cloning, rename target, and post-clone cleanup.
+- **Why add to Tengiz:** Tengiz has Persistent Storage (Volume Management) for mounting volumes but no volume duplication. `tengiz volume clone <volume> <new-name>` enables snapshot-before-deploy workflows, staging data refresh from production, and volume migration.
+- **Detected:** 2026-07-25
+
+## Transactional Email System (User-Facing Emails)
+- **Source:** Coolify
+- **Description:** Beyond admin alert emails, a complete transactional email subsystem: team invitation emails with accept/decline links, password reset with token and expiry, email change verification. Team invitations come with role-based access.
+- **Why add to Tengiz:** As Tengiz gains team/user management, transactional emails are essential: team invitations, password resets, email verification. Different from admin alerts — these are user-facing communications that power collaboration workflows.
+- **Detected:** 2026-07-25
+
+## Cleanup Unreachable Servers (Automatic Server Decommissioning)
+- **Source:** Coolify
+- **Description:** Detects servers that haven't been reachable for a configurable threshold period and optionally removes them from management. Prevents accumulation of dead server entries in the platform state. Configurable grace period, notification before final deletion.
+- **Why add to Tengiz:** In multi-server setups, servers get decommissioned or replaced. Dead server entries accumulate in state files. Automatic cleanup of unreachable servers keeps state clean. Complements Centralized Multi-Server Management.
+- **Detected:** 2026-07-25
+
+## Proxy Network Auto-Connection
+- **Source:** Coolify
+- **Description:** Automatically connects the proxy container to application Docker networks whenever network configuration changes. Enables the proxy to route traffic to apps regardless of which Docker network they're on.
+- **Why add to Tengiz:** When apps use custom Docker networks, the proxy must be connected to those networks. Auto-connection ensures this happens without manual intervention. Complements Custom Docker Network feature.
+- **Detected:** 2026-07-25
+
+## SSH Multiplexed Connection Management
+- **Source:** Coolify
+- **Description:** SSH ControlMaster multiplexed connection management. SSH multiplexing shares a single TCP connection for multiple SSH sessions, dramatically speeding up consecutive operations. Creates, monitors, and cleans up stale multiplex sockets.
+- **Why add to Tengiz:** Multi-server SSH operations (deploy, exec, log streaming) benefit from multiplexed SSH connections. Without cleanup, stale sockets accumulate. Complements SSH Key Management and Centralized Multi-Server features.
+- **Detected:** 2026-07-25
+
+## Service Version Auto-Update (One-Click Template Refresh)
+- **Source:** Coolify
+- **Description:** Checks registered one-click service templates against their source repositories (Docker Hub, GitHub) and updates template definitions to the latest available version. Version checking uses registry API calls or digest comparison.
+- **Why add to Tengiz:** One-click Service Templates become stale as upstream images update. An auto-update mechanism (`tengiz service update --all`) refreshes template definitions. Complements Service Template Registry with CDN Auto-Update.
+- **Detected:** 2026-07-25
+
+## Cloud Provider Server Provisioning (DO/Hetzner/Vultr)
+- **Source:** Coolify
+- **Description:** Automated server lifecycle on cloud providers: create droplet/server (specify region, size, image), list available sizes/images/regions, delete server, get server status. Full cloud API integration with token auth and server readiness monitoring.
+- **Why add to Tengiz:** Currently Tengiz installs on existing servers. Cloud provider provisioning adds self-service: `tengiz server create --provider digitalocean --region fra1 --size s-2vcpu-4gb`. Transforms Tengiz from "install on existing infrastructure" to "create infrastructure + deploy".
+- **Detected:** 2026-07-25
+
+## Deploy Queue Management & Diagnostics
+- **Source:** Coolify
+- **Description:** Queue health monitoring, job count inspection, stuck job detection, and removal of stale/duplicate queue entries. Tracks each deployment's position in the queue with processing time visibility.
+- **Why add to Tengiz:** Existing Build Queue with Deduplication covers queue dedup but not queue visibility. `tengiz queue status` shows pending builds, processing time, and stuck jobs. `tengiz queue cleanup` removes stale entries.
+- **Detected:** 2026-07-25
