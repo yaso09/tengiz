@@ -16,10 +16,16 @@ import (
 )
 
 type Manager struct {
-	dataDir string
-	store   *config.Store
-	rt      runtime.Manager
-	builder *builder.Builder
+	dataDir     string
+	store       *config.Store
+	rt          runtime.Manager
+	builder     *builder.Builder
+	nixpacksCfg *types.NixpacksConfig
+}
+
+func (m *Manager) SetNixpacksConfig(cfg *types.NixpacksConfig) {
+	m.nixpacksCfg = cfg
+	m.builder.SetNixpacksConfig(cfg)
 }
 
 func NewManager(dataDir string, store *config.Store, rt runtime.Manager) *Manager {
@@ -61,6 +67,9 @@ func (m *Manager) Create(ctx context.Context, appName string, prNumber int, bran
 	detection, err := builder.Detect(cloneDir)
 	if err != nil {
 		return nil, fmt.Errorf("detect: %w", err)
+	}
+	if m.nixpacksCfg != nil {
+		detection.Framework = builder.FrameworkNixpacks
 	}
 
 	deploymentID := fmt.Sprintf("%d", time.Now().Unix())
@@ -143,6 +152,9 @@ func (m *Manager) Update(ctx context.Context, appName string, prNumber int, bran
 	detection, err := builder.Detect(cloneDir)
 	if err != nil {
 		return nil, fmt.Errorf("detect: %w", err)
+	}
+	if m.nixpacksCfg != nil {
+		detection.Framework = builder.FrameworkNixpacks
 	}
 
 	deploymentID := fmt.Sprintf("%d", time.Now().Unix())
