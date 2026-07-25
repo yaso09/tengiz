@@ -188,6 +188,9 @@ var deployCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("detect: %w", err)
 		}
+		if cfg.Build.Builder == "nixpacks" {
+			detection.Framework = builder.FrameworkNixpacks
+		}
 		fmt.Printf("[tengiz] detected: %s (port %d)\n", detection.Framework, detection.InternalPort)
 
 		if cfg.Port == 0 {
@@ -197,6 +200,9 @@ var deployCmd = &cobra.Command{
 		deploymentID := fmt.Sprintf("%d", time.Now().Unix())
 
 		b := builder.New(dataDir)
+		if cfg.Build.NixpacksConfig != nil {
+			b.SetNixpacksConfig(cfg.Build.NixpacksConfig)
+		}
 		store := config.NewStoreWithEnv(dataDir, envFlag)
 		imageTag, buildLog, err := b.Build(context.Background(), projectRoot, cfg.Name, cfg.Environment, detection, deploymentID)
 		if err != nil {
