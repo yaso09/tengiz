@@ -17,6 +17,7 @@ const (
 	FrameworkPython Framework = "python"
 	FrameworkStatic Framework = "static"
 	FrameworkDocker Framework = "docker"
+	FrameworkNixpacks Framework = "nixpacks"
 )
 
 type Detection struct {
