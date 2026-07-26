@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/yaso09/tengiz/internal/config"
+	"github.com/yaso09/tengiz/internal/notify"
 	"github.com/yaso09/tengiz/internal/runtime"
 	"github.com/yaso09/tengiz/internal/types"
 )
@@ -19,6 +20,7 @@ type Checker struct {
 	mu     sync.Mutex
 	checks map[string]context.CancelFunc
 	env    string
+	notify *notify.Manager
 }
 
 func New(rt runtime.Manager, store *config.Store) *Checker {
@@ -29,11 +31,26 @@ func NewWithEnv(rt runtime.Manager, store *config.Store, env string) *Checker {
 	if env == "" {
 		env = "production"
 	}
+	nm := notify.NewManager(store.DataDir(), env)
+	nm.LoadConfig()
+	cfg := nm.GetConfig()
+	if cfg != nil && cfg.Enabled {
+		if cfg.Discord != nil {
+			nm.AddNotifier(notify.NewDiscordNotifier(*cfg.Discord))
+		}
+		if cfg.Slack != nil {
+			nm.AddNotifier(notify.NewSlackNotifier(*cfg.Slack))
+		}
+		if cfg.Email != nil {
+			nm.AddNotifier(notify.NewEmailNotifier(*cfg.Email))
+		}
+	}
 	return &Checker{
 		rt:     rt,
 		store:  store,
 		checks: make(map[string]context.CancelFunc),
 		env:    env,
+		notify: nm,
 	}
 }
 
@@ -109,6 +126,19 @@ func (c *Checker) runChecker(ctx context.Context, appName string) {
 
 			containerName := runtime.ContainerName(appName, c.env)
 			log.Printf("[health] %s unhealthy (attempt %d), restarting", containerName, app.RestartCount)
+
+			if currentRestarts := app.RestartCount; currentRestarts >= 3 {
+				c.notify.SendAsync(ctx, types.NotificationEvent{
+					Type:    types.EventHealthAlert,
+					AppName: appName,
+					Message: fmt.Sprintf("Container %s restarted %d times in a row", appName, currentRestarts),
+					Metadata: map[string]string{
+						"environment":   c.env,
+						"restart_count": fmt.Sprintf("%d", currentRestarts),
+					},
+				})
+			}
+
 			if err := c.rt.Restart(ctx, containerName); err != nil {
 				log.Printf("[health] restart %s failed: %v", containerName, err)
 			} else {

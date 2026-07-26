@@ -37,6 +37,10 @@ func NewStore(dataDir string) *Store {
 	return NewStoreWithEnv(dataDir, "")
 }
 
+func (s *Store) DataDir() string {
+	return s.dataDir
+}
+
 func (s *Store) SaveApp(app types.AppEntry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

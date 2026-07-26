@@ -2,6 +2,58 @@ package types
 
 import "time"
 
+type NotificationEventType string
+
+const (
+	EventDeploySuccess NotificationEventType = "deploy:success"
+	EventDeployFailure NotificationEventType = "deploy:failure"
+	EventHealthAlert   NotificationEventType = "health:alert"
+	EventContainerStop NotificationEventType = "container:stop"
+	EventSystemWarning NotificationEventType = "system:warning"
+)
+
+type NotificationEvent struct {
+	Type      NotificationEventType `json:"type"`
+	AppName   string                `json:"app_name,omitempty"`
+	Message   string                `json:"message"`
+	Timestamp time.Time             `json:"timestamp"`
+	Metadata  map[string]string     `json:"metadata,omitempty"`
+}
+
+type ChannelType string
+
+const (
+	ChannelDiscord ChannelType = "discord"
+	ChannelSlack   ChannelType = "slack"
+	ChannelEmail   ChannelType = "email"
+)
+
+type DiscordConfig struct {
+	WebhookURL string `json:"webhook_url"`
+}
+
+type SlackConfig struct {
+	WebhookURL string `json:"webhook_url"`
+}
+
+type EmailConfig struct {
+	SMTPServer string `json:"smtp_server"`
+	SMTPPort   int    `json:"smtp_port"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	From       string `json:"from"`
+	To         string `json:"to"`
+	UseTLS     bool   `json:"use_tls"`
+}
+
+type NotificationConfig struct {
+	Discord *DiscordConfig         `json:"discord,omitempty"`
+	Slack   *SlackConfig           `json:"slack,omitempty"`
+	Email   *EmailConfig           `json:"email,omitempty"`
+	Enabled bool                   `json:"enabled"`
+	Events  []NotificationEventType `json:"events,omitempty"`
+}
+
 type GitConfig struct {
 	Repo     string `mapstructure:"repo" json:"repo,omitempty"`
 	Branch   string `mapstructure:"branch" json:"branch,omitempty"`

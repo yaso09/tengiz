@@ -11,6 +11,7 @@ import (
 	"github.com/yaso09/tengiz/internal/builder"
 	"github.com/yaso09/tengiz/internal/config"
 	"github.com/yaso09/tengiz/internal/git"
+	"github.com/yaso09/tengiz/internal/notify"
 	"github.com/yaso09/tengiz/internal/proxy"
 	"github.com/yaso09/tengiz/internal/runtime"
 	"github.com/yaso09/tengiz/internal/secrets"
@@ -125,9 +126,32 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		}
 	}
 
+	// Set up notification manager
+	notifyMgr := notify.NewManager(p.dataDir, p.env)
+	if loadErr := notifyMgr.LoadConfig(); loadErr == nil {
+		nc := notifyMgr.GetConfig()
+		if nc != nil && nc.Enabled {
+			if nc.Discord != nil {
+				notifyMgr.AddNotifier(notify.NewDiscordNotifier(*nc.Discord))
+			}
+			if nc.Slack != nil {
+				notifyMgr.AddNotifier(notify.NewSlackNotifier(*nc.Slack))
+			}
+			if nc.Email != nil {
+				notifyMgr.AddNotifier(notify.NewEmailNotifier(*nc.Email))
+			}
+		}
+	}
+
 	if lookupErr != nil {
 		port, err := p.store.AllocatePort(appName)
 		if err != nil {
+			notifyMgr.SendAsync(ctx, types.NotificationEvent{
+				Type:    types.EventDeployFailure,
+				AppName: appName,
+				Message: fmt.Sprintf("Port allocation failed for %s: %v", appName, err),
+				Metadata: map[string]string{"environment": p.env},
+			})
 			return fmt.Errorf("port: %w", err)
 		}
 
@@ -146,6 +170,12 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 
 		if err := p.rt.Create(ctx, cfg, imageTag, port); err != nil {
 			p.store.FreePort(port)
+			notifyMgr.SendAsync(ctx, types.NotificationEvent{
+				Type:    types.EventDeployFailure,
+				AppName: appName,
+				Message: fmt.Sprintf("Container create failed for %s: %v", appName, err),
+				Metadata: map[string]string{"environment": p.env},
+			})
 			return fmt.Errorf("create: %w", err)
 		}
 		log.Printf("[tengiz] running on port %d", port)
@@ -178,6 +208,13 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		}
 
 		log.Printf("[tengiz] deployed: %s via git push", appName)
+
+		notifyMgr.SendAsync(ctx, types.NotificationEvent{
+			Type:    types.EventDeploySuccess,
+			AppName: appName,
+			Message: fmt.Sprintf("Git deploy: %s from %s/%s", appName, provider, branch),
+			Metadata: map[string]string{"environment": p.env},
+		})
 		return nil
 	}
 
@@ -185,6 +222,12 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 	deploymentID = fmt.Sprintf("%d", time.Now().Unix())
 	newPort, err := p.store.AllocatePort(appName)
 	if err != nil {
+		notifyMgr.SendAsync(ctx, types.NotificationEvent{
+			Type:    types.EventDeployFailure,
+			AppName: appName,
+			Message: fmt.Sprintf("Port allocation failed for %s: %v", appName, err),
+			Metadata: map[string]string{"environment": p.env},
+		})
 		return fmt.Errorf("port allocation: %w", err)
 	}
 
@@ -203,6 +246,12 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 
 	if err := p.rt.CreateVersioned(ctx, cfg, imageTag, newPort, deploymentID); err != nil {
 		p.store.FreePort(newPort)
+		notifyMgr.SendAsync(ctx, types.NotificationEvent{
+			Type:    types.EventDeployFailure,
+			AppName: appName,
+			Message: fmt.Sprintf("Container create failed for %s: %v", appName, err),
+			Metadata: map[string]string{"environment": p.env},
+		})
 		return fmt.Errorf("create versioned: %w", err)
 	}
 	log.Printf("[tengiz] new container starting on port %d", newPort)
@@ -258,5 +307,12 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 	}
 
 	log.Printf("[tengiz] deployed (zero-downtime) via git push: %s", appName)
+
+	notifyMgr.SendAsync(ctx, types.NotificationEvent{
+		Type:    types.EventDeploySuccess,
+		AppName: appName,
+		Message: fmt.Sprintf("Git deploy: %s from %s/%s (zero-downtime)", appName, provider, branch),
+		Metadata: map[string]string{"environment": p.env},
+	})
 	return nil
 }
