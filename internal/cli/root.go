@@ -238,6 +238,15 @@ var deployCmd = &cobra.Command{
 		if cfg.Build.NixpacksConfig != nil {
 			b.SetNixpacksConfig(cfg.Build.NixpacksConfig)
 		}
+
+		smBuild, secBuildErr := secrets.NewManagerFromConfig(dataDir, envFlag, cfg.SecretsProvider, "", "", "", "", "")
+		if secBuildErr == nil {
+			appSecrets, listErr := smBuild.GetAllForApp(cfg.Name)
+			if listErr == nil && len(appSecrets) > 0 {
+				b.SetBuildSecrets(appSecrets)
+			}
+		}
+
 		store := config.NewStoreWithEnv(dataDir, envFlag)
 		imageTag, buildLog, err := b.Build(context.Background(), projectRoot, cfg.Name, cfg.Environment, detection, deploymentID)
 		if err != nil {

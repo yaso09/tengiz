@@ -109,6 +109,14 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		}
 	}
 
+	smBuild, secBuildErr := secrets.NewManagerFromConfig(p.dataDir, p.env, cfg.SecretsProvider, "", "", "", "", "")
+	if secBuildErr == nil {
+		appSecrets, listErr := smBuild.GetAllForApp(appName)
+		if listErr == nil && len(appSecrets) > 0 {
+			p.b.SetBuildSecrets(appSecrets)
+		}
+	}
+
 	deploymentID := fmt.Sprintf("%d", time.Now().Unix())
 	imageTag, buildLog, err := p.b.Build(ctx, cloneDir, appName, p.env, detection, deploymentID)
 	if err != nil {

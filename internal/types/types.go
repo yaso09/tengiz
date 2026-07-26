@@ -99,6 +99,7 @@ type BuildConfig struct {
 	Output         string           `mapstructure:"output"`
 	Builder        string           `mapstructure:"builder"`
 	NixpacksConfig *NixpacksConfig  `mapstructure:"nixpacks,omitempty"`
+	Secrets        []string         `mapstructure:"secrets,omitempty"`
 }
 
 type NixpacksConfig struct {
