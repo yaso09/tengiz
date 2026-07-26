@@ -20,7 +20,9 @@
 | `health` | Periodic HTTP health checks with automatic restart. Env-aware via `NewWithEnv`. |
 | `gitdeploy` | Git-based deployment pipeline. Env-aware via `NewPipelineWithEnv`. |
 | `preview` | Preview deployment lifecycle (PR-based). `Manager` struct with `Create/Update/Delete/List`. Webhook `pull_request` events trigger auto-create/update/cleanup. |
-| `types` | Shared: `AppConfig`, `AppStatus`, `AppEntry`, `PortEntry`, `DeploymentEntry`, `DeploymentStatus`. `AppConfig.Environment` field. |
+| `encrypt` | AES-256-GCM encrypt/decrypt, key generation, key file load/save |
+| `secrets` | `Manager` struct: encrypted per-app secrets storage in `secrets-{env}.json`. `NewManager`, `Set`, `Get`, `Unset`, `List`, `GetAllForApp` |
+| `types` | Shared: `AppConfig`, `AppStatus`, `AppEntry`, `PortEntry`, `DeploymentEntry`, `DeploymentStatus`. `AppConfig.Environment` field, `AppConfig.Secrets` field. |
 
 ## Commands
 
@@ -43,6 +45,11 @@ tengiz build-logs <app> [deployment-id] → show build logs from previous deploy
 tengiz run <app> <cmd> [-i] [-e KEY=VALUE] → one-off command in temporary container
 tengiz stop/start/rm  → lifecycle
 tengiz config set/get/unset/show → env vars
+tengiz config set <app> <key> <value> --secret → store as encrypted secret
+tengiz secret set <app> <key> <value> → set an encrypted secret
+tengiz secret get <app> <key>     → get a secret value
+tengiz secret unset <app> <key>   → remove a secret
+tengiz secret list <app>          → list secrets (values masked)
 tengiz domain add/remove/list   → custom domains
 tengiz volume add/remove/list   → persistent storage volumes
 tengiz preview list <app>       → list preview deployments
