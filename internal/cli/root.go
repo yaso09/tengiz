@@ -186,6 +186,29 @@ var deployCmd = &cobra.Command{
 			}
 		}
 
+		if len(cfg.Secrets) > 0 {
+			sm, secErr := secrets.NewManager(dataDir, envFlag)
+			if secErr == nil {
+				for k, v := range cfg.Secrets {
+					if err := sm.Set(cfg.Name, k, v); err != nil {
+						log.Printf("[tengiz] warning: failed to store secret %s: %v", k, err)
+					}
+				}
+				cfg.SecretKeys = make([]string, 0, len(cfg.Secrets))
+				for k := range cfg.Secrets {
+					cfg.SecretKeys = append(cfg.SecretKeys, k)
+				}
+
+				store := config.NewStoreWithEnv(dataDir, envFlag)
+				app, _ := store.GetApp(cfg.Name)
+				if app != nil {
+					app.Config.SecretKeys = cfg.SecretKeys
+					store.UpdateApp(*app)
+				}
+			}
+			cfg.Secrets = nil
+		}
+
 		fmt.Printf("[tengiz] deploying %s from %s\n", cfg.Name, projectRoot)
 
 		detection, err := builder.Detect(projectRoot)
