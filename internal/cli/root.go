@@ -566,6 +566,17 @@ var rmCmd = &cobra.Command{
 			return err
 		}
 		store.RemoveApp(appName)
+
+		sm, secErr := secrets.NewManager(dataDir, env)
+		if secErr == nil {
+			secretsList, listErr := sm.List(appName)
+			if listErr == nil {
+				for k := range secretsList {
+					sm.Unset(appName, k)
+				}
+			}
+		}
+
 		fmt.Printf("[tengiz] removed: %s\n", appName)
 		return nil
 	},
