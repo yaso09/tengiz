@@ -7,6 +7,48 @@ import (
 	"testing"
 )
 
+type stubProvider struct {
+	data map[string]map[string]string
+}
+
+func newStubProvider() *stubProvider {
+	return &stubProvider{data: make(map[string]map[string]string)}
+}
+func (s *stubProvider) Name() string { return "stub" }
+func (s *stubProvider) Set(app, key, value string) error {
+	if s.data[app] == nil {
+		s.data[app] = make(map[string]string)
+	}
+	s.data[app][key] = value
+	return nil
+}
+func (s *stubProvider) Get(app, key string) (string, bool, error) {
+	if s.data[app] == nil {
+		return "", false, nil
+	}
+	v, ok := s.data[app][key]
+	return v, ok, nil
+}
+func (s *stubProvider) Unset(app, key string) error {
+	if s.data[app] != nil {
+		delete(s.data[app], key)
+		if len(s.data[app]) == 0 {
+			delete(s.data, app)
+		}
+	}
+	return nil
+}
+func (s *stubProvider) List(app string) (map[string]string, error) {
+	if s.data[app] == nil {
+		return map[string]string{}, nil
+	}
+	r := make(map[string]string, len(s.data[app]))
+	for k, v := range s.data[app] {
+		r[k] = v
+	}
+	return r, nil
+}
+
 func TestNewManager(t *testing.T) {
 	dir := t.TempDir()
 	m, err := NewManager(dir, "production")
@@ -170,5 +212,29 @@ func TestPersistenceAcrossManagerInstances(t *testing.T) {
 	}
 	if val != "survive-restart" {
 		t.Fatalf("got %q, want %q", val, "survive-restart")
+	}
+}
+
+func TestManagerWithStubProvider(t *testing.T) {
+	m := NewManagerWithProvider(newStubProvider())
+	if err := m.Set("app1", "KEY", "val"); err != nil {
+		t.Fatal(err)
+	}
+	v, ok, _ := m.Get("app1", "KEY")
+	if !ok || v != "val" {
+		t.Fatal("expected val")
+	}
+}
+
+func TestManagerWithStubProviderGetAllForApp(t *testing.T) {
+	m := NewManagerWithProvider(newStubProvider())
+	m.Set("app1", "A", "1")
+	m.Set("app1", "B", "2")
+	all, err := m.GetAllForApp("app1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all["A"] != "1" || all["B"] != "2" {
+		t.Fatal("unexpected values")
 	}
 }
