@@ -4,7 +4,7 @@
 
 - Single Go module: `github.com/yaso09/tengiz`, Go 1.26
 - Entry: `main.go` → `internal/cli/root.go` (Cobra CLI)
-- Only 2 direct deps: `cobra`, `viper`
+- Core deps: `cobra`, `viper`; optional Vault backend: `hashicorp/vault/api`
 - No Docker SDK — runtime calls `docker` CLI via `os/exec`. Docker must be installed separately.
 - `sources/` dir contains cloned Vercel alternative repos (gitignored). Agent definitions in `.opencode/agents/`.
 
@@ -21,7 +21,7 @@
 | `gitdeploy` | Git-based deployment pipeline. Env-aware via `NewPipelineWithEnv`. |
 | `preview` | Preview deployment lifecycle (PR-based). `Manager` struct with `Create/Update/Delete/List`. Webhook `pull_request` events trigger auto-create/update/cleanup. |
 | `encrypt` | AES-256-GCM encrypt/decrypt, key generation, key file load/save |
-| `secrets` | `Manager` struct: encrypted per-app secrets storage in `secrets-{env}.json`. `NewManager`, `Set`, `Get`, `Unset`, `List`, `GetAllForApp` |
+| `secrets` | `Manager` struct: encrypted per-app secrets storage in `secrets-{env}.json`. `Provider` interface with `LocalProvider` (file-based), `VaultProvider`, `DopplerProvider` backends. `NewManagerFromConfig` for provider selection. `ResolveInterpolations` for `[[secret.NAME]]` env var expansion. `RotateKey` on `LocalProvider` for re-encryption. |
 | `notify` | Multi-channel notification system. `Notifier` interface with Discord/Slack/Email backends. `Manager` with `Send`/`SendAsync`, `LoadConfig`/`SaveConfig`. Per-environment config in `notifications-{env}.json`. |
 | `types` | Shared: `AppConfig`, `AppStatus`, `AppEntry`, `PortEntry`, `DeploymentEntry`, `DeploymentStatus`. `AppConfig.Environment` field, `AppConfig.Secrets` field. |
 
@@ -51,6 +51,7 @@ tengiz secret set <app> <key> <value> → set an encrypted secret
 tengiz secret get <app> <key>     → get a secret value
 tengiz secret unset <app> <key>   → remove a secret
 tengiz secret list <app>          → list secrets (values masked)
+tengiz secret rotate-key         → rotate encryption key for local store
 tengiz domain add/remove/list   → custom domains
 tengiz volume add/remove/list   → persistent storage volumes
 tengiz preview list <app>       → list preview deployments
@@ -82,3 +83,6 @@ tengiz notification show        → show current notification configuration
 - Proxy's `extractApp()` checks custom domains first (`p.domains` map), then strips `.tengiz.local`/`.localhost` suffixes and checks the full prefix as a route key, then falls back to first subdomain part (e.g. `pr-42.myapp.tengiz.local` → `pr-42.myapp` as route key, `myapp.tengiz.local` → `myapp`)
 - Tests for `proxy` are slow (~2s each) due to TCP dial timeout on unreachable ports
 - `idle` tests are time-sensitive (use `time.Sleep` with 50ms granularity)
+- Secrets providers: `local` (default, AES-256-GCM encrypted JSON), `vault` (HashiCorp Vault), `doppler` (Doppler API). Set via `secrets_provider` in `.tengiz.yaml` or `--provider` flag on secret commands.
+- Build-time secrets: pass `--secret id=NAME,src=/path` to Docker build via `SetBuildSecrets()` on the Builder. Configured automatically from app secrets during deploy.
+- Secret interpolation: `[[secret.NAME]]` in env var values is resolved at deploy/run time from stored secrets.
