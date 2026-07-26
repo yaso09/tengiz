@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/yaso09/tengiz/internal/preview"
 	"github.com/yaso09/tengiz/internal/proxy"
 	"github.com/yaso09/tengiz/internal/runtime"
+	"github.com/yaso09/tengiz/internal/secrets"
 	"github.com/yaso09/tengiz/internal/types"
 	"github.com/yaso09/tengiz/internal/webhook"
 )
@@ -62,6 +64,8 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd)
+	rootCmd.AddCommand(secretCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -1198,6 +1202,157 @@ var configShowCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+var secretCmd = &cobra.Command{
+	Use:   "secret",
+	Short: "Manage encrypted secrets for an application",
+}
+
+var secretSetCmd = &cobra.Command{
+	Use:   "set <app> <key> <value>",
+	Short: "Set an encrypted secret",
+	Args:  cobra.ExactArgs(3),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		appName, key, value := args[0], args[1], args[2]
+
+		store := config.NewStoreWithEnv(dataDir, env)
+		app, err := store.GetApp(appName)
+		if err != nil {
+			return fmt.Errorf("app %q not found: %w", appName, err)
+		}
+
+		sm, err := secrets.NewManager(dataDir, env)
+		if err != nil {
+			return fmt.Errorf("secrets manager: %w", err)
+		}
+
+		if err := sm.Set(appName, key, value); err != nil {
+			return fmt.Errorf("set secret: %w", err)
+		}
+
+		app.Config.SecretKeys = addToSlice(app.Config.SecretKeys, key)
+		if err := store.UpdateApp(*app); err != nil {
+			return fmt.Errorf("update app: %w", err)
+		}
+
+		fmt.Printf("[tengiz] secret %s set for %s\n", key, appName)
+		return nil
+	},
+}
+
+var secretGetCmd = &cobra.Command{
+	Use:   "get <app> <key>",
+	Short: "Get a secret value",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		appName, key := args[0], args[1]
+
+		sm, err := secrets.NewManager(dataDir, env)
+		if err != nil {
+			return fmt.Errorf("secrets manager: %w", err)
+		}
+
+		val, ok, err := sm.Get(appName, key)
+		if err != nil {
+			return fmt.Errorf("get secret: %w", err)
+		}
+		if !ok {
+			return fmt.Errorf("secret %q not found for app %q", key, appName)
+		}
+
+		fmt.Printf("%s=%s\n", key, val)
+		return nil
+	},
+}
+
+var secretUnsetCmd = &cobra.Command{
+	Use:   "unset <app> <key>",
+	Short: "Remove a secret",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		appName, key := args[0], args[1]
+
+		store := config.NewStoreWithEnv(dataDir, env)
+		app, err := store.GetApp(appName)
+		if err != nil {
+			return fmt.Errorf("app %q not found: %w", appName, err)
+		}
+
+		sm, err := secrets.NewManager(dataDir, env)
+		if err != nil {
+			return fmt.Errorf("secrets manager: %w", err)
+		}
+
+		if err := sm.Unset(appName, key); err != nil {
+			return fmt.Errorf("unset secret: %w", err)
+		}
+
+		app.Config.SecretKeys = removeFromSlice(app.Config.SecretKeys, key)
+		if err := store.UpdateApp(*app); err != nil {
+			return fmt.Errorf("update app: %w", err)
+		}
+
+		fmt.Printf("[tengiz] secret %s unset for %s\n", key, appName)
+		return nil
+	},
+}
+
+var secretListCmd = &cobra.Command{
+	Use:   "list <app>",
+	Short: "List all secrets for an application (values masked)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		appName := args[0]
+
+		sm, err := secrets.NewManager(dataDir, env)
+		if err != nil {
+			return fmt.Errorf("secrets manager: %w", err)
+		}
+
+		secrets, err := sm.List(appName)
+		if err != nil {
+			return fmt.Errorf("list secrets: %w", err)
+		}
+
+		if len(secrets) == 0 {
+			fmt.Printf("No secrets for %s.\n", appName)
+			return nil
+		}
+
+		keys := make([]string, 0, len(secrets))
+		for k := range secrets {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		for _, k := range keys {
+			fmt.Printf("%s=****\n", k)
+		}
+		return nil
+	},
+}
+
+func addToSlice(s []string, v string) []string {
+	for _, x := range s {
+		if x == v {
+			return s
+		}
+	}
+	return append(s, v)
+}
+
+func removeFromSlice(s []string, v string) []string {
+	for i, x := range s {
+		if x == v {
+			return append(s[:i], s[i+1:]...)
+		}
+	}
+	return s
 }
 
 func getwd() string {
