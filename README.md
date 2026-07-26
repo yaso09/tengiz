@@ -652,10 +652,6 @@ go test ./... -v -count=1
 ```
 tengiz/
 ├── main.go                  # Entry point
-├── installer/               # TUI installer (Python/Textual, UV-managed)
-│   ├── app.py               #   Textual app
-│   ├── gh.py                #   GitHub API client
-│   └── requirements.txt     #   Dependencies
 ├── internal/
 │   ├── builder/             # Framework detection + Dockerfile generation
 │   ├── cli/                 # Cobra CLI commands
