@@ -13,7 +13,7 @@
 | Package | Responsibility |
 |---------|---------------|
 | `runtime.Manager` | Interface for container lifecycle. `NewDocker()` = exec-based impl, `NewStub()` = test mock. Also: `CreateFromImage`, `RemoveImage`, `KeepLastNImages` for rollback + image cleanup. `ContainerName(name, env)` helper. |
-| `builder` | Framework detection (`detect.go`) + Dockerfile generation (`builder.go`). Supports: Docker, Next.js, Vite, Go, Node, Python, static. Env-aware image tags (`{env}-{deploymentID}`). |
+| `builder` | Framework detection (`detect.go`) + Dockerfile generation (`builder.go`). Supports: Docker, Next.js, Vite, Go, Node, Python, static. Nixpacks backend (`build.builder: nixpacks`) for hundreds of frameworks (Ruby, Rust, PHP, etc). Env-aware image tags (`{env}-{deploymentID}`). |
 | `proxy` | `httputil.ReverseProxy` with host-based routing (`appname.tengiz.local` → port 9000+) and custom domain support. Cold-starts stopped containers on demand. Env-aware via `NewWithEnv`. |
 | `idle` | Per-app timer. `Reset(name)` extends deadline. On expiry: calls `runtime.Stop()`. Default 5m timeout. Env-aware via `NewWithEnv`. |
 | `config` | Loads `.tengiz.yaml` via viper. `LoadWithEnv(path, env)` and `LoadForEnvironment(path, env)` merge `.tengiz.{env}.yaml` overrides (latter adds env name validation + comprehensive scalar merge). `Store` persists apps + port allocations in `~/.tengiz/` (env-scoped). Adds `GetEnv`/`SetEnv`/`UnsetEnv`/`ListEnv` for env var management. |
@@ -59,6 +59,7 @@ tengiz rollback <app>           → rollback to previous deployment
 
 ## Quirks
 
+- Nixpacks is an optional build backend. Enable with `build.builder: nixpacks` in `.tengiz.yaml`. Requires `nixpacks` CLI (`npm install -g nixpacks`). Falls back to error if binary not found.
 - Container names are prefixed `tengiz-<appname>`, labeled with `tengiz-app=<appname>`
 - Non-production envs use `tengiz-<appname>-<env>` naming; all envs add `tengiz-env=<env>` label
 - Port allocations: 9000-9999, persisted in `~/.tengiz/ports.json` (env-scoped: `ports-{env}.json`)
