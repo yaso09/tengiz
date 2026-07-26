@@ -194,7 +194,7 @@ var deployCmd = &cobra.Command{
 		}
 
 		if len(cfg.Secrets) > 0 {
-			sm, secErr := secrets.NewManager(dataDir, envFlag)
+			sm, secErr := secrets.NewManagerFromConfig(dataDir, envFlag, cfg.SecretsProvider, "", "", "", "", "")
 			if secErr == nil {
 				for k, v := range cfg.Secrets {
 					if err := sm.Set(cfg.Name, k, v); err != nil {
@@ -293,7 +293,7 @@ var deployCmd = &cobra.Command{
 				return fmt.Errorf("port: %w", err)
 			}
 
-			sm, secErr := secrets.NewManager(dataDir, envFlag)
+			sm, secErr := secrets.NewManagerFromConfig(dataDir, envFlag, cfg.SecretsProvider, "", "", "", "", "")
 			if secErr == nil {
 				appSecrets, listErr := sm.GetAllForApp(cfg.Name)
 				if listErr == nil && len(appSecrets) > 0 {
@@ -370,7 +370,7 @@ var deployCmd = &cobra.Command{
 			return fmt.Errorf("port allocation: %w", err)
 		}
 
-		sm, secErr := secrets.NewManager(dataDir, envFlag)
+		sm, secErr := secrets.NewManagerFromConfig(dataDir, envFlag, cfg.SecretsProvider, "", "", "", "", "")
 		if secErr == nil {
 			appSecrets, listErr := sm.GetAllForApp(cfg.Name)
 			if listErr == nil && len(appSecrets) > 0 {
@@ -635,7 +635,7 @@ var rmCmd = &cobra.Command{
 		}
 		store.RemoveApp(appName)
 
-		sm, secErr := secrets.NewManager(dataDir, env)
+		sm, secErr := getSecretManager(cmd, dataDir, env)
 		if secErr == nil {
 			secretsList, listErr := sm.List(appName)
 			if listErr == nil {
@@ -1126,7 +1126,7 @@ Examples:
 			extraEnv[parts[0]] = parts[1]
 		}
 
-		sm, secErr := secrets.NewManager(dataDir, env)
+		sm, secErr := getSecretManager(cmd, dataDir, env)
 		if secErr == nil {
 			appSecrets, listErr := sm.GetAllForApp(appName)
 			if listErr == nil && len(appSecrets) > 0 {
@@ -1483,7 +1483,7 @@ var configSetCmd = &cobra.Command{
 		store := config.NewStoreWithEnv(dataDir, env)
 
 		if isSecret, _ := cmd.Flags().GetBool("secret"); isSecret {
-			sm, err := secrets.NewManager(dataDir, env)
+			sm, err := getSecretManager(cmd, dataDir, env)
 			if err != nil {
 				return fmt.Errorf("secrets manager: %w", err)
 			}
@@ -1524,7 +1524,7 @@ var configGetCmd = &cobra.Command{
 			return fmt.Errorf("env var %q not set for %s", args[1], args[0])
 		}
 
-		sm, secErr := secrets.NewManager(dataDir, env)
+		sm, secErr := getSecretManager(cmd, dataDir, env)
 		if secErr == nil {
 			secretKeys, _ := sm.List(args[0])
 			if _, isSecret := secretKeys[args[1]]; isSecret {
@@ -1568,7 +1568,7 @@ var configShowCmd = &cobra.Command{
 			return nil
 		}
 
-		sm, secErr := secrets.NewManager(dataDir, env)
+		sm, secErr := getSecretManager(cmd, dataDir, env)
 		if secErr == nil {
 			secretKeys, _ := sm.List(args[0])
 			for k := range secretKeys {
@@ -1604,7 +1604,7 @@ var secretSetCmd = &cobra.Command{
 			return fmt.Errorf("app %q not found: %w", appName, err)
 		}
 
-		sm, err := secrets.NewManager(dataDir, env)
+		sm, err := getSecretManager(cmd, dataDir, env)
 		if err != nil {
 			return fmt.Errorf("secrets manager: %w", err)
 		}
@@ -1631,7 +1631,7 @@ var secretGetCmd = &cobra.Command{
 		env := getEnv(cmd)
 		appName, key := args[0], args[1]
 
-		sm, err := secrets.NewManager(dataDir, env)
+		sm, err := getSecretManager(cmd, dataDir, env)
 		if err != nil {
 			return fmt.Errorf("secrets manager: %w", err)
 		}
@@ -1663,7 +1663,7 @@ var secretUnsetCmd = &cobra.Command{
 			return fmt.Errorf("app %q not found: %w", appName, err)
 		}
 
-		sm, err := secrets.NewManager(dataDir, env)
+		sm, err := getSecretManager(cmd, dataDir, env)
 		if err != nil {
 			return fmt.Errorf("secrets manager: %w", err)
 		}
@@ -1690,7 +1690,7 @@ var secretListCmd = &cobra.Command{
 		env := getEnv(cmd)
 		appName := args[0]
 
-		sm, err := secrets.NewManager(dataDir, env)
+		sm, err := getSecretManager(cmd, dataDir, env)
 		if err != nil {
 			return fmt.Errorf("secrets manager: %w", err)
 		}
@@ -1736,6 +1736,16 @@ func removeFromSlice(s []string, v string) []string {
 	return s
 }
 
+func getSecretManager(cmd *cobra.Command, dataDir, env string) (*secrets.Manager, error) {
+	provider, _ := cmd.Flags().GetString("provider")
+	vaultAddr, _ := cmd.Flags().GetString("vault-addr")
+	vaultToken, _ := cmd.Flags().GetString("vault-token")
+	dopplerToken, _ := cmd.Flags().GetString("doppler-token")
+	dopplerProject, _ := cmd.Flags().GetString("doppler-project")
+	dopplerConfig, _ := cmd.Flags().GetString("doppler-config")
+	return secrets.NewManagerFromConfig(dataDir, env, provider, vaultAddr, vaultToken, dopplerToken, dopplerProject, dopplerConfig)
+}
+
 func maskSecret(s string) string {
 	if len(s) <= 4 {
 		return "****"
@@ -1749,6 +1759,15 @@ func getwd() string {
 		return "app"
 	}
 	return wd
+}
+
+func addSecretProviderFlags(cmd *cobra.Command) {
+	cmd.Flags().String("provider", "", "secrets provider: local, vault, doppler (default: local)")
+	cmd.Flags().String("vault-addr", "", "Vault server address")
+	cmd.Flags().String("vault-token", "", "Vault token")
+	cmd.Flags().String("doppler-token", "", "Doppler service token")
+	cmd.Flags().String("doppler-project", "", "Doppler project")
+	cmd.Flags().String("doppler-config", "", "Doppler config")
 }
 
 func Execute() {
@@ -1767,6 +1786,10 @@ func Execute() {
 	notificationSetChannelCmd.Flags().String("username", "", "SMTP username")
 	notificationSetChannelCmd.Flags().String("password", "", "SMTP password")
 	notificationSetChannelCmd.Flags().Bool("tls", false, "use TLS for SMTP")
+	addSecretProviderFlags(secretSetCmd)
+	addSecretProviderFlags(secretGetCmd)
+	addSecretProviderFlags(secretUnsetCmd)
+	addSecretProviderFlags(secretListCmd)
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

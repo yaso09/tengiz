@@ -155,7 +155,7 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 			return fmt.Errorf("port: %w", err)
 		}
 
-		sm, secErr := secrets.NewManager(p.dataDir, p.env)
+		sm, secErr := secrets.NewManagerFromConfig(p.dataDir, p.env, cfg.SecretsProvider, "", "", "", "", "")
 		if secErr == nil {
 			appSecrets, listErr := sm.GetAllForApp(appName)
 			if listErr == nil && len(appSecrets) > 0 {
@@ -231,7 +231,7 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		return fmt.Errorf("port allocation: %w", err)
 	}
 
-	sm, secErr := secrets.NewManager(p.dataDir, p.env)
+	sm, secErr := secrets.NewManagerFromConfig(p.dataDir, p.env, cfg.SecretsProvider, "", "", "", "", "")
 	if secErr == nil {
 		appSecrets, listErr := sm.GetAllForApp(appName)
 		if listErr == nil && len(appSecrets) > 0 {

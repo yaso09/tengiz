@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"fmt"
 	"sync"
 )
 
@@ -64,4 +65,32 @@ func (m *Manager) GetAllForApp(appName string) (map[string]string, error) {
 
 func (m *Manager) Provider() Provider {
 	return m.provider
+}
+
+func NewManagerFromConfig(dataDir, env, provider, vaultAddr, vaultToken, dopplerToken, dopplerProject, dopplerConfig string) (*Manager, error) {
+	switch provider {
+	case "", "local":
+		return NewManager(dataDir, env)
+	case "vault":
+		p, err := NewVaultProvider(VaultConfig{
+			Address: vaultAddr,
+			Token:   vaultToken,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return NewManagerWithProvider(p), nil
+	case "doppler":
+		p, err := NewDopplerProvider(DopplerConfig{
+			Token:   dopplerToken,
+			Project: dopplerProject,
+			Config:  dopplerConfig,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return NewManagerWithProvider(p), nil
+	default:
+		return nil, fmt.Errorf("unknown secrets provider: %q (supported: local, vault, doppler)", provider)
+	}
 }

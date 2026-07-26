@@ -81,7 +81,8 @@ type AppConfig struct {
 	HealthCheck *HealthCheckConfig  `mapstructure:"healthcheck,omitempty"`
 	Resources   *ResourceConfig     `mapstructure:"resources,omitempty" json:"resources,omitempty"`
 	Env         map[string]string   `mapstructure:"env" json:"env,omitempty"`
-	SecretKeys  []string            `mapstructure:"secret_keys,omitempty" json:"secret_keys,omitempty"`
+	SecretKeys      []string            `mapstructure:"secret_keys,omitempty" json:"secret_keys,omitempty"`
+	SecretsProvider string              `mapstructure:"secrets_provider" json:"secrets_provider,omitempty"`
 	Secrets     map[string]string   `mapstructure:"secrets" json:"-"`
 	Environment string              `mapstructure:"environment" json:"environment,omitempty"`
 	Git         *GitConfig          `mapstructure:"git,omitempty" json:"git,omitempty"`

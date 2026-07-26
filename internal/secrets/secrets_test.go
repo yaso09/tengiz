@@ -226,6 +226,27 @@ func TestManagerWithStubProvider(t *testing.T) {
 	}
 }
 
+func TestNewManagerFromConfigLocal(t *testing.T) {
+	m, err := NewManagerFromConfig(t.TempDir(), "test", "", "", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Set("app", "K", "v"); err != nil {
+		t.Fatal(err)
+	}
+	v, ok, _ := m.Get("app", "K")
+	if !ok || v != "v" {
+		t.Fatal("expected v")
+	}
+}
+
+func TestNewManagerFromConfigUnknown(t *testing.T) {
+	_, err := NewManagerFromConfig("", "test", "nonexistent", "", "", "", "", "")
+	if err == nil {
+		t.Fatal("expected error for unknown provider")
+	}
+}
+
 func TestManagerWithStubProviderGetAllForApp(t *testing.T) {
 	m := NewManagerWithProvider(newStubProvider())
 	m.Set("app1", "A", "1")
