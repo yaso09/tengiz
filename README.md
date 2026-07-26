@@ -29,7 +29,45 @@
 
 ## Installation
 
+### One-liner (Unix)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yaso09/tengiz/main/install.sh | bash
+```
+
+Pass flags directly:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yaso09/tengiz/main/install.sh | bash -s -- --ci --dry-run
+curl -fsSL https://raw.githubusercontent.com/yaso09/tengiz/main/install.sh | bash -s -- --ci --os linux --arch arm64
+```
+
+### One-liner (Windows PowerShell)
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/yaso09/tengiz/main/install.bat | iex
+```
+
+### From cloned repo
+
+```bash
+git clone https://github.com/yaso09/tengiz.git
+cd tengiz
+
+# CI build (requires gh CLI)
+./install.sh                # Unix
+install.bat                 # Windows
+
+# or latest release
+./install.sh --version v0.1.0
+
+# or run source directly (no gh needed)
+python3 installer/install.py
+```
+
 ### From source
+
+Build the CLI binary yourself:
 
 ```bash
 git clone https://github.com/yaso09/tengiz.git
@@ -38,7 +76,7 @@ go build -o tengiz .
 sudo mv tengiz /usr/local/bin/
 ```
 
-### Or just build and run without installing
+### Quick run without installing
 
 ```bash
 go build -o tengiz .
