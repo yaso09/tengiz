@@ -72,3 +72,42 @@ jobs:
           name: tengiz-windows-amd64
           path: tengiz-windows-amd64.exe
           if-no-files-found: error
+
+  build-installer:
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        include:
+          - os: ubuntu-latest
+            asset: tengiz-installer-linux
+            ext: ""
+          - os: macos-latest
+            asset: tengiz-installer-darwin
+            ext: ""
+          - os: windows-latest
+            asset: tengiz-installer-windows
+            ext: .exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build installer
+        run: pyinstaller --onefile --name tengiz-installer${{ matrix.ext }} installer/install.py
+
+      - name: Upload ${{ matrix.asset }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/tengiz-installer${{ matrix.ext }}
+          if-no-files-found: error
