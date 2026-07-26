@@ -240,6 +240,19 @@ var deployCmd = &cobra.Command{
 				return fmt.Errorf("port: %w", err)
 			}
 
+			sm, secErr := secrets.NewManager(dataDir, envFlag)
+			if secErr == nil {
+				appSecrets, listErr := sm.GetAllForApp(cfg.Name)
+				if listErr == nil && len(appSecrets) > 0 {
+					if cfg.Env == nil {
+						cfg.Env = make(map[string]string, len(appSecrets))
+					}
+					for k, v := range appSecrets {
+						cfg.Env[k] = v
+					}
+				}
+			}
+
 			if err := rt.Create(context.Background(), cfg, imageTag, port); err != nil {
 				return fmt.Errorf("create: %w", err)
 			}
@@ -280,6 +293,19 @@ var deployCmd = &cobra.Command{
 		newPort, err := store.AllocatePort(cfg.Name)
 		if err != nil {
 			return fmt.Errorf("port allocation: %w", err)
+		}
+
+		sm, secErr := secrets.NewManager(dataDir, envFlag)
+		if secErr == nil {
+			appSecrets, listErr := sm.GetAllForApp(cfg.Name)
+			if listErr == nil && len(appSecrets) > 0 {
+				if cfg.Env == nil {
+					cfg.Env = make(map[string]string, len(appSecrets))
+				}
+				for k, v := range appSecrets {
+					cfg.Env[k] = v
+				}
+			}
 		}
 
 		// Create new container with versioned name
@@ -996,6 +1022,16 @@ Examples:
 				return fmt.Errorf("invalid env format %q, use KEY=VALUE", e)
 			}
 			extraEnv[parts[0]] = parts[1]
+		}
+
+		sm, secErr := secrets.NewManager(dataDir, env)
+		if secErr == nil {
+			appSecrets, listErr := sm.GetAllForApp(appName)
+			if listErr == nil && len(appSecrets) > 0 {
+				for k, v := range appSecrets {
+					extraEnv[k] = v
+				}
+			}
 		}
 
 		opts := runtime.RunOptions{

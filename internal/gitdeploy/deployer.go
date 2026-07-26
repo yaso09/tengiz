@@ -13,6 +13,7 @@ import (
 	"github.com/yaso09/tengiz/internal/git"
 	"github.com/yaso09/tengiz/internal/proxy"
 	"github.com/yaso09/tengiz/internal/runtime"
+	"github.com/yaso09/tengiz/internal/secrets"
 	"github.com/yaso09/tengiz/internal/types"
 )
 
@@ -130,6 +131,19 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 			return fmt.Errorf("port: %w", err)
 		}
 
+		sm, secErr := secrets.NewManager(p.dataDir, p.env)
+		if secErr == nil {
+			appSecrets, listErr := sm.GetAllForApp(appName)
+			if listErr == nil && len(appSecrets) > 0 {
+				if cfg.Env == nil {
+					cfg.Env = make(map[string]string, len(appSecrets))
+				}
+				for k, v := range appSecrets {
+					cfg.Env[k] = v
+				}
+			}
+		}
+
 		if err := p.rt.Create(ctx, cfg, imageTag, port); err != nil {
 			p.store.FreePort(port)
 			return fmt.Errorf("create: %w", err)
@@ -172,6 +186,19 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 	newPort, err := p.store.AllocatePort(appName)
 	if err != nil {
 		return fmt.Errorf("port allocation: %w", err)
+	}
+
+	sm, secErr := secrets.NewManager(p.dataDir, p.env)
+	if secErr == nil {
+		appSecrets, listErr := sm.GetAllForApp(appName)
+		if listErr == nil && len(appSecrets) > 0 {
+			if cfg.Env == nil {
+				cfg.Env = make(map[string]string, len(appSecrets))
+			}
+			for k, v := range appSecrets {
+				cfg.Env[k] = v
+			}
+		}
 	}
 
 	if err := p.rt.CreateVersioned(ctx, cfg, imageTag, newPort, deploymentID); err != nil {
