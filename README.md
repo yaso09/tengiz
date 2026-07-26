@@ -38,8 +38,8 @@ Downloads the latest published release asset for your platform.
 | Platform | Command |
 |----------|---------|
 | Unix | `curl -fsSL https://raw.githubusercontent.com/yaso09/tengiz/main/install.sh \| bash` |
-| Windows PowerShell | `iwr -useb https://raw.githubusercontent.com/yaso09/tengiz/main/install.bat \| iex` |
-| Cloned repo | `./install.sh` / `install.bat` |
+| Windows PowerShell | `iwr -useb https://raw.githubusercontent.com/yaso09/tengiz/main/install.ps1 \| iex` |
+| Cloned repo | `./install.sh` / `./install.ps1` |
 
 To pin a specific version:
 
@@ -54,8 +54,8 @@ Downloads the latest successful CI build artifact for your platform. Useful for 
 | Platform | Command |
 |----------|---------|
 | Unix | `curl -fsSL https://raw.githubusercontent.com/yaso09/tengiz/main/install.sh \| bash -s -- --ci` |
-| Windows PowerShell | `powershell -c "iwr -useb https://raw.githubusercontent.com/yaso09/tengiz/main/install.bat \| iex; & install.bat --ci"` |
-| Cloned repo | `./install.sh --ci` / `install.bat --ci` |
+| Windows PowerShell | `powershell -c "iwr -useb https://raw.githubusercontent.com/yaso09/tengiz/main/install.ps1 -OutFile ~\install.ps1; . ~\install.ps1 -ci"` |
+| Cloned repo | `./install.sh --ci` / `./install.ps1 -ci` |
 
 Override platform detection for cross-downloads:
 
@@ -65,7 +65,7 @@ curl -fsSL https://raw.githubusercontent.com/yaso09/tengiz/main/install.sh | bas
 
 ### How the install scripts work
 
-Both `install.sh` and `install.bat` follow the same three-step fallback:
+All install scripts (`install.sh`, `install.ps1`) follow the same three-step fallback:
 
 1. **`gh` CLI available** — download the pre-built binary from CI artifacts or releases (fastest)
 2. **Local source present** — run `python3 installer/install.py` directly from the cloned repo
