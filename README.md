@@ -29,41 +29,49 @@
 
 ## Installation
 
-### One-liner (Unix)
+Tengiz can be installed from **releases** (stable, recommended) or from **CI builds** (latest development version).
+
+### From release (stable)
+
+Downloads the latest published release asset for your platform.
+
+| Platform | Command |
+|----------|---------|
+| Unix | `curl -fsSL https://raw.githubusercontent.com/yaso09/tengiz/main/install.sh \| bash` |
+| Windows PowerShell | `iwr -useb https://raw.githubusercontent.com/yaso09/tengiz/main/install.bat \| iex` |
+| Cloned repo | `./install.sh` / `install.bat` |
+
+To pin a specific version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yaso09/tengiz/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/yaso09/tengiz/main/install.sh | bash -s -- --version v0.1.0
 ```
 
-Pass flags directly:
+### From CI (development)
+
+Downloads the latest successful CI build artifact for your platform. Useful for trying the latest changes before a release is cut.
+
+| Platform | Command |
+|----------|---------|
+| Unix | `curl -fsSL https://raw.githubusercontent.com/yaso09/tengiz/main/install.sh \| bash -s -- --ci` |
+| Windows PowerShell | `powershell -c "iwr -useb https://raw.githubusercontent.com/yaso09/tengiz/main/install.bat \| iex; & install.bat --ci"` |
+| Cloned repo | `./install.sh --ci` / `install.bat --ci` |
+
+Override platform detection for cross-downloads:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yaso09/tengiz/main/install.sh | bash -s -- --ci --dry-run
 curl -fsSL https://raw.githubusercontent.com/yaso09/tengiz/main/install.sh | bash -s -- --ci --os linux --arch arm64
 ```
 
-### One-liner (Windows PowerShell)
+### How the install scripts work
 
-```powershell
-iwr -useb https://raw.githubusercontent.com/yaso09/tengiz/main/install.bat | iex
-```
+Both `install.sh` and `install.bat` follow the same three-step fallback:
 
-### From cloned repo
+1. **`gh` CLI available** — download the pre-built binary from CI artifacts or releases (fastest)
+2. **Local source present** — run `python3 installer/install.py` directly from the cloned repo
+3. **Neither** — download Python source from `raw.githubusercontent.com` and run it
 
-```bash
-git clone https://github.com/yaso09/tengiz.git
-cd tengiz
-
-# CI build (requires gh CLI)
-./install.sh                # Unix
-install.bat                 # Windows
-
-# or latest release
-./install.sh --version v0.1.0
-
-# or run source directly (no gh needed)
-python3 installer/install.py
-```
+No authentication or tokens are needed — all sources are public.
 
 ### From source
 
