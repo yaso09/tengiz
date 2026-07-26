@@ -141,3 +141,42 @@ func (p *LocalProvider) List(appName string) (map[string]string, error) {
 	}
 	return result, nil
 }
+
+func (p *LocalProvider) keyPath() string {
+	return filepath.Join(p.dataDir, ".key")
+}
+
+func (p *LocalProvider) RotateKey() error {
+	keyPath := p.keyPath()
+	if _, err := os.Stat(keyPath); err == nil {
+		oldPath := keyPath + ".old"
+		data, err := os.ReadFile(keyPath)
+		if err != nil {
+			return fmt.Errorf("read old key: %w", err)
+		}
+		if err := os.WriteFile(oldPath, data, 0600); err != nil {
+			return fmt.Errorf("backup old key: %w", err)
+		}
+	}
+
+	newKey, err := encrypt.GenerateKey()
+	if err != nil {
+		return fmt.Errorf("generate new key: %w", err)
+	}
+
+	sf, err := p.load()
+	if err != nil {
+		return fmt.Errorf("load secrets with old key: %w", err)
+	}
+
+	if err := encrypt.SaveKey(keyPath, newKey); err != nil {
+		return fmt.Errorf("save new key: %w", err)
+	}
+	p.key = newKey
+
+	if err := p.save(sf); err != nil {
+		return fmt.Errorf("save secrets with new key: %w", err)
+	}
+
+	return nil
+}
