@@ -83,17 +83,18 @@ function Download-Source {
 }
 
 function Build-Args {
-    $argList = @()
-    if ($ci) { $argList += "--ci" }
-    if ($version) { $argList += "--version"; $argList += $version }
-    if ($os) { $argList += "--os"; $argList += $os }
-    if ($arch) { $argList += "--arch"; $argList += $arch }
-    if ($dest) { $argList += "--dest"; $argList += $dest }
-    if ($noPath) { $argList += "--no-path" }
-    if ($dryRun) { $argList += "--dry-run" }
-    if ($listVersions -or $list) { $argList += "--list" }
-    if ($listArtifacts -or ($list -and $ci)) { $argList += "--list-artifacts" }
-    return $argList
+    $a = @()
+    if ($ci) { $a += "--ci" }
+    if ($version) { $a += "--version"; $a += $version }
+    if ($os) { $a += "--os"; $a += $os }
+    if ($arch) { $a += "--arch"; $a += $arch }
+    if ($dest) { $a += "--dest"; $a += $dest }
+    if ($noPath) { $a += "--no-path" }
+    if ($dryRun) { $a += "--dry-run" }
+    if ($listVersions -or $list) { $a += "--list" }
+    if ($listArtifacts -or ($list -and $ci)) { $a += "--list-artifacts" }
+    if ($help) { $a += "--help" }
+    return $a
 }
 
 $python = if (Get-Command "python3" -ErrorAction SilentlyContinue) { "python3" }
@@ -105,7 +106,7 @@ $binary = Use-GitHubCLI
 if ($binary) {
     $installerArgs = Build-Args
     if ($installerArgs.Count -gt 0) {
-        & $binary @installerArgs
+        & $binary $installerArgs
     } else {
         & $binary
     }
@@ -130,5 +131,9 @@ if (-not $python) {
 }
 
 $installerArgs = Build-Args
-& $python $source @installerArgs
+if ($installerArgs.Count -gt 0) {
+    & $python $source $installerArgs
+} else {
+    & $python $source
+}
 exit $LASTEXITCODE
