@@ -260,6 +260,23 @@ var deployCmd = &cobra.Command{
 			return fmt.Errorf("docker: %w", err)
 		}
 
+		// Set up notification manager
+		notifyMgr := notify.NewManager(dataDir, envFlag)
+		if loadErr := notifyMgr.LoadConfig(); loadErr == nil {
+			cfg := notifyMgr.GetConfig()
+			if cfg != nil && cfg.Enabled {
+				if cfg.Discord != nil {
+					notifyMgr.AddNotifier(notify.NewDiscordNotifier(*cfg.Discord))
+				}
+				if cfg.Slack != nil {
+					notifyMgr.AddNotifier(notify.NewSlackNotifier(*cfg.Slack))
+				}
+				if cfg.Email != nil {
+					notifyMgr.AddNotifier(notify.NewEmailNotifier(*cfg.Email))
+				}
+			}
+		}
+
 		// Check if this app already exists (previous deploy)
 		existingApp, lookupErr := store.GetApp(cfg.Name)
 
@@ -267,6 +284,12 @@ var deployCmd = &cobra.Command{
 			// First deploy — simple: allocate port, create container
 			port, err := store.AllocatePort(cfg.Name)
 			if err != nil {
+				notifyMgr.SendAsync(context.Background(), types.NotificationEvent{
+					Type:    types.EventDeployFailure,
+					AppName: cfg.Name,
+					Message: fmt.Sprintf("Port allocation failed for %s: %v", cfg.Name, err),
+					Metadata: map[string]string{"environment": envFlag},
+				})
 				return fmt.Errorf("port: %w", err)
 			}
 
@@ -284,6 +307,12 @@ var deployCmd = &cobra.Command{
 			}
 
 			if err := rt.Create(context.Background(), cfg, imageTag, port); err != nil {
+				notifyMgr.SendAsync(context.Background(), types.NotificationEvent{
+					Type:    types.EventDeployFailure,
+					AppName: cfg.Name,
+					Message: fmt.Sprintf("Container create failed for %s: %v", cfg.Name, err),
+					Metadata: map[string]string{"environment": envFlag},
+				})
 				return fmt.Errorf("create: %w", err)
 			}
 			fmt.Printf("[tengiz] running on port %d\n", port)
@@ -314,6 +343,16 @@ var deployCmd = &cobra.Command{
 
 			fmt.Printf("[tengiz] deployed: %s at http://%s.tengiz.local:%d\n",
 				cfg.Name, cfg.Name, port)
+
+			notifyMgr.SendAsync(context.Background(), types.NotificationEvent{
+				Type:    types.EventDeploySuccess,
+				AppName: cfg.Name,
+				Message: fmt.Sprintf("Deployed %s successfully on port %d", cfg.Name, port),
+				Metadata: map[string]string{
+					"environment": envFlag,
+					"image":       imageTag,
+				},
+			})
 			return nil
 		}
 
@@ -322,6 +361,12 @@ var deployCmd = &cobra.Command{
 		// Allocate a second port for the new container
 		newPort, err := store.AllocatePort(cfg.Name)
 		if err != nil {
+			notifyMgr.SendAsync(context.Background(), types.NotificationEvent{
+				Type:    types.EventDeployFailure,
+				AppName: cfg.Name,
+				Message: fmt.Sprintf("Port allocation failed for %s: %v", cfg.Name, err),
+				Metadata: map[string]string{"environment": envFlag},
+			})
 			return fmt.Errorf("port allocation: %w", err)
 		}
 
@@ -341,6 +386,12 @@ var deployCmd = &cobra.Command{
 		// Create new container with versioned name
 		if err := rt.CreateVersioned(context.Background(), cfg, imageTag, newPort, deploymentID); err != nil {
 			store.FreePort(newPort)
+			notifyMgr.SendAsync(context.Background(), types.NotificationEvent{
+				Type:    types.EventDeployFailure,
+				AppName: cfg.Name,
+				Message: fmt.Sprintf("Container create failed for %s: %v", cfg.Name, err),
+				Metadata: map[string]string{"environment": envFlag},
+			})
 			return fmt.Errorf("create versioned: %w", err)
 		}
 		fmt.Printf("[tengiz] new container starting on port %d\n", newPort)
@@ -407,6 +458,16 @@ var deployCmd = &cobra.Command{
 
 		fmt.Printf("[tengiz] deployed (zero-downtime): %s at http://%s.tengiz.local:%d\n",
 			cfg.Name, cfg.Name, newPort)
+
+		notifyMgr.SendAsync(context.Background(), types.NotificationEvent{
+			Type:    types.EventDeploySuccess,
+			AppName: cfg.Name,
+			Message: fmt.Sprintf("Deployed %s successfully on port %d (zero-downtime)", cfg.Name, newPort),
+			Metadata: map[string]string{
+				"environment": envFlag,
+				"image":       imageTag,
+			},
+		})
 		return nil
 	},
 }
