@@ -9,8 +9,8 @@ param(
     [switch]$dryRun,
     [switch]$list,
     [switch]$listVersions,
-    [string]$listAssets,
-    [switch]$listArtifacts
+    [switch]$listArtifacts,
+    [switch]$help
 )
 
 $REPO = "yaso09/tengiz"
@@ -83,18 +83,17 @@ function Download-Source {
 }
 
 function Build-Args {
-    $a = @()
-    if ($ci) { $a += "--ci" }
-    if ($version) { $a += "--version"; $a += $version }
-    if ($os) { $a += "--os"; $a += $os }
-    if ($arch) { $a += "--arch"; $a += $arch }
-    if ($dest) { $a += "--dest"; $a += $dest }
-    if ($noPath) { $a += "--no-path" }
-    if ($dryRun) { $a += "--dry-run" }
-    if ($listVersions -or $list) { $a += "--list" }
-    if ($listAssets) { $a += "--list-assets"; if ($listAssets -ne $true) { $a += $listAssets } }
-    if ($listArtifacts -or ($list -and $ci)) { $a += "--list-artifacts" }
-    return $a
+    $argList = @()
+    if ($ci) { $argList += "--ci" }
+    if ($version) { $argList += "--version"; $argList += $version }
+    if ($os) { $argList += "--os"; $argList += $os }
+    if ($arch) { $argList += "--arch"; $argList += $arch }
+    if ($dest) { $argList += "--dest"; $argList += $dest }
+    if ($noPath) { $argList += "--no-path" }
+    if ($dryRun) { $argList += "--dry-run" }
+    if ($listVersions -or $list) { $argList += "--list" }
+    if ($listArtifacts -or ($list -and $ci)) { $argList += "--list-artifacts" }
+    return $argList
 }
 
 $python = if (Get-Command "python3" -ErrorAction SilentlyContinue) { "python3" }
@@ -104,9 +103,9 @@ $python = if (Get-Command "python3" -ErrorAction SilentlyContinue) { "python3" }
 # Try gh binary first
 $binary = Use-GitHubCLI
 if ($binary) {
-    $args = Build-Args
-    if ($args.Count -gt 0) {
-        & $binary @args
+    $installerArgs = Build-Args
+    if ($installerArgs.Count -gt 0) {
+        & $binary @installerArgs
     } else {
         & $binary
     }
@@ -130,6 +129,6 @@ if (-not $python) {
     exit 1
 }
 
-$args = Build-Args
-& $python $source @args
+$installerArgs = Build-Args
+& $python $source @installerArgs
 exit $LASTEXITCODE
