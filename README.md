@@ -291,13 +291,17 @@ Manage environment variables for an application.
 
 #### `tengiz config set <app> <key> <value>`
 
-Set an environment variable for an application. Persisted in `~/.tengiz/apps.json` and injected as `-e KEY=VALUE` on next deploy/start.
+Set an environment variable (or encrypted secret with `--secret`) for an application. Plaintext env vars are persisted in `~/.tengiz/apps.json` and injected as `-e KEY=VALUE` on next deploy/start. Secrets are AES-256-GCM encrypted and stored in `~/.tengiz/secrets-{env}.json`.
+
+| Flag | Description |
+|------|-------------|
+| `--secret` | Store as encrypted secret instead of plaintext env var |
 
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name |
-| `key` | Environment variable name |
-| `value` | Environment variable value |
+| `key` | Environment variable or secret name |
+| `value` | Value |
 
 #### `tengiz config get <app> <key>`
 
@@ -320,6 +324,46 @@ Remove an environment variable.
 #### `tengiz config show <app>`
 
 Show all environment variables for an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+
+### `tengiz secret`
+
+Manage encrypted secrets for an application. Secrets are AES-256-GCM encrypted and stored in `~/.tengiz/secrets-{env}.json`, separate from plaintext env vars.
+
+#### `tengiz secret set <app> <key> <value>`
+
+Set an encrypted secret for an application. Injected as `-e KEY=VALUE` on next deploy/start alongside env vars.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `key` | Secret name |
+| `value` | Secret value |
+
+#### `tengiz secret get <app> <key>`
+
+Get the decrypted value of a secret.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `key` | Secret name |
+
+#### `tengiz secret unset <app> <key>`
+
+Remove a secret from an application.
+
+| Argument | Description |
+|----------|-------------|
+| `app` | Application name |
+| `key` | Secret name |
+
+#### `tengiz secret list <app>`
+
+List all secrets for an application. Values are masked for security.
 
 | Argument | Description |
 |----------|-------------|
@@ -352,6 +396,9 @@ healthcheck:
 env:
   DATABASE_URL: postgres://localhost:5432/myapp
   API_KEY: your-secret-key
+secrets:
+  DB_PASSWORD: s3cr3t
+  STRIPE_API_KEY: sk_live_abc123
 resources:
   cpu: "1.0"         # CPU cores (e.g., "0.5", "2")
   memory: "256m"     # Memory limit (e.g., "128m", "1g")
