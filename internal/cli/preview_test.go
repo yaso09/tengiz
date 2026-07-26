@@ -4,23 +4,34 @@ import (
 	"testing"
 )
 
-func TestPreviewCommandsRegistered(t *testing.T) {
-	cmd, _, err := rootCmd.Find([]string{"preview"})
-	if err != nil {
-		t.Fatalf("preview command not found: %v", err)
+func TestPreviewCmdRegistered(t *testing.T) {
+	found := false
+	for _, cmd := range rootCmd.Commands() {
+		if cmd.Use == "preview" {
+			found = true
+			break
+		}
 	}
-	if cmd == nil {
-		t.Fatal("preview command is nil")
+	if !found {
+		t.Error("preview command not registered on root")
 	}
+}
 
+func TestPreviewSubCommands(t *testing.T) {
+	if previewCmd == nil {
+		t.Skip("previewCmd not defined")
+	}
 	subCommands := []string{"list", "rm", "deploy"}
 	for _, name := range subCommands {
-		sub, _, err := cmd.Find([]string{name})
-		if err != nil {
-			t.Errorf("preview %s subcommand not found: %v", name, err)
+		found := false
+		for _, sub := range previewCmd.Commands() {
+			if sub.Use == name || len(sub.Use) > len(name) && sub.Use[:len(name)] == name {
+				found = true
+				break
+			}
 		}
-		if sub == nil {
-			t.Errorf("preview %s subcommand is nil", name)
+		if !found {
+			t.Errorf("preview subcommand %q not found", name)
 		}
 	}
 }

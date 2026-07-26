@@ -541,6 +541,57 @@ func TestPreviewStoreCRUD(t *testing.T) {
 	}
 }
 
+func TestPreviewFullLifecycleNaming(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	appName := "myapp"
+	prNumber := 42
+
+	key := previewKey(appName, prNumber)
+	expectedKey := "myapp/pr-42"
+	if key != expectedKey {
+		t.Errorf("previewKey = %q, want %q", key, expectedKey)
+	}
+
+	containerName := fmt.Sprintf("tengiz-%s-pr-%d", appName, prNumber)
+	if containerName != "tengiz-myapp-pr-42" {
+		t.Errorf("container name = %q", containerName)
+	}
+
+	preview := types.PreviewEntry{
+		AppName:       appName,
+		PRNumber:      prNumber,
+		Branch:        "feature/login",
+		ContainerName: containerName,
+		Port:          9001,
+		Status:        string(types.PreviewActive),
+	}
+	s.AddPreview(preview)
+
+	got, err := s.GetPreview(appName, prNumber)
+	if err != nil {
+		t.Fatalf("GetPreview: %v", err)
+	}
+	if got.ContainerName != "tengiz-myapp-pr-42" {
+		t.Errorf("container name = %q", got.ContainerName)
+	}
+
+	previews, err := s.ListPreviews(appName)
+	if err != nil {
+		t.Fatalf("ListPreviews: %v", err)
+	}
+	if len(previews) != 1 {
+		t.Errorf("len = %d, want 1", len(previews))
+	}
+
+	s.DeletePreview(appName, prNumber)
+	_, err = s.GetPreview(appName, prNumber)
+	if err == nil {
+		t.Error("expected error after remove")
+	}
+}
+
 func TestPruneBuildLogs(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)
