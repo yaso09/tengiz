@@ -19,6 +19,7 @@ import (
 	"github.com/yaso09/tengiz/internal/git"
 	"github.com/yaso09/tengiz/internal/gitdeploy"
 	"github.com/yaso09/tengiz/internal/health"
+	"github.com/yaso09/tengiz/internal/notify"
 	"github.com/yaso09/tengiz/internal/idle"
 	"github.com/yaso09/tengiz/internal/preview"
 	"github.com/yaso09/tengiz/internal/proxy"
@@ -66,6 +67,12 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd)
 	rootCmd.AddCommand(secretCmd)
+	notificationCmd.AddCommand(notificationEnableCmd)
+	notificationCmd.AddCommand(notificationDisableCmd)
+	notificationCmd.AddCommand(notificationConfigCmd)
+	notificationCmd.AddCommand(notificationSetChannelCmd)
+	notificationCmd.AddCommand(notificationShowCmd)
+	rootCmd.AddCommand(notificationCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -1197,6 +1204,209 @@ var webhookCmd = &cobra.Command{
 	},
 }
 
+var notificationCmd = &cobra.Command{
+	Use:   "notification",
+	Short: "Manage notification channels",
+}
+
+var notificationEnableCmd = &cobra.Command{
+	Use:   "enable",
+	Short: "Enable notifications",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		mgr := notify.NewManager(dataDir, env)
+		if err := mgr.LoadConfig(); err != nil {
+			return err
+		}
+		cfg := mgr.GetConfig()
+		if cfg == nil {
+			cfg = &types.NotificationConfig{Enabled: true}
+		} else {
+			cfg.Enabled = true
+		}
+		if err := mgr.SaveConfig(cfg); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
+		fmt.Println("[tengiz] notifications enabled")
+		return nil
+	},
+}
+
+var notificationDisableCmd = &cobra.Command{
+	Use:   "disable",
+	Short: "Disable notifications",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		mgr := notify.NewManager(dataDir, env)
+		if err := mgr.LoadConfig(); err != nil {
+			return err
+		}
+		cfg := mgr.GetConfig()
+		if cfg == nil {
+			cfg = &types.NotificationConfig{Enabled: false}
+		} else {
+			cfg.Enabled = false
+		}
+		if err := mgr.SaveConfig(cfg); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
+		fmt.Println("[tengiz] notifications disabled")
+		return nil
+	},
+}
+
+var notificationConfigCmd = &cobra.Command{
+	Use:   "config <app>",
+	Short: "Configure which events trigger notifications",
+	Long: `Set which events trigger notifications. Events: deploy:success, deploy:failure, health:alert, container:stop, system:warning.
+Use --events flag (comma-separated) or --all to enable all events.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		appName := args[0]
+
+		allEvents, _ := cmd.Flags().GetBool("all")
+		eventsStr, _ := cmd.Flags().GetString("events")
+
+		mgr := notify.NewManager(dataDir, env)
+		if err := mgr.LoadConfig(); err != nil {
+			return err
+		}
+
+		cfg := mgr.GetConfig()
+		if cfg == nil {
+			cfg = &types.NotificationConfig{}
+		}
+
+		if allEvents {
+			cfg.Events = []types.NotificationEventType{
+				types.EventDeploySuccess,
+				types.EventDeployFailure,
+				types.EventHealthAlert,
+				types.EventContainerStop,
+				types.EventSystemWarning,
+			}
+		} else if eventsStr != "" {
+			parts := strings.Split(eventsStr, ",")
+			events := make([]types.NotificationEventType, 0, len(parts))
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				events = append(events, types.NotificationEventType(p))
+			}
+			cfg.Events = events
+		}
+
+		if err := mgr.SaveConfig(cfg); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
+		fmt.Printf("[tengiz] notification events configured for %s\n", appName)
+		return nil
+	},
+}
+
+var notificationSetChannelCmd = &cobra.Command{
+	Use:   "set-channel <type>",
+	Short: "Configure a notification channel",
+	Long: `Configure a notification channel. Types: discord, slack, email.
+
+Discord: --webhook-url <url>
+Slack:   --webhook-url <url>
+Email:   --smtp-server <host> --smtp-port <port> --from <addr> --to <addr> [--username <user> --password <pass>] [--tls]`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		channelType := args[0]
+
+		mgr := notify.NewManager(dataDir, env)
+		if err := mgr.LoadConfig(); err != nil {
+			return err
+		}
+
+		cfg := mgr.GetConfig()
+		if cfg == nil {
+			cfg = &types.NotificationConfig{}
+		}
+
+		switch types.ChannelType(channelType) {
+		case types.ChannelDiscord:
+			webhookURL, _ := cmd.Flags().GetString("webhook-url")
+			if webhookURL == "" {
+				return fmt.Errorf("--webhook-url is required for discord")
+			}
+			cfg.Discord = &types.DiscordConfig{WebhookURL: webhookURL}
+		case types.ChannelSlack:
+			webhookURL, _ := cmd.Flags().GetString("webhook-url")
+			if webhookURL == "" {
+				return fmt.Errorf("--webhook-url is required for slack")
+			}
+			cfg.Slack = &types.SlackConfig{WebhookURL: webhookURL}
+		case types.ChannelEmail:
+			smtpServer, _ := cmd.Flags().GetString("smtp-server")
+			smtpPort, _ := cmd.Flags().GetInt("smtp-port")
+			from, _ := cmd.Flags().GetString("from")
+			to, _ := cmd.Flags().GetString("to")
+			username, _ := cmd.Flags().GetString("username")
+			password, _ := cmd.Flags().GetString("password")
+			useTLS, _ := cmd.Flags().GetBool("tls")
+
+			if smtpServer == "" || from == "" || to == "" {
+				return fmt.Errorf("--smtp-server, --from, and --to are required for email")
+			}
+			if smtpPort == 0 {
+				smtpPort = 587
+			}
+			cfg.Email = &types.EmailConfig{
+				SMTPServer: smtpServer,
+				SMTPPort:   smtpPort,
+				Username:   username,
+				Password:   password,
+				From:       from,
+				To:         to,
+				UseTLS:     useTLS,
+			}
+		default:
+			return fmt.Errorf("unknown channel type %q; supported: discord, slack, email", channelType)
+		}
+
+		if err := mgr.SaveConfig(cfg); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
+		fmt.Printf("[tengiz] notification channel %s configured\n", channelType)
+		return nil
+	},
+}
+
+var notificationShowCmd = &cobra.Command{
+	Use:   "show",
+	Short: "Show current notification configuration",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		mgr := notify.NewManager(dataDir, env)
+		if err := mgr.LoadConfig(); err != nil {
+			return err
+		}
+
+		cfg := mgr.GetConfig()
+		if cfg == nil {
+			fmt.Println("Notifications not configured.")
+			return nil
+		}
+
+		fmt.Printf("Enabled: %v\n", cfg.Enabled)
+		fmt.Printf("Events: %v\n", cfg.Events)
+		if cfg.Discord != nil {
+			fmt.Printf("Discord: configured (webhook: %s)\n", maskSecret(cfg.Discord.WebhookURL))
+		}
+		if cfg.Slack != nil {
+			fmt.Printf("Slack: configured (webhook: %s)\n", maskSecret(cfg.Slack.WebhookURL))
+		}
+		if cfg.Email != nil {
+			fmt.Printf("Email: configured (%s -> %s, server: %s:%d)\n", cfg.Email.From, cfg.Email.To, cfg.Email.SMTPServer, cfg.Email.SMTPPort)
+		}
+		return nil
+	},
+}
+
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage environment variables for an application",
@@ -1486,6 +1696,16 @@ func Execute() {
 	proxyCmd.Flags().String("env", "production", "environment for proxy routing")
 	buildLogsCmd.Flags().Int("tail", 0, "show only last N lines of the latest build log")
 	configSetCmd.Flags().Bool("secret", false, "Store as encrypted secret instead of plaintext env var")
+	notificationConfigCmd.Flags().Bool("all", false, "enable notifications for all event types")
+	notificationConfigCmd.Flags().String("events", "", "comma-separated list of event types to notify on")
+	notificationSetChannelCmd.Flags().String("webhook-url", "", "webhook URL for Discord/Slack")
+	notificationSetChannelCmd.Flags().String("smtp-server", "", "SMTP server hostname")
+	notificationSetChannelCmd.Flags().Int("smtp-port", 0, "SMTP server port")
+	notificationSetChannelCmd.Flags().String("from", "", "sender email address")
+	notificationSetChannelCmd.Flags().String("to", "", "recipient email address")
+	notificationSetChannelCmd.Flags().String("username", "", "SMTP username")
+	notificationSetChannelCmd.Flags().String("password", "", "SMTP password")
+	notificationSetChannelCmd.Flags().Bool("tls", false, "use TLS for SMTP")
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
