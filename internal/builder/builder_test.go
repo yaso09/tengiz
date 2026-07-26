@@ -160,6 +160,12 @@ func TestBuildCapturesOutput(t *testing.T) {
 	_ = logs
 }
 
+func TestFrameworkNixpacksConstant(t *testing.T) {
+	if FrameworkNixpacks != "nixpacks" {
+		t.Errorf("expected nixpacks, got %q", FrameworkNixpacks)
+	}
+}
+
 func TestBuildWithDeploymentIDCompiles(t *testing.T) {
 	b := New(t.TempDir())
 	dir := t.TempDir()
