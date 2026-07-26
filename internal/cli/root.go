@@ -194,9 +194,16 @@ var deployCmd = &cobra.Command{
 			cfg.Port = detection.InternalPort
 		}
 
+		if cfg.Build.Builder == "nixpacks" {
+			detection.Framework = builder.FrameworkNixpacks
+		}
+
 		deploymentID := fmt.Sprintf("%d", time.Now().Unix())
 
 		b := builder.New(dataDir)
+		if cfg.Build.NixpacksConfig != nil {
+			b.SetNixpacksConfig(cfg.Build.NixpacksConfig)
+		}
 		store := config.NewStoreWithEnv(dataDir, envFlag)
 		imageTag, buildLog, err := b.Build(context.Background(), projectRoot, cfg.Name, cfg.Environment, detection, deploymentID)
 		if err != nil {
