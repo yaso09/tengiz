@@ -312,6 +312,7 @@ var deployCmd = &cobra.Command{
 					for k, v := range appSecrets {
 						cfg.Env[k] = v
 					}
+					cfg.Env = secrets.ResolveInterpolations(cfg.Env, appSecrets)
 				}
 			}
 
@@ -389,6 +390,7 @@ var deployCmd = &cobra.Command{
 				for k, v := range appSecrets {
 					cfg.Env[k] = v
 				}
+				cfg.Env = secrets.ResolveInterpolations(cfg.Env, appSecrets)
 			}
 		}
 
@@ -1142,6 +1144,7 @@ Examples:
 				for k, v := range appSecrets {
 					extraEnv[k] = v
 				}
+				extraEnv = secrets.ResolveInterpolations(extraEnv, appSecrets)
 			}
 		}
 

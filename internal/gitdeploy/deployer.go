@@ -173,6 +173,7 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 				for k, v := range appSecrets {
 					cfg.Env[k] = v
 				}
+				cfg.Env = secrets.ResolveInterpolations(cfg.Env, appSecrets)
 			}
 		}
 
@@ -249,6 +250,7 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 			for k, v := range appSecrets {
 				cfg.Env[k] = v
 			}
+			cfg.Env = secrets.ResolveInterpolations(cfg.Env, appSecrets)
 		}
 	}
 
