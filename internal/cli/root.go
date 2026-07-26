@@ -1176,6 +1176,26 @@ var configSetCmd = &cobra.Command{
 		env := getEnv(cmd)
 		appName, key, value := args[0], args[1], args[2]
 		store := config.NewStoreWithEnv(dataDir, env)
+
+		if isSecret, _ := cmd.Flags().GetBool("secret"); isSecret {
+			sm, err := secrets.NewManager(dataDir, env)
+			if err != nil {
+				return fmt.Errorf("secrets manager: %w", err)
+			}
+			if err := sm.Set(appName, key, value); err != nil {
+				return fmt.Errorf("set secret: %w", err)
+			}
+
+			app, _ := store.GetApp(appName)
+			if app != nil {
+				app.Config.SecretKeys = addToSlice(app.Config.SecretKeys, key)
+				store.UpdateApp(*app)
+			}
+
+			fmt.Printf("[tengiz] secret %s set for %s\n", key, appName)
+			return nil
+		}
+
 		if err := store.SetEnv(appName, key, value); err != nil {
 			return err
 		}
@@ -1431,6 +1451,7 @@ func Execute() {
 	proxyCmd.Flags().IntP("port", "p", 8080, "proxy listen port")
 	proxyCmd.Flags().String("env", "production", "environment for proxy routing")
 	buildLogsCmd.Flags().Int("tail", 0, "show only last N lines of the latest build log")
+	configSetCmd.Flags().Bool("secret", false, "Store as encrypted secret instead of plaintext env var")
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
