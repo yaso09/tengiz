@@ -22,6 +22,7 @@
 | `preview` | Preview deployment lifecycle (PR-based). `Manager` struct with `Create/Update/Delete/List`. Webhook `pull_request` events trigger auto-create/update/cleanup. |
 | `encrypt` | AES-256-GCM encrypt/decrypt, key generation, key file load/save |
 | `secrets` | `Manager` struct: encrypted per-app secrets storage in `secrets-{env}.json`. `NewManager`, `Set`, `Get`, `Unset`, `List`, `GetAllForApp` |
+| `notify` | Multi-channel notification system. `Notifier` interface with Discord/Slack/Email backends. `Manager` with `Send`/`SendAsync`, `LoadConfig`/`SaveConfig`. Per-environment config in `notifications-{env}.json`. |
 | `types` | Shared: `AppConfig`, `AppStatus`, `AppEntry`, `PortEntry`, `DeploymentEntry`, `DeploymentStatus`. `AppConfig.Environment` field, `AppConfig.Secrets` field. |
 
 ## Commands
@@ -56,6 +57,11 @@ tengiz preview list <app>       → list preview deployments
 tengiz preview rm <app> <pr>    → remove a preview deployment
 tengiz preview deploy <app> <pr> → create/update preview deployment (webhook preferred)
 tengiz rollback <app>           → rollback to previous deployment
+tengiz notification enable      → enable notifications
+tengiz notification disable     → disable notifications
+tengiz notification config <app> [--events ...] [--all] → configure which events trigger notifications
+tengiz notification set-channel <type> [--webhook-url ...] [--smtp-server ...] → configure a notification channel
+tengiz notification show        → show current notification configuration
 ```
 
 ## Rules
