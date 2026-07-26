@@ -1198,6 +1198,15 @@ var configGetCmd = &cobra.Command{
 		if !ok {
 			return fmt.Errorf("env var %q not set for %s", args[1], args[0])
 		}
+
+		sm, secErr := secrets.NewManager(dataDir, env)
+		if secErr == nil {
+			secretKeys, _ := sm.List(args[0])
+			if _, isSecret := secretKeys[args[1]]; isSecret {
+				val = maskSecret(val)
+			}
+		}
+
 		fmt.Printf("%s=%s\n", args[1], val)
 		return nil
 	},
@@ -1233,6 +1242,17 @@ var configShowCmd = &cobra.Command{
 			fmt.Printf("No environment variables set for %s.\n", args[0])
 			return nil
 		}
+
+		sm, secErr := secrets.NewManager(dataDir, env)
+		if secErr == nil {
+			secretKeys, _ := sm.List(args[0])
+			for k := range secretKeys {
+				if v, ok := envVars[k]; ok {
+					envVars[k] = maskSecret(v)
+				}
+			}
+		}
+
 		for k, v := range envVars {
 			fmt.Printf("%s=%s\n", k, v)
 		}
@@ -1389,6 +1409,13 @@ func removeFromSlice(s []string, v string) []string {
 		}
 	}
 	return s
+}
+
+func maskSecret(s string) string {
+	if len(s) <= 4 {
+		return "****"
+	}
+	return s[:1] + "**" + s[len(s)-1:]
 }
 
 func getwd() string {

@@ -6,6 +6,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func TestSecretMasking(t *testing.T) {
+	masked := maskSecret("abcdef123456")
+	if masked != "a**6" {
+		t.Fatalf("expected 'a**6', got %q", masked)
+	}
+
+	short := maskSecret("ab")
+	if short != "****" {
+		t.Fatalf("expected '****', got %q", short)
+	}
+}
+
 func TestSecretCommandsRegistered(t *testing.T) {
 	secretCmd := findSubcommand(rootCmd, "secret")
 	if secretCmd == nil {
