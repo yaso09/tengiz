@@ -224,6 +224,20 @@ func TestBuildWithNixpacksCompiles(t *testing.T) {
 	}
 }
 
+func TestBuildWithSecrets(t *testing.T) {
+	b := New("/tmp/test-build-secrets")
+	b.SetBuildSecrets(map[string]string{
+		"NPM_TOKEN": "npm_abc123",
+		"API_KEY":   "key_xyz",
+	})
+	if len(b.buildSecrets) != 2 {
+		t.Fatalf("expected 2 build secrets, got %d", len(b.buildSecrets))
+	}
+	if b.buildSecrets["NPM_TOKEN"] != "npm_abc123" {
+		t.Fatal("build secrets not stored correctly")
+	}
+}
+
 func TestFrameworkNixpacksConstant(t *testing.T) {
 	if FrameworkNixpacks != "nixpacks" {
 		t.Errorf("expected nixpacks, got %q", FrameworkNixpacks)

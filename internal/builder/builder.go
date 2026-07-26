@@ -14,8 +14,10 @@ import (
 )
 
 type Builder struct {
-	dataDir     string
-	nixpacksCfg *types.NixpacksConfig
+	dataDir      string
+	nixpacksCfg  *types.NixpacksConfig
+	buildSecrets map[string]string
+	secretDir    string
 }
 
 func New(dataDir string) *Builder {
@@ -24,6 +26,10 @@ func New(dataDir string) *Builder {
 
 func (b *Builder) SetNixpacksConfig(cfg *types.NixpacksConfig) {
 	b.nixpacksCfg = cfg
+}
+
+func (b *Builder) SetBuildSecrets(secrets map[string]string) {
+	b.buildSecrets = secrets
 }
 
 func (b *Builder) Build(ctx context.Context, dir string, appName string, env string, detection *Detection, deploymentID string) (string, string, error) {
@@ -53,7 +59,18 @@ func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName s
 		env = "production"
 	}
 	tag := fmt.Sprintf("tengiz-apps/%s:%s-%s", appName, env, deploymentID)
-	cmd := exec.CommandContext(ctx, "docker", "build", "-t", tag, dir)
+
+	cleanup, err := b.writeBuildSecrets()
+	if err != nil {
+		return "", "", err
+	}
+	defer cleanup()
+
+	args := []string{"build"}
+	args = append(args, b.buildSecretArgs()...)
+	args = append(args, "-t", tag, dir)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
 
 	var logBuf bytes.Buffer
 	logWriter := io.MultiWriter(os.Stdout, &logBuf)
@@ -71,6 +88,37 @@ func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName s
 	}
 
 	return tag, logBuf.String(), nil
+}
+
+func (b *Builder) buildSecretArgs() []string {
+	var args []string
+	for k := range b.buildSecrets {
+		args = append(args, "--secret", fmt.Sprintf("id=%s,src=%s", k, b.buildSecretFilePath(k)))
+	}
+	return args
+}
+
+func (b *Builder) writeBuildSecrets() (func(), error) {
+	if len(b.buildSecrets) == 0 {
+		return func() {}, nil
+	}
+	dir, err := os.MkdirTemp("", "tengiz-build-secrets-*")
+	if err != nil {
+		return nil, fmt.Errorf("create temp dir: %w", err)
+	}
+	for k, v := range b.buildSecrets {
+		path := filepath.Join(dir, k)
+		if err := os.WriteFile(path, []byte(v), 0600); err != nil {
+			os.RemoveAll(dir)
+			return nil, fmt.Errorf("write build secret %s: %w", k, err)
+		}
+	}
+	b.secretDir = dir
+	return func() { os.RemoveAll(dir) }, nil
+}
+
+func (b *Builder) buildSecretFilePath(key string) string {
+	return filepath.Join(b.secretDir, key)
 }
 
 func (b *Builder) nixpacksAvailable() bool {
