@@ -118,6 +118,10 @@ func TestDeployZeroDowntimeCreatesVersionedContainer(t *testing.T) {
 	}
 }
 
+func TestDeployCallsCleanup(t *testing.T) {
+	t.Skip("integration test requires Docker daemon")
+}
+
 func TestHealthCmdNoApp(t *testing.T) {
 	rootCmd.SetArgs([]string{"health"})
 	err := rootCmd.Execute()
