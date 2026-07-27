@@ -363,6 +363,29 @@ func TestLogsCmdFlagParsing(t *testing.T) {
 	}
 }
 
+func TestCleanupCmdRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not found: %v", err)
+	}
+	if cmd == nil {
+		t.Fatal("cleanup command is nil")
+	}
+	if cmd.Name() != "cleanup" {
+		t.Errorf("expected Name='cleanup', got %q", cmd.Name())
+	}
+}
+
+func TestCleanupFlags(t *testing.T) {
+	cmd, _, _ := rootCmd.Find([]string{"cleanup"})
+	expectedFlags := []string{"dry-run", "all", "containers", "images", "volumes", "networks", "build-cache"}
+	for _, name := range expectedFlags {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("missing --%s flag", name)
+		}
+	}
+}
+
 func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	configCmd, _, err := rootCmd.Find([]string{"config"})
 	if err != nil {
