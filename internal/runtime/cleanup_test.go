@@ -54,6 +54,40 @@ func TestStubDiskUsage(t *testing.T) {
 	}
 }
 
+func TestParseDockerPruneOutputReclaimed(t *testing.T) {
+	output := `Deleted Containers:
+abc123
+def456
+
+Total reclaimed space: 150.5MB`
+	space := parseReclaimedSpace(output)
+	if space != "150.5MB" {
+		t.Errorf("parseReclaimedSpace = %q, want %q", space, "150.5MB")
+	}
+}
+
+func TestParseDockerPruneOutputNoReclaimed(t *testing.T) {
+	space := parseReclaimedSpace("")
+	if space != "0B" {
+		t.Errorf("parseReclaimedSpace = %q, want %q", space, "0B")
+	}
+}
+
+func TestParseDockerDFOutput(t *testing.T) {
+	output := `Images: 5
+Containers: 3
+Volumes: 2
+Build Cache: 7
+Total Reclaimed Space: 2.1GB`
+	report := parseDiskUsageOutput(output)
+	if report == nil || report.ImagesReclaimed != 5 {
+		t.Errorf("ImagesReclaimed = %d, want 5", report.ImagesReclaimed)
+	}
+	if report.ContainersReclaimed != 3 {
+		t.Errorf("ContainersReclaimed = %d, want 3", report.ContainersReclaimed)
+	}
+}
+
 func TestCleanupReportRecoveredSpace(t *testing.T) {
 	r := &types.CleanupReport{
 		ContainersReclaimed: 2,
