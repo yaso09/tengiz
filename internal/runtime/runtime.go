@@ -28,7 +28,18 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type PruneReport struct {
+	ReclaimedBytes uint64 `json:"reclaimed_bytes,omitempty"`
+	ObjectsDeleted int    `json:"objects_deleted,omitempty"`
+	Output         string `json:"output,omitempty"`
+}
+
 type Manager interface {
+	PruneContainers(ctx context.Context) (PruneReport, error)
+	PruneImages(ctx context.Context) (PruneReport, error)
+	PruneVolumes(ctx context.Context) (PruneReport, error)
+	PruneNetworks(ctx context.Context) (PruneReport, error)
+	PruneBuildCache(ctx context.Context) (PruneReport, error)
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
@@ -112,6 +123,26 @@ func (m *stubManager) WaitForHealth(ctx context.Context, name string, hc *types.
 
 func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
 	return nil
+}
+
+func (m *stubManager) PruneContainers(ctx context.Context) (PruneReport, error) {
+	return PruneReport{}, nil
+}
+
+func (m *stubManager) PruneImages(ctx context.Context) (PruneReport, error) {
+	return PruneReport{}, nil
+}
+
+func (m *stubManager) PruneVolumes(ctx context.Context) (PruneReport, error) {
+	return PruneReport{}, nil
+}
+
+func (m *stubManager) PruneNetworks(ctx context.Context) (PruneReport, error) {
+	return PruneReport{}, nil
+}
+
+func (m *stubManager) PruneBuildCache(ctx context.Context) (PruneReport, error) {
+	return PruneReport{}, nil
 }
 
 func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {

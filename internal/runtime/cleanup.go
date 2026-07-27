@@ -5,9 +5,105 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
+
+func parsePruneOutput(out []byte) PruneReport {
+	output := string(out)
+	var reclaimed uint64
+	re := regexp.MustCompile(`Total reclaimed space:\s+([0-9.]+)(kB|MB|GB|TB|B)`)
+	matches := re.FindStringSubmatch(output)
+	if len(matches) == 3 {
+		val, _ := strconv.ParseFloat(matches[1], 64)
+		switch matches[2] {
+		case "B":
+			reclaimed = uint64(val)
+		case "kB":
+			reclaimed = uint64(val * 1024)
+		case "MB":
+			reclaimed = uint64(val * 1024 * 1024)
+		case "GB":
+			reclaimed = uint64(val * 1024 * 1024 * 1024)
+		case "TB":
+			reclaimed = uint64(val * 1024 * 1024 * 1024 * 1024)
+		}
+	}
+	return PruneReport{
+		ReclaimedBytes: reclaimed,
+		Output:         output,
+	}
+}
+
+func countLinesStartingWith(out []byte, prefix string) int {
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	count := 0
+	for _, line := range lines {
+		if strings.HasPrefix(line, prefix) {
+			count++
+		}
+	}
+	return count
+}
+
+func (r *dockerRuntime) PruneContainers(ctx context.Context) (PruneReport, error) {
+	cmd := exec.CommandContext(ctx, "docker", "container", "prune", "-f",
+		"--filter", "label!=tengiz-app",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return PruneReport{}, fmt.Errorf("docker container prune: %w\n%s", err, string(out))
+	}
+	report := parsePruneOutput(out)
+	report.ObjectsDeleted = countLinesStartingWith(out, "Deleted:")
+	return report, nil
+}
+
+func (r *dockerRuntime) PruneImages(ctx context.Context) (PruneReport, error) {
+	cmd := exec.CommandContext(ctx, "docker", "image", "prune", "-f")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return PruneReport{}, fmt.Errorf("docker image prune: %w\n%s", err, string(out))
+	}
+	report := parsePruneOutput(out)
+	report.ObjectsDeleted = countLinesStartingWith(out, "Deleted:")
+	return report, nil
+}
+
+func (r *dockerRuntime) PruneVolumes(ctx context.Context) (PruneReport, error) {
+	cmd := exec.CommandContext(ctx, "docker", "volume", "prune", "-f")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return PruneReport{}, fmt.Errorf("docker volume prune: %w\n%s", err, string(out))
+	}
+	report := parsePruneOutput(out)
+	report.ObjectsDeleted = countLinesStartingWith(out, "Deleted:")
+	return report, nil
+}
+
+func (r *dockerRuntime) PruneNetworks(ctx context.Context) (PruneReport, error) {
+	cmd := exec.CommandContext(ctx, "docker", "network", "prune", "-f")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return PruneReport{}, fmt.Errorf("docker network prune: %w\n%s", err, string(out))
+	}
+	report := parsePruneOutput(out)
+	report.ObjectsDeleted = countLinesStartingWith(out, "Deleted:")
+	return report, nil
+}
+
+func (r *dockerRuntime) PruneBuildCache(ctx context.Context) (PruneReport, error) {
+	cmd := exec.CommandContext(ctx, "docker", "builder", "prune", "-f", "-a")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return PruneReport{}, fmt.Errorf("docker builder prune: %w\n%s", err, string(out))
+	}
+	report := parsePruneOutput(out)
+	report.ObjectsDeleted = countLinesStartingWith(out, "Deleted:")
+	return report, nil
+}
 
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)

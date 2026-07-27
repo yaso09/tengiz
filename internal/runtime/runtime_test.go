@@ -247,6 +247,61 @@ func TestStubRun(t *testing.T) {
 	}
 }
 
+func TestStubPruneContainers(t *testing.T) {
+	m := NewStub()
+	report, err := m.PruneContainers(context.Background())
+	if err != nil {
+		t.Fatalf("PruneContainers() error = %v", err)
+	}
+	if report.ObjectsDeleted != 0 {
+		t.Errorf("ObjectsDeleted = %d, want 0", report.ObjectsDeleted)
+	}
+}
+
+func TestStubPruneImages(t *testing.T) {
+	m := NewStub()
+	report, err := m.PruneImages(context.Background())
+	if err != nil {
+		t.Fatalf("PruneImages() error = %v", err)
+	}
+	if report.ObjectsDeleted != 0 {
+		t.Errorf("ObjectsDeleted = %d, want 0", report.ObjectsDeleted)
+	}
+}
+
+func TestStubPruneVolumes(t *testing.T) {
+	m := NewStub()
+	report, err := m.PruneVolumes(context.Background())
+	if err != nil {
+		t.Fatalf("PruneVolumes() error = %v", err)
+	}
+	if report.ObjectsDeleted != 0 {
+		t.Errorf("ObjectsDeleted = %d, want 0", report.ObjectsDeleted)
+	}
+}
+
+func TestStubPruneNetworks(t *testing.T) {
+	m := NewStub()
+	report, err := m.PruneNetworks(context.Background())
+	if err != nil {
+		t.Fatalf("PruneNetworks() error = %v", err)
+	}
+	if report.ObjectsDeleted != 0 {
+		t.Errorf("ObjectsDeleted = %d, want 0", report.ObjectsDeleted)
+	}
+}
+
+func TestStubPruneBuildCache(t *testing.T) {
+	m := NewStub()
+	report, err := m.PruneBuildCache(context.Background())
+	if err != nil {
+		t.Fatalf("PruneBuildCache() error = %v", err)
+	}
+	if report.ObjectsDeleted != 0 {
+		t.Errorf("ObjectsDeleted = %d, want 0", report.ObjectsDeleted)
+	}
+}
+
 func TestStubRunInteractive(t *testing.T) {
 	m := NewStub()
 	cfg := &types.AppConfig{Name: "testapp", Env: map[string]string{"FOO": "bar"}}
