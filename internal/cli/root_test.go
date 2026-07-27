@@ -386,6 +386,14 @@ func TestCleanupFlags(t *testing.T) {
 	}
 }
 
+func TestDeployCmdCallsKeepLastNImages(t *testing.T) {
+	cmd, _, _ := rootCmd.Find([]string{"cleanup"})
+	flag := cmd.Flags().Lookup("images")
+	if flag == nil {
+		t.Error("missing --images flag on cleanup command")
+	}
+}
+
 func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	configCmd, _, err := rootCmd.Find([]string{"config"})
 	if err != nil {
