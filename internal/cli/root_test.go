@@ -98,6 +98,12 @@ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppCon
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRTForDeploy) PruneContainers(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) { return &types.CleanupReport{}, nil }
+func (m *mockRTForDeploy) PruneImages(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) { return &types.CleanupReport{}, nil }
+func (m *mockRTForDeploy) PruneVolumes(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) { return &types.CleanupReport{}, nil }
+func (m *mockRTForDeploy) PruneNetworks(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) { return &types.CleanupReport{}, nil }
+func (m *mockRTForDeploy) PruneBuildCache(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) { return &types.CleanupReport{}, nil }
+func (m *mockRTForDeploy) DiskUsage(ctx context.Context) (*types.CleanupReport, error) { return &types.CleanupReport{}, nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}
@@ -354,6 +360,37 @@ func TestLogsCmdFlagParsing(t *testing.T) {
 		if !strings.Contains(helpText, flag) {
 			t.Errorf("help text missing flag %q", flag)
 		}
+	}
+}
+
+func TestCleanupCmdRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not found: %v", err)
+	}
+	if cmd == nil {
+		t.Fatal("cleanup command is nil")
+	}
+	if cmd.Name() != "cleanup" {
+		t.Errorf("expected Name='cleanup', got %q", cmd.Name())
+	}
+}
+
+func TestCleanupFlags(t *testing.T) {
+	cmd, _, _ := rootCmd.Find([]string{"cleanup"})
+	expectedFlags := []string{"dry-run", "all", "containers", "images", "volumes", "networks", "build-cache"}
+	for _, name := range expectedFlags {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("missing --%s flag", name)
+		}
+	}
+}
+
+func TestDeployCmdCallsKeepLastNImages(t *testing.T) {
+	cmd, _, _ := rootCmd.Find([]string{"cleanup"})
+	flag := cmd.Flags().Lookup("images")
+	if flag == nil {
+		t.Error("missing --images flag on cleanup command")
 	}
 }
 

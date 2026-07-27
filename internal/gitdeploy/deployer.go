@@ -215,6 +215,9 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		if err := p.rt.KeepLastNImages(ctx, appName, 5); err != nil {
 			log.Printf("[tengiz] warning: image cleanup: %v", err)
 		}
+		if _, err := p.rt.PruneBuildCache(ctx, types.PruneOptions{DryRun: false}); err != nil {
+			log.Printf("[tengiz] warning: build cache prune: %v", err)
+		}
 
 		log.Printf("[tengiz] deployed: %s via git push", appName)
 
@@ -314,6 +317,9 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 
 	if err := p.rt.KeepLastNImages(ctx, appName, 5); err != nil {
 		log.Printf("[tengiz] warning: image cleanup: %v", err)
+	}
+	if _, err := p.rt.PruneBuildCache(ctx, types.PruneOptions{DryRun: false}); err != nil {
+		log.Printf("[tengiz] warning: build cache prune: %v", err)
 	}
 
 	log.Printf("[tengiz] deployed (zero-downtime) via git push: %s", appName)

@@ -184,3 +184,16 @@ type AppEntry struct {
 	GitBranch        string            `json:"git_branch,omitempty"`
 	GitProvider      string            `json:"git_provider,omitempty"`
 }
+
+type PruneOptions struct {
+	DryRun bool
+}
+
+type CleanupReport struct {
+	ContainersReclaimed int    `json:"containers_reclaimed"`
+	ImagesReclaimed     int    `json:"images_reclaimed"`
+	VolumesReclaimed    int    `json:"volumes_reclaimed"`
+	NetworksReclaimed   int    `json:"networks_reclaimed"`
+	BuildCacheReclaimed int    `json:"build_cache_reclaimed"`
+	SpaceReclaimed      string `json:"space_reclaimed"`
+}
