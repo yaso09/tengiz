@@ -592,6 +592,60 @@ func TestPreviewFullLifecycleNaming(t *testing.T) {
 	}
 }
 
+func TestCleanupOrphanedPorts(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	app := types.AppEntry{Name: "myapp", Port: 9000}
+	if err := s.SaveApp(app); err != nil {
+		t.Fatalf("SaveApp: %v", err)
+	}
+
+	port, err := s.AllocatePort("myapp")
+	if err != nil {
+		t.Fatalf("AllocatePort: %v", err)
+	}
+
+	if err := s.RemoveApp("myapp"); err != nil {
+		t.Fatalf("RemoveApp: %v", err)
+	}
+
+	removed, err := s.CleanupOrphanedPorts()
+	if err != nil {
+		t.Fatalf("CleanupOrphanedPorts: %v", err)
+	}
+	if removed != 1 {
+		t.Errorf("expected 1 orphaned port, got %d", removed)
+	}
+
+	ports := make(map[int]string)
+	s.readJSON(s.envFile("ports.json"), &ports)
+	if _, exists := ports[port]; exists {
+		t.Errorf("port %d should have been freed", port)
+	}
+}
+
+func TestCleanupOrphanedPortsNoOrphans(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	app := types.AppEntry{Name: "myapp", Port: 9000}
+	if err := s.SaveApp(app); err != nil {
+		t.Fatalf("SaveApp: %v", err)
+	}
+	if _, err := s.AllocatePort("myapp"); err != nil {
+		t.Fatalf("AllocatePort: %v", err)
+	}
+
+	removed, err := s.CleanupOrphanedPorts()
+	if err != nil {
+		t.Fatalf("CleanupOrphanedPorts: %v", err)
+	}
+	if removed != 0 {
+		t.Errorf("expected 0 orphans, got %d", removed)
+	}
+}
+
 func TestPruneBuildLogs(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)
