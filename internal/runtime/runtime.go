@@ -46,6 +46,12 @@ type Manager interface {
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
+	PruneContainers(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error)
+	PruneImages(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error)
+	PruneVolumes(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error)
+	PruneNetworks(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error)
+	PruneBuildCache(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error)
+	DiskUsage(ctx context.Context) (*types.CleanupReport, error)
 }
 
 type stubManager struct{}
@@ -120,4 +126,28 @@ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
 	return nil
+}
+
+func (m *stubManager) PruneContainers(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) {
+	return &types.CleanupReport{}, nil
+}
+
+func (m *stubManager) PruneImages(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) {
+	return &types.CleanupReport{}, nil
+}
+
+func (m *stubManager) PruneVolumes(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) {
+	return &types.CleanupReport{}, nil
+}
+
+func (m *stubManager) PruneNetworks(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) {
+	return &types.CleanupReport{}, nil
+}
+
+func (m *stubManager) PruneBuildCache(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) {
+	return &types.CleanupReport{}, nil
+}
+
+func (m *stubManager) DiskUsage(ctx context.Context) (*types.CleanupReport, error) {
+	return &types.CleanupReport{}, nil
 }

@@ -98,6 +98,12 @@ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppCon
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRTForDeploy) PruneContainers(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) { return &types.CleanupReport{}, nil }
+func (m *mockRTForDeploy) PruneImages(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) { return &types.CleanupReport{}, nil }
+func (m *mockRTForDeploy) PruneVolumes(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) { return &types.CleanupReport{}, nil }
+func (m *mockRTForDeploy) PruneNetworks(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) { return &types.CleanupReport{}, nil }
+func (m *mockRTForDeploy) PruneBuildCache(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) { return &types.CleanupReport{}, nil }
+func (m *mockRTForDeploy) DiskUsage(ctx context.Context) (*types.CleanupReport, error) { return &types.CleanupReport{}, nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}

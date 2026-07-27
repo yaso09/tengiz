@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
@@ -56,4 +58,31 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 		}
 	}
 	return nil
+}
+
+// Stub implementations for dockerRuntime to satisfy Manager interface.
+// Real implementations are in Task 2.
+
+func (r *dockerRuntime) PruneContainers(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) {
+	return &types.CleanupReport{}, nil
+}
+
+func (r *dockerRuntime) PruneImages(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) {
+	return &types.CleanupReport{}, nil
+}
+
+func (r *dockerRuntime) PruneVolumes(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) {
+	return &types.CleanupReport{}, nil
+}
+
+func (r *dockerRuntime) PruneNetworks(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) {
+	return &types.CleanupReport{}, nil
+}
+
+func (r *dockerRuntime) PruneBuildCache(ctx context.Context, opts types.PruneOptions) (*types.CleanupReport, error) {
+	return &types.CleanupReport{}, nil
+}
+
+func (r *dockerRuntime) DiskUsage(ctx context.Context) (*types.CleanupReport, error) {
+	return &types.CleanupReport{}, nil
 }
