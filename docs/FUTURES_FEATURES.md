@@ -1697,6 +1697,60 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Why add to Tengiz:** Private repos are the norm, not the exception. Currently users must manually configure git credentials or use SSH keys. Netrc auth provides a programmatic, scriptable authentication mechanism that works with HTTPS-based git operations.
 - **Detected:** 2026-07-27
 
+## Async Build Mode (Detached/Aynchronous Deploy)
+- **Source:** CapRover
+- **Description:** Deploy runs asynchronously in background — CLI/API returns immediately after starting the build, a deployment ID is returned for tracking progress. Query status via `tengiz deploy status <id>` or wait for completion with `--wait`. Essential for CI/CD pipelines that shouldn't block on long builds. CapRover's `?detached=true` query param enables this behavior.
+- **Why add to Tengiz:** Long builds (Next.js, Rust, large monorepos) block the CLI for minutes. CI/CD pipelines need non-blocking invocation. `tengiz deploy --async` returns immediately with a deploy ID. `tengiz deploy status <id>` checks progress. `tengiz deploy wait <id>` blocks until complete. The build queue (#34) already serializes deploys — async mode just returns before the queue finishes. Low effort (goroutine + deploy ID tracking + status endpoint).
+- **Detected:** 2026-07-27
+
+## Captain-Definition Alternative Config Format (app.json Equivalent)
+- **Source:** CapRover
+- **Description:** CapRover's `captain-definition` is a JSON schema (`schemaVersion`, `dockerfileLines`, `dockerfilePath`, `imageName`, `templateId`) that serves as an alternative app configuration format alongside the main config. Supports four mutually exclusive build methods via schema validation: templateId (one-click), imageName (pre-built), dockerfilePath (custom Dockerfile), dockerfileLines (inline). CI/CD can POST this JSON directly to the deploy API without file uploads.
+- **Why add to Tengiz:** A standardized JSON deploy manifest enables: programmatic deploys from CI/CD (POST JSON instead of tar upload), multi-tool support (Tengiz + other tools can share the same manifest), inline Dockerfile definition (no separate Dockerfile needed in the repo), and schema validation with clear error messages. `.tengiz.yaml` remains the primary config, but a `tengiz.json` manifest alongside the project root provides a universal deploy contract similar to `app.json` or `vercel.json`. Low effort (JSON schema + validation), high interoperability value.
+- **Detected:** 2026-07-27
+
+## Container Resource Reservation (Guaranteed Minimum Resources)
+- **Source:** CapRover
+- **Description:** Docker supports both hard limits (`--memory`, `--cpus`) and soft reservations (`--memory-reservation`, `--cpuset-cpus`). Reservations guarantee a minimum amount of resources the container is always assured, while limits cap the maximum. CapRover's `IAppDef` has `Limits` and `Reservation` under `resources`. Without reservations, a container can be starved by noisy neighbors even within its limit.
+- **Why add to Tengiz:** Existing Resource Limits (implemented) set only hard caps. Adding reservations ensures QoS: a critical app gets guaranteed CPU/memory before other apps compete. `.tengiz.yaml`'da `resources.reserve.memory: 256M` ve `resources.reserve.cpus: 0.5`. Docker CLI: `--memory-reservation`, `--cpuset-mems`. Low effort (additional Docker flags), high production reliability value. Complements Per-Process-Type Resource Limits (#106) and Custom Docker Options (#23).
+- **Detected:** 2026-07-27
+
+## Time-Limited Download Tokens (Secure Backup/File URLs)
+- **Source:** CapRover
+- **Description:** CapRover generates short-lived (2 minute) expiring tokens for secure download of backup files and logs. Tokens are cryptographic hashes appended as query parameters. After expiry, the URL returns 403. This prevents backup files from being accessible indefinitely on the server. Tokens are generated on-demand per download request.
+- **Why add to Tengiz:** Backup files (`tengiz backup create`) and log archives contain sensitive data (DB credentials, API keys, source code). Serving them on a static path is a security risk. Time-limited download tokens ensure: even if a URL is intercepted, it expires within minutes. Implementation: SHA256 HMAC with a server secret + timestamp + filename. URL format: `/downloads/<app>/<file>?token=<hmac>&expires=<unix>`. Token validated in proxy middleware before serving the file. Low effort (HMAC + expiry check), high security value for backup and log download features.
+- **Detected:** 2026-07-27
+
+## Custom Template Repositories (Extensible One-Click App Sources)
+- **Source:** CapRover
+- **Description:** Users can add arbitrary third-party one-click app template repositories (URL-based marketplace), not just the official CapRover registry. The system validates the repo by fetching its app list before saving. This enables community-contributed templates and enterprise-internal template catalogs. CapRover stores custom registry URLs in its config and auto-refreshes the template catalog on startup.
+- **Why add to Tengiz:** Existing One-Click Service Templates (#104, P2) relies on a single curated registry. Custom repositories unlock: community template ecosystems (anyone publishes templates), enterprise-internal templates (standardized stack blueprints), and air-gapped deployments (internal template mirror). Implementation: `tengiz template repo add <name> <url>` stores in config. `tengiz template list --repo <name>` fetches and lists. Template format: JSON/YAML with Docker Compose definition + env var metadata + health check config. Low-medium effort (HTTP fetch + validation + merge), enables community growth without central moderation bottleneck.
+- **Detected:** 2026-07-27
+
+## Firewall/Port Accessibility Checker
+- **Source:** CapRover
+- **Description:** Pre-installation validation that checks if ports 80, 443, and the admin port (3000) are reachable from the public internet. CapRover pings a public HTTP endpoint that echoes the server's public IP and verifies connectivity. If ports are blocked, the installer warns and suggests firewall configuration. Part of CapRover's `CaptainInstaller.ts` setup wizard.
+- **Why add to Tengiz:** Many first-time Tengiz users install on cloud VPS and can't access their apps because cloud firewalls block ports 80/443. `tengiz doctor --firewall` or integration into `tengiz server init` would: check if ports 80/443 are reachable, suggest `ufw allow 80/tcp && ufw allow 443/tcp`, detect if behind NAT. Implementation: a Go function that dials a public STUN-like service (e.g., `ifconfig.me`) and attempts to listen on port 80/443 temporarily to test reachability. Low effort (net/http dial + port check), prevents the most common first-deploy failure.
+- **Detected:** 2026-07-27
+
+## Demo/Read-Only Mode (Restricted Operations for Staging)
+- **Source:** CapRover
+- **Description:** `DEMO_MODE_ADMIN_IP` restricts all non-GET API operations to a single admin IP address. Non-admin users can view apps, logs, and config but cannot deploy, modify, or delete resources. Ideal for: staging/demo servers where visitors explore the platform, training environments, sales demos, and shared development instances.
+- **Why add to Tengiz:** A Tengiz demo server (e.g., `demo.tengiz.dev`) currently lets anyone deploy/delete apps. Demo mode protects: read-only access for demo users, admin-only destructive operations, configurable IP whitelist for admins. Implementation: a `TENGIZ_DEMO_MODE=true` env var or `.tengiz.yaml`'da `demo_mode.enabled: true` + `demo_mode.admin_ip: x.x.x.x`. Guards all state-modifying CLI commands and API endpoints with a read-only check. Low effort (centralized guard function), enables public demo deployment.
+- **Detected:** 2026-07-27
+
+## Deploy via API Payload (JSON Deploy Without File Upload)
+- **Source:** CapRover
+- **Description:** CI/CD pipelines can trigger deploys by sending a JSON payload (captain-definition content, image name, or compose config) directly to the deploy API endpoint — no file upload (tar) required. Essential for GitLab CI, GitHub Actions, and other CI systems where building a tar is cumbersome. Supports specifying inline Dockerfile content, git repo URL, or pre-built image name in the JSON body.
+- **Why add to Tengiz:** Currently `tengiz deploy` requires a local directory (tar upload via CLI). CI/CD integration needs: deploy from a git URL without cloning, deploy a pre-built image by name, deploy with inline Dockerfile. `tengiz deploy --json '{"image":"nginx:alpine","name":"my-proxy"}'`. Implementation: a `DeployPayload` struct that accepts git URL, image name, compose URL, or inline Dockerfile. Validates exactly one source is specified (mutual exclusion per CapRover's schema validation). Low-medium effort, unlocks CI/CD integration without requiring the CLI binary.
+- **Detected:** 2026-07-27
+
+## Load Balancer Metrics Endpoint (Nginx/Proxy Status)
+- **Source:** CapRover
+- **Description:** CapRover exposes Nginx load balancer metrics: active connections, accepted connections, handled connections, total connections, readings, writings, waitings (stub_status equivalent). Accessible via a dedicated endpoint for monitoring systems. Complements Prometheus metrics by providing raw connection-level statistics.
+- **Why add to Tengiz:** Existing Prometheus Metrics (#26, P0) covers HTTP-level metrics (request count, latency). Load Balancer Metrics provide connection-level insight: how many connections are open, queued, dropping. Useful before scaling decisions: high `waiting` count suggests insufficient workers. Implementation: a `/metrics/lb` endpoint on the proxy that exports `expvar` counters for: active connections, total connections, accepted, handled. Low effort (`expvar` or `sync/atomic` counters incremented in proxy handlers), provides operational visibility beyond Prometheus metrics.
+- **Detected:** 2026-07-27
+
 ## Deploy from Archive (git:from-archive / git:load-image)
 - **Source:** Dokku
 - **Description:** `git:from-archive <app> <url>` deploys from tar/tar.gz/zip archive URLs (e.g., GitHub release artifacts). `git:load-image` loads a Docker image from stdin tarball. `git:from-image <app> <docker-image>` deploys directly from a pre-existing Docker image without source code.
