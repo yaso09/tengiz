@@ -57,3 +57,65 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	}
 	return nil
 }
+
+func parsePruneOutput(out []byte) PruneStats {
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var deleted int
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "Total reclaimed space:") || strings.HasPrefix(line, "Deleted") {
+			continue
+		}
+		deleted++
+	}
+	return PruneStats{ItemsRemoved: deleted}
+}
+
+func (r *dockerRuntime) PruneContainers(ctx context.Context) (PruneStats, error) {
+	cmd := exec.CommandContext(ctx, "docker", "container", "prune", "-f")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return PruneStats{}, fmt.Errorf("docker container prune: %w\n%s", err, string(out))
+	}
+	return parsePruneOutput(out), nil
+}
+
+func (r *dockerRuntime) PruneImages(ctx context.Context, all bool) (PruneStats, error) {
+	args := []string{"image", "prune", "-f"}
+	if all {
+		args = append(args, "-a")
+	}
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return PruneStats{}, fmt.Errorf("docker image prune: %w\n%s", err, string(out))
+	}
+	return parsePruneOutput(out), nil
+}
+
+func (r *dockerRuntime) PruneVolumes(ctx context.Context) (PruneStats, error) {
+	cmd := exec.CommandContext(ctx, "docker", "volume", "prune", "-f")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return PruneStats{}, fmt.Errorf("docker volume prune: %w\n%s", err, string(out))
+	}
+	return parsePruneOutput(out), nil
+}
+
+func (r *dockerRuntime) PruneNetworks(ctx context.Context) (PruneStats, error) {
+	cmd := exec.CommandContext(ctx, "docker", "network", "prune", "-f")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return PruneStats{}, fmt.Errorf("docker network prune: %w\n%s", err, string(out))
+	}
+	return parsePruneOutput(out), nil
+}
+
+func (r *dockerRuntime) PruneBuildCache(ctx context.Context) (PruneStats, error) {
+	cmd := exec.CommandContext(ctx, "docker", "builder", "prune", "-f")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return PruneStats{}, fmt.Errorf("docker builder prune: %w\n%s", err, string(out))
+	}
+	return parsePruneOutput(out), nil
+}
