@@ -302,6 +302,13 @@ func TestStubPruneBuildCache(t *testing.T) {
 	}
 }
 
+func TestStubKeepLastNContainers(t *testing.T) {
+	m := NewStub()
+	if err := m.KeepLastNContainers(context.Background(), "testapp", 5); err != nil {
+		t.Fatalf("KeepLastNContainers() error = %v", err)
+	}
+}
+
 func TestStubRunInteractive(t *testing.T) {
 	m := NewStub()
 	cfg := &types.AppConfig{Name: "testapp", Env: map[string]string{"FOO": "bar"}}

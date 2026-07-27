@@ -40,6 +40,7 @@ type Manager interface {
 	PruneVolumes(ctx context.Context) (PruneReport, error)
 	PruneNetworks(ctx context.Context) (PruneReport, error)
 	PruneBuildCache(ctx context.Context) (PruneReport, error)
+	KeepLastNContainers(ctx context.Context, appName string, n int) error
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
@@ -143,6 +144,10 @@ func (m *stubManager) PruneNetworks(ctx context.Context) (PruneReport, error) {
 
 func (m *stubManager) PruneBuildCache(ctx context.Context) (PruneReport, error) {
 	return PruneReport{}, nil
+}
+
+func (m *stubManager) KeepLastNContainers(ctx context.Context, appName string, n int) error {
+	return nil
 }
 
 func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {

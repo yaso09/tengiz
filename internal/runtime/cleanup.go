@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func parsePruneOutput(out []byte) PruneReport {
@@ -103,6 +104,58 @@ func (r *dockerRuntime) PruneBuildCache(ctx context.Context) (PruneReport, error
 	report := parsePruneOutput(out)
 	report.ObjectsDeleted = countLinesStartingWith(out, "Deleted:")
 	return report, nil
+}
+
+func (r *dockerRuntime) KeepLastNContainers(ctx context.Context, appName string, n int) error {
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-a",
+		"--filter", fmt.Sprintf("name=tengiz-%s", appName),
+		"--format", "{{.ID}}|{{.Names}}|{{.CreatedAt}}",
+		"--no-trunc",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker ps: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) <= n {
+		return nil
+	}
+
+	type entry struct {
+		id   string
+		name string
+		time time.Time
+	}
+	var entries []entry
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, strings.TrimSpace(parts[2]))
+		if err != nil {
+			continue
+		}
+		entries = append(entries, entry{id: parts[0], name: parts[1], time: t})
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].time.Before(entries[j].time)
+	})
+
+	for i := 0; i < len(entries)-n; i++ {
+		cname := entries[i].name
+		log.Printf("[runtime] removing old container %s", cname)
+		rmCmd := exec.CommandContext(ctx, "docker", "rm", "-f", cname)
+		if rmOut, rmErr := rmCmd.CombinedOutput(); rmErr != nil {
+			log.Printf("[runtime] failed to remove old container %s: %v\n%s", cname, rmErr, string(rmOut))
+		}
+	}
+	return nil
 }
 
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
