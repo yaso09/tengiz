@@ -18,3 +18,25 @@ func TestStubKeepLastNImages(t *testing.T) {
 		t.Fatalf("KeepLastNImages() error = %v", err)
 	}
 }
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	report, err := m.Cleanup(context.Background(), CleanupOptions{All: true})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if report == nil {
+		t.Fatal("Cleanup() report is nil")
+	}
+}
+
+func TestStubCleanupSelective(t *testing.T) {
+	m := NewStub()
+	report, err := m.Cleanup(context.Background(), CleanupOptions{Containers: true, Images: true})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if report == nil {
+		t.Fatal("Cleanup() report is nil")
+	}
+}
