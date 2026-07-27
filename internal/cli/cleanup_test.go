@@ -31,6 +31,21 @@ func TestCleanupCmdFlags(t *testing.T) {
 	}
 }
 
+func TestCleanupCmdEnvFlag(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not found: %v", err)
+	}
+	if cmd.Flags().Lookup("dry-run") == nil {
+		t.Error("--dry-run flag not found on cleanup")
+	}
+	// Verify global --env flag is accessible (inherited from persistent flags)
+	envFlag := rootCmd.PersistentFlags().Lookup("env")
+	if envFlag == nil {
+		t.Error("--env persistent flag not found on rootCmd")
+	}
+}
+
 func TestDescribeCategories(t *testing.T) {
 	tests := []struct {
 		opts     string
