@@ -28,6 +28,20 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type PruneOptions struct {
+	DryRun     bool
+	Containers bool
+	Images     bool
+	BuildCache bool
+	All        bool
+}
+
+type PruneReport struct {
+	ContainersOutput string
+	ImagesOutput     string
+	CacheOutput      string
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
@@ -46,6 +60,7 @@ type Manager interface {
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
+	PruneSystem(ctx context.Context, opts PruneOptions) (*PruneReport, error)
 }
 
 type stubManager struct{}
@@ -120,4 +135,8 @@ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
 	return nil
+}
+
+func (m *stubManager) PruneSystem(ctx context.Context, opts PruneOptions) (*PruneReport, error) {
+	return &PruneReport{}, nil
 }
