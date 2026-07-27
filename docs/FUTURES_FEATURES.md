@@ -1660,3 +1660,231 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Telegram bot integration for deployment and system notifications. Send deploy success/failure, health alerts, backup status, and SSL expiry notifications directly to a Telegram chat or group via a bot. Supports HTML/Markdown formatting for rich messages, severity-based formatting (red = critical, yellow = warning, green = success), inline keyboards for quick actions (restart app, view logs), and per-chat subscriptions to specific event types.
 - **Why add to Tengiz:** Telegram is widely used by developers and DevOps teams for operational alerts. Unlike email (requires SMTP setup) or Slack/Discord (requires workspace membership), Telegram only needs a bot token — zero configuration on the receiving end. Push notifications on mobile ensure operators never miss critical alerts. Implementation: `tengiz notification add --type telegram --bot-token <token> --chat-id <id>` configures the channel. Go's Telegram Bot API via `github.com/go-telegram/bot` or direct HTTP POST to `https://api.telegram.org/bot<token>/sendMessage`. Reuses existing event system — `notify.Manager` gets a `TelegramNotifier` implementation. Low effort (well-documented API, existing Go libraries).
 - **Detected:** 2026-07-27
+
+## Cron Concurrency Policies (Allow/Forbid/Replace)
+- **Source:** Dokku
+- **Description:** Per-cron-task concurrency policy controlling behavior when a scheduled task fires while a previous instance is still running. `allow` = run concurrently (default), `forbid` = skip if running, `replace` = stop existing and start new. Configurable per-task in `app.json`'s `cron[].concurrency_policy` field.
+- **Why add to Tengiz:** Without this, long-running cron jobs can pile up, consuming resources and corrupting data. Forbid prevents duplicate mail deliveries; replace ensures recurring jobs never overlap. Essential for production cron reliability.
+- **Detected:** 2026-07-27
+
+## Cron Maintenance Mode (Per-Task Suspend/Resume)
+- **Source:** Dokku
+- **Description:** Individual cron tasks can be suspended (`cron:suspend <app> <task-id>`) and resumed (`cron:resume`). Also supports app-wide cron maintenance mode. Suspended tasks are preserved but skipped during execution. Task ID shown in `cron:list` output.
+- **Why add to Tengiz:** Enables surgical control over cron jobs without deleting and recreating them. Useful for: temporarily disabling a failing migration during incident response, pushing emergency deploys without cron interference, silencing noisy test jobs.
+- **Detected:** 2026-07-27
+
+## Cron Email Notifications
+- **Source:** Dokku
+- **Description:** Per-app cron email configuration (`mailto`, `mailfrom` properties). When a cron task produces stdout/stderr output, Dokku emails the output to the configured address. Global and per-app settings.
+- **Why add to Tengiz:** Cron job output often contains critical information (backup success/failure, batch job results, error logs). Without notifications, users must manually check cron logs. Email is the lowest-friction channel. Complements the existing Notification System with cron-specific alert triggers.
+- **Detected:** 2026-07-27
+
+## Global Cron Tasks (System-Level)
+- **Source:** Dokku
+- **Description:** Cron tasks defined at global scope (not tied to an app) via `cron-entries` trigger. Tasks have schedule, command, and optional log file. Managed by the scheduler alongside per-app cron tasks.
+- **Why add to Tengiz:** Enables system-level scheduled operations: daily `docker system prune`, periodic `tengiz cleanup`, SSL cert renewal checks, health sweep across all apps. These are operational tasks that don't belong to any single app but are essential for platform health.
+- **Detected:** 2026-07-27
+
+## Immediate Cron Execution (cron:run)
+- **Source:** Dokku
+- **Description:** `cron:run <app> <task-id>` executes a cron task immediately, on-demand, outside its scheduled time. Respects the task's concurrency policy. Supports detached mode. Useful for testing or ad-hoc execution of scheduled jobs.
+- **Why add to Tengiz:** Essential for testing cron jobs before they fire in production. Lets users verify that a new cron task works correctly without waiting for the next scheduled interval. Building on Tengiz's existing `tengiz run`, this provides a more structured interface tied to cron task definitions.
+- **Detected:** 2026-07-27
+
+## Git Server Authentication (netrc-based)
+- **Source:** Dokku
+- **Description:** `git:auth <host> <username> <password>` configures netrc-based authentication for private Git servers (GitHub, GitLab, Bitbucket, Gitea, self-hosted). `git:auth-status` verifies current auth state. Credentials stored in `~dokku/.netrc` with restricted file permissions.
+- **Why add to Tengiz:** Private repos are the norm, not the exception. Currently users must manually configure git credentials or use SSH keys. Netrc auth provides a programmatic, scriptable authentication mechanism that works with HTTPS-based git operations.
+- **Detected:** 2026-07-27
+
+## Deploy from Archive (git:from-archive / git:load-image)
+- **Source:** Dokku
+- **Description:** `git:from-archive <app> <url>` deploys from tar/tar.gz/zip archive URLs (e.g., GitHub release artifacts). `git:load-image` loads a Docker image from stdin tarball. `git:from-image <app> <docker-image>` deploys directly from a pre-existing Docker image without source code.
+- **Why add to Tengiz:** Enables deployment scenarios that don't require a full git clone: deploying release artifacts from CI/CD, loading vendor-provided images, deploying from Docker images built externally. Complements the existing "Explicit Image Name Deploy" and "Git-Based Image Version Tagging" by providing more deployment source options.
+- **Detected:** 2026-07-27
+
+## SSH Deploy Key Management (git:generate-deploy-key / git:public-key)
+- **Source:** Dokku
+- **Description:** `git:generate-deploy-key` generates an Ed25519 SSH keypair for git operations. `git:public-key` outputs the public key for easy copying to Git provider settings. Keys stored at `~dokku/.ssh/id_ed25519`.
+- **Why add to Tengiz:** A core prerequisite for private repo deploys. Currently users must manually generate and place SSH keys. Automated key management streamlines the git+SSH provider setup flow.
+- **Detected:** 2026-07-27
+
+## Git Deploy Branch & Keep-Git-Dir Configuration
+- **Source:** Dokku
+- **Description:** Per-app and global `deploy-branch` property (default: `master`) to select which git branch triggers deploys. `keep-git-dir` property controls whether the `.git` directory is retained in the build workspace (useful for apps that check git metadata at build time).
+- **Why add to Tengiz:** Many teams use non-standard branch names (`main`, `production`, `release`). `deploy-branch` configuration makes git-sync and git-hook deploys work with any branch. `keep-git-dir` supports apps that need git history available during build (e.g., for commit SHA injection). Low effort, high interoperability value.
+- **Detected:** 2026-07-27
+
+## SSH Host Key Verification (git:allow-host)
+- **Source:** Dokku
+- **Description:** `git:allow-host <hostname>` adds a host's SSH key to `known_hosts` using `ssh-keyscan`. Prevents SSH host key verification failures during git operations (clone, fetch) against new or changed git servers.
+- **Why add to Tengiz:** Without this, first-time git operations against a new host prompt for SSH verification or fail in non-interactive CI/CD contexts. Essential for automated deployment pipelines where interactive prompts are impossible.
+- **Detected:** 2026-07-27
+
+## Network Properties: Attach to Additional Networks
+- **Source:** Dokku
+- **Description:** `network:set <app> attach-post-create <network-names>` and `network:set <app> attach-post-deploy <network-names>` attaches containers to additional Docker networks after creation or deploy. Enables multi-network setups (e.g., app connected to both a frontend network and a database-only network).
+- **Why add to Tengiz:** Multi-service apps need network isolation. This enables: database containers on a private backend network, monitoring containers on a management network, multi-tier app segmentation. Complements the basic "Custom Docker Network" by adding per-app multi-attach capabilities.
+- **Detected:** 2026-07-27
+
+## Static Web Listener (Fixed IP Binding)
+- **Source:** Dokku
+- **Description:** `network:set <app> static-web-listener <ip:port>` assigns a fixed IP address for web process listeners, bypassing dynamic Docker IP allocation. Useful for apps that need predictable IP addresses for network policies or firewall rules.
+- **Why add to Tengiz:** Some deployments require fixed IPs for compliance, network policy, or integration with external systems that whitelist IPs. The static listener approach also avoids DNS-based service discovery where it isn't available.
+- **Detected:** 2026-07-27
+
+## Network TLD Configuration
+- **Source:** Dokku
+- **Description:** Global `tld` property (top-level domain) for Docker networks. Controls DNS resolution behavior for containers within Dokku-managed networks.
+- **Why add to Tengiz:** Fine-grained control over inter-container DNS resolution. Useful for multi-tenant environments where DNS namespace isolation matters.
+- **Detected:** 2026-07-27
+
+## Scheme-Based Port Mapping
+- **Source:** Dokku
+- **Description:** Port mapping using scheme:host-port:container-port format (e.g., `http:80:5000`, `https:443:5000`). Supports multiple schemes per port mapping. Detects and prevents duplicate scheme+host+port combinations.
+- **Why add to Tengiz:** More expressive than raw host:container port mapping. Enables HTTP vs HTTPS port differentiation, explicit protocol declaration, and validation against port conflicts. The scheme prefix provides semantic meaning that the proxy layer can use for protocol-specific routing.
+- **Detected:** 2026-07-27
+
+## Docker Inspect via CLI (ps:inspect)
+- **Source:** Dokku
+- **Description:** `ps:inspect <app>` runs `docker inspect` on the app's container and returns sanitized output. Shows container configuration, network settings, mounts, environment, and resource limits in a readable format.
+- **Why add to Tengiz:** Debugging container issues currently requires raw `docker inspect` commands. `tengiz ps:inspect` provides a Tengiz-aware, filtered view that surfaces the most relevant container metadata without overwhelming the user with Docker's full JSON output.
+- **Detected:** 2026-07-27
+
+## Process-Type Specific Restart
+- **Source:** Dokku
+- **Description:** `ps:restart <app> <process-type>` restarts only one process type (e.g., just `web` or just `worker`) without affecting other container types. Useful when only one process type needs updating or recovery.
+- **Why add to Tengiz:** Minimizes blast radius during maintenance. A buggy worker process shouldn't require restarting all web containers. Essential for apps with multiple process types (web + worker + scheduler).
+- **Detected:** 2026-07-27
+
+## Ps:Set Properties (Docker start-cmd, Procfile-path, Stop-Timeout)
+- **Source:** Dokku
+- **Description:** Per-app `ps:set` configures: `dockerfile-start-cmd` (override CMD for Dockerfile builds), `procfile-path` (custom Procfile location for monorepo support), `start-cmd` (override start command), `stop-timeout-seconds` (Docker stop grace period, default 30s), `restore` flag (per-app disable of boot restore).
+- **Why add to Tengiz:** Fine-grained process management control. Monorepo teams need custom `procfile-path`. Apps with slow shutdown sequences need longer stop-timeout. Per-app restore opt-out is critical for apps that should not auto-start after reboot.
+- **Detected:** 2026-07-27
+
+## Storage Exec (Run Commands with Volume Access)
+- **Source:** Dokku
+- **Description:** `storage:exec <entry-name> [-- <cmd>]` runs a command (or interactive shell) inside a temporary Docker container that mounts the storage entry at `/data`. Supports `-i` (interactive), `-t` (tty), `--as-user` override, and respects the entry's chown setting. Exit code forwarded for scripting.
+- **Why add to Tengiz:** Critical for stateful apps: inspect database files, modify uploaded content, run data migration scripts. Currently users must create a manual container with volume mounts. `storage:exec` provides a one-command interface.
+- **Detected:** 2026-07-27
+
+## Named Storage Entries (First-Class Storage Volumes)
+- **Source:** Dokku
+- **Description:** `storage:create <name> [<path>]` registers a named storage entry with properties: scheduler type, host path, size, access mode, storage class, chown, reclaim policy, annotations, labels. `storage:info`, `storage:set`, `storage:destroy`, `storage:list-entries` provide full lifecycle management. Entries can be mounted to multiple apps.
+- **Why add to Tengiz:** More flexible than raw host-path volumes. Named entries enable: reusable volumes shared across apps, persistent volume claims on k3s, volume metadata/annotations, scheduler-independent volume management. Foundation for stateful app support on both Docker and Kubernetes schedulers.
+- **Detected:** 2026-07-27
+
+## Storage Migration (Legacy to Named Entry Format)
+- **Source:** Dokku
+- **Description:** `storage:migrate [<app>|--all]` converts legacy colon-format mount specifications (`/host:/container`) to the new named-entry format. Ensures backward compatibility while enabling new storage features. Migration is idempotent and preserves existing mounts.
+- **Why add to Tengiz:** Tengiz already has volume management. Adding migration ensures users can upgrade from simple host-path mounts to named entries without disrupting running apps. Critical for platform evolution without breaking existing deployments.
+- **Detected:** 2026-07-27
+
+## K3s Scheduler Storage Support (PVC)
+- **Source:** Dokku
+- **Description:** Named storage entries on the k3s scheduler create Kubernetes PersistentVolumeClaims (PVCs) with configurable: access modes (ReadWriteOnce, ReadOnlyMany, ReadWriteMany, ReadWriteOncePod), storage classes, reclaim policies (Retain/Delete), and namespace. `storage:wait <name>` blocks until PVC is bound.
+- **Why add to Tengiz:** As Tengiz's scheduler abstraction allows targeting Kubernetes via k3s, persistent storage must work across both backends. PVC support is essential for stateful workloads on multi-node clusters.
+- **Detected:** 2026-07-27
+
+## Build Cancellation (Cancel In-Flight Deploys)
+- **Source:** Dokku
+- **Description:** `builds:cancel <app>` sends SIGQUIT to the build process group, killing the in-flight deploy. Build record is marked as `canceled`. Detects already-terminated processes and marks them as `failed`. Handles stale lock files.
+- **Why add to Tengiz:** Long-running builds due to mistakes (wrong branch, missing env vars) waste time and cluster resources. Users need a way to abort a deploy that's stuck or incorrect. SIGQUIT to process groups ensures all child processes are cleaned up.
+- **Detected:** 2026-07-27
+
+## Build Output Streaming (Live Build Logs)
+- **Source:** Dokku
+- **Description:** `builds:output <app> [<build-id>]` streams build logs live using `tail -f` when the build is still running, or dumps the full log file for completed builds. Falls back to `journalctl` for systemd-managed builds. Build ID can be `current` to reference the in-flight build.
+- **Why add to Tengiz:** Complements existing build logs storage. Provides both historical log viewing and real-time streaming. The live tail feature (via `tail -f`) is essential for debugging slow builds.
+- **Detected:** 2026-07-27
+
+## Build History Filtering (by Kind and Status)
+- **Source:** Dokku
+- **Description:** `builds:list <app> --kind build|deploy --status running|succeeded|failed|canceled|abandoned` filters the build history. Supports JSON output format. Shows running builds across all apps when no app is specified. Retention limit (default 20) prevents unbounded log storage.
+- **Why add to Tengiz:** As the number of deployments grows, finding a specific build becomes difficult without filtering. Status filtering helps identify failed builds for alerting. Kind filtering separates full builds from deploy-only runs.
+- **Detected:** 2026-07-27
+
+## Run Container Lifecycle Management
+- **Source:** Dokku
+- **Description:** Beyond one-off process execution (`tengiz run`), Dokku provides full run container lifecycle: `run:list` shows running/stopped run containers, `run:logs <app> [<id>]` retrieves logs from completed runs, `run:retire` cleans up expired run containers, `run:stop <app> <id>` stops a specific run. Run containers are automatically retired after TTL (default 86400s).
+- **Why add to Tengiz:** One-off processes (migrations, scripts) are currently fire-and-forget. Run lifecycle management provides: visibility into what run containers exist, access to their logs after completion, cleanup of stale containers, and the ability to abort runaway processes.
+- **Detected:** 2026-07-27
+
+## Resource: Network Bandwidth Limits
+- **Source:** Dokku
+- **Description:** Per-app resource limits for network bandwidth: `resource:limit <app> --network <rate>` limits both ingress and egress. Also supports separate `network-ingress` and `network-egress` values.
+- **Why add to Tengiz:** A single high-traffic app can saturate the server's network interface, degrading all other apps. Network bandwidth limits provide predictable performance isolation. Especially important for Tengiz's single-server deployment model where all apps share the same network.
+- **Detected:** 2026-07-27
+
+## Resource: NVIDIA GPU Limits
+- **Source:** Dokku
+- **Description:** `resource:limit <app> --nvidia-gpu <device-ids>` controls GPU access for AI/ML workloads. Supports specifying specific GPU device IDs. Works with Docker's `--gpus` flag infrastructure.
+- **Why add to Tengiz:** AI/ML workloads are a growing deployment category. GPU passthrough needs per-app resource control. This adds granular GPU device assignment, preventing GPU resource conflicts between apps.
+- **Detected:** 2026-07-27
+
+## Resource: Memory-Swap Limit
+- **Source:** Dokku
+- **Description:** `resource:limit <app> --memory-swap <limit>` sets the total memory + swap limit for a container. When less than `--memory`, disables swap. When equal to `--memory`, swap is disabled. When greater, allows that much swap usage.
+- **Why add to Tengiz:** Memory-swap control is critical for production deployments. Without it, containers can swap excessively, degrading performance for all apps on the host. Proper swap configuration prevents OOM kills while maintaining performance isolation.
+- **Detected:** 2026-07-27
+
+## Resource: Reserve vs Limit Semantics
+- **Source:** Dokku
+- **Description:** Separate `resource:reserve` (guaranteed minimum, `--memory-reservation`, `--cpus`) and `resource:limit` (hard maximum, `--memory`, `--cpus`). Reserve ensures the app gets at least this much resource. Limit caps the maximum. Both per-process-type.
+- **Why add to Tengiz:** Simple limits alone are insufficient. Without reservation, a bursty app may not get enough CPU when the host is busy. Without limits, a memory leak can crash the host. Reserve+limit provides proper resource QoS, letting important apps get guaranteed resources while capping their maximum impact.
+- **Detected:** 2026-07-27
+
+## Per-App Registry Credential Isolation
+- **Source:** Dokku
+- **Description:** `registry:login <app> <server> <username> <password>` stores per-app Docker registry credentials in a separate `DOCKER_CONFIG` directory, preventing credential cross-contamination between apps. `registry:logout` removes per-app credentials independently.
+- **Why add to Tengiz:** Different apps may need access to different private registries. Shared global credentials are a security risk (one app's compromise exposes all registry auth). Per-app isolation follows the principle of least privilege and enables multi-tenant registry access.
+- **Detected:** 2026-07-27
+
+## Registry Push Extra Tags
+- **Source:** Dokku
+- **Description:** `registry:set <app> push-extra-tags "latest,v1.2.3"` adds additional tags when pushing images to the registry. Image is tagged with each extra tag before push. Works alongside the image-repo configuration.
+- **Why add to Tengiz:** Single images often need multiple tags (e.g., `myapp:latest`, `myapp:v1`, `myapp:v1.2.3`). Without extra tags, users must manually tag and push. Per-app extra tags automate this, ensuring CI/CD pipelines produce properly tagged releases.
+- **Detected:** 2026-07-27
+
+## app.json Formation Autoscaling
+- **Source:** Dokku
+- **Description:** `app.json` `formation` section supports autoscaling configuration per process type: `autoscaling.cooldown_period_seconds`, `autoscaling.max_quantity`, `autoscaling.min_quantity`, `autoscaling.polling_interval_seconds`, and `autoscaling.triggers` (named triggers with types and metadata). Formation also supports `max_parallel` (parallel container start count) and `service` (non-web process service exposure).
+- **Why add to Tengiz:** The existing KEDA-based autoscaling discussion focuses on external trigger sources. app.json-based autoscaling provides a simpler, built-in alternative: define autoscaling parameters alongside your app manifest, no external dependencies. The triggers system is extensible for future scalers.
+- **Detected:** 2026-07-27
+
+## app.json Healthchecks with Types (Liveness/Readiness/Startup)
+- **Source:** Dokku
+- **Description:** `app.json` supports comprehensive healthcheck definitions per process type with: type (liveness/readiness/startup), path, port, scheme, HTTP headers, content matching, command execution, attempts/timeout/wait/initial delay, on-failure actions (execute command or call URL).
+- **Why add to Tengiz:** Current health check support is Docker-level (container restart on failure). app.json healthchecks provide Kubernetes-style health semantics: liveness (is the app alive?), readiness (is it ready to serve traffic?), startup (has it finished starting?). Content matching enables deeper validation than HTTP 200 checks.
+- **Detected:** 2026-07-27
+
+## Self-Signed SSL Certificate Generation with CSR
+- **Source:** Dokku
+- **Description:** `certs:generate <app> <domain>` generates a self-signed SSL certificate AND outputs a Certificate Signing Request (CSR) that can be submitted to a Certificate Authority for official signing. Preserves the CSR alongside the self-signed cert. If cert already exists, refuses to overwrite.
+- **Why add to Tengiz:** Self-signed certs are useful for development, internal tools, and staging environments. The CSR output streamlines the transition from self-signed to CA-signed: generate self-signed for immediate use, submit CSR to a CA, install the signed cert.
+- **Detected:** 2026-07-27
+
+## Manual Healthcheck Execution (checks:run)
+- **Source:** Dokku
+- **Description:** `checks:run <app>` manually executes the deploy healthcheck against the app's running container. Useful for ad-hoc validation, testing healthcheck configuration changes, or confirming recovery after an incident.
+- **Why add to Tengiz:** Provides a way to validate healthcheck configuration without triggering a full deploy. Essential for debugging healthcheck failures (are the checks wrong, or is the app broken?). Can be used in monitoring scripts to periodically verify app health.
+- **Detected:** 2026-07-27
+
+## Per-Process-Type Healthcheck Control (Disable/Skip)
+- **Source:** Dokku
+- **Description:** `checks:set <app> disabled web.1` disables healthchecks for specific process types. `checks:set <app> skipped web.1` skips checks (runs but doesn't fail deploy). Supports `_all_` wildcard. Useful for worker processes that don't expose HTTP endpoints.
+- **Why add to Tengiz:** Not all process types are HTTP servers. Workers, cron-type processes, and background job containers can't pass HTTP healthchecks. Per-process-type disable and skip lets users define which process types get validated, preventing false deploy failures for non-web processes.
+- **Detected:** 2026-07-27
+
+## Allocatable Ports Management (ports-get-available)
+- **Source:** Dokku
+- **Description:** Internal trigger `ports-get-available` queries the port allocator for the next available port. Ports are tracked in a persistent store and allocated sequentially (9000-9999 range). `ports-clear` releases all port allocations for an app.
+- **Why add to Tengiz:** Tengiz already manages port allocations in `~/.tengiz/ports.json`, but there is no CLI visibility into the port allocator. Exposing port allocation state as a command would let users see the allocation state, find reserved ports, and understand port conflicts.
+- **Detected:** 2026-07-27
+
+## Deploy Source Metadata Recording (deploy-source-set)
+- **Source:** Dokku
+- **Description:** Every deploy records its source: `git-hook`, `git-sync`, `git-from-archive`, `docker-image`, `tar`, `ps:rebuild`, or `config-redeploy`. Stored as app property and surfaced in build records. Enables deploy origin traceability.
+- **Why add to Tengiz:** Knowing what triggered a deploy is essential for debugging, audit, and rollback decisions. "Was this deploy from a git push or a manual rebuild?" Currently Tengiz has no deploy source tracking. Recorded alongside build metadata, this feeds the audit trail and app report features already on the roadmap.
+- **Detected:** 2026-07-27
