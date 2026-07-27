@@ -67,6 +67,15 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("all", false, "prune all categories (default)")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers")
+	cleanupCmd.Flags().Bool("images", false, "prune unused images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune build cache")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be pruned without deleting")
+	cleanupCmd.Flags().BoolP("force", "f", false, "skip confirmation prompt")
 	notificationCmd.AddCommand(notificationEnableCmd)
 	notificationCmd.AddCommand(notificationDisableCmd)
 	notificationCmd.AddCommand(notificationConfigCmd)
@@ -936,6 +945,115 @@ var volumeListCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources (disk space reclamation)",
+	Long: `Prune unused Docker containers, images, volumes, networks, and build cache.
+All operations are scoped to Tengiz-managed resources via label filtering.
+
+Categories (use flags to select specific ones):
+  --containers    Remove stopped Tengiz containers
+  --images        Remove unused Tengiz images
+  --volumes       Remove unused Tengiz volumes
+  --networks      Remove unused Tengiz networks
+  --build-cache   Remove build cache
+
+Default (no category flag): all categories.
+
+Use --dry-run to see what would be removed without deleting.
+Use --force or -f to skip the confirmation prompt.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		_ = getEnv(cmd)
+
+		all, _ := cmd.Flags().GetBool("all")
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		networks, _ := cmd.Flags().GetBool("networks")
+		buildCache, _ := cmd.Flags().GetBool("build-cache")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		force, _ := cmd.Flags().GetBool("force")
+
+		if !all && !containers && !images && !volumes && !networks && !buildCache {
+			all = true
+		}
+
+		opts := runtime.PruneOptions{
+			All:        all,
+			Containers: containers,
+			Images:     images,
+			Volumes:    volumes,
+			Networks:   networks,
+			BuildCache: buildCache,
+			DryRun:     dryRun,
+		}
+
+		if !force && !dryRun {
+			fmt.Printf("[tengiz] This will prune %s managed by Tengiz.\n", describeCategories(opts))
+			fmt.Print("[tengiz] Are you sure? [y/N]: ")
+			var response string
+			fmt.Scanln(&response)
+			response = strings.TrimSpace(strings.ToLower(response))
+			if response != "y" && response != "yes" {
+				fmt.Println("[tengiz] cancelled")
+				return nil
+			}
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		report, err := rt.Prune(cmd.Context(), opts)
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+
+		if dryRun {
+			fmt.Println("[tengiz] DRY RUN — no resources were deleted")
+		}
+
+		fmt.Println("[tengiz] cleanup complete:")
+		fmt.Printf("  Containers deleted: %d\n", report.ContainersDeleted)
+		fmt.Printf("  Images deleted:     %d\n", report.ImagesDeleted)
+		fmt.Printf("  Volumes deleted:    %d\n", report.VolumesDeleted)
+		fmt.Printf("  Networks deleted:   %d\n", report.NetworksDeleted)
+		if report.BuildCacheCleaned {
+			fmt.Println("  Build cache:        cleared")
+		}
+		fmt.Printf("  Space reclaimed:    %s\n", report.SpaceReclaimed)
+
+		return nil
+	},
+}
+
+func describeCategories(opts runtime.PruneOptions) string {
+	if opts.All {
+		return "all Docker resources"
+	}
+	var parts []string
+	if opts.Containers {
+		parts = append(parts, "containers")
+	}
+	if opts.Images {
+		parts = append(parts, "images")
+	}
+	if opts.Volumes {
+		parts = append(parts, "volumes")
+	}
+	if opts.Networks {
+		parts = append(parts, "networks")
+	}
+	if opts.BuildCache {
+		parts = append(parts, "build cache")
+	}
+	if len(parts) == 0 {
+		return "all Docker resources"
+	}
+	return strings.Join(parts, ", ")
 }
 
 var rollbackCmd = &cobra.Command{
