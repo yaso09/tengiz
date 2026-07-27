@@ -5,7 +5,9 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/yaso09/tengiz/internal/notify"
 	"github.com/yaso09/tengiz/internal/runtime"
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 var cleanupCmd = &cobra.Command{
@@ -32,6 +34,7 @@ func init() {
 	cleanupCmd.Flags().Bool("dry-run", false, "show what would be pruned (runs Docker prune without -f)")
 
 	cleanupCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
 		all, _ := cmd.Flags().GetBool("all")
 		containers, _ := cmd.Flags().GetBool("containers")
 		images, _ := cmd.Flags().GetBool("images")
@@ -111,6 +114,32 @@ func init() {
 		}
 
 		fmt.Printf("\n[cleanup] total reclaimed: %s\n", formatBytes(totalReclaimed))
+
+		notifyMgr := notify.NewManager(dataDir, env)
+		if loadErr := notifyMgr.LoadConfig(); loadErr == nil {
+			cfg := notifyMgr.GetConfig()
+			if cfg != nil && cfg.Enabled {
+				if cfg.Discord != nil {
+					notifyMgr.AddNotifier(notify.NewDiscordNotifier(*cfg.Discord))
+				}
+				if cfg.Slack != nil {
+					notifyMgr.AddNotifier(notify.NewSlackNotifier(*cfg.Slack))
+				}
+				if cfg.Email != nil {
+					notifyMgr.AddNotifier(notify.NewEmailNotifier(*cfg.Email))
+				}
+			}
+		}
+
+		notifyMgr.SendAsync(context.Background(), types.NotificationEvent{
+			Type:    types.EventCleanup,
+			Message: fmt.Sprintf("Docker cleanup completed. Total reclaimed: %s", formatBytes(totalReclaimed)),
+			Metadata: map[string]string{
+				"environment": env,
+				"reclaimed":   fmt.Sprintf("%d", totalReclaimed),
+			},
+		})
+
 		return nil
 	}
 }

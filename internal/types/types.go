@@ -10,6 +10,7 @@ const (
 	EventHealthAlert   NotificationEventType = "health:alert"
 	EventContainerStop NotificationEventType = "container:stop"
 	EventSystemWarning NotificationEventType = "system:warning"
+	EventCleanup       NotificationEventType = "cleanup:completed"
 )
 
 type NotificationEvent struct {
