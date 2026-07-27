@@ -93,6 +93,36 @@ func (s *Store) AllocatePort(appName string) (int, error) {
 	return 0, nil
 }
 
+func (s *Store) CleanupOrphanedPorts() (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ports := make(map[int]string)
+	s.readJSON(s.envFile("ports.json"), &ports)
+	if len(ports) == 0 {
+		return 0, nil
+	}
+
+	apps := make(map[string]types.AppEntry)
+	s.readJSON(s.envFile("apps.json"), &apps)
+
+	var removed int
+	for port, appName := range ports {
+		if _, exists := apps[appName]; !exists {
+			delete(ports, port)
+			removed++
+		}
+	}
+
+	if removed > 0 {
+		if err := s.writeJSON(s.envFile("ports.json"), ports); err != nil {
+			return removed, fmt.Errorf("write ports: %w", err)
+		}
+	}
+
+	return removed, nil
+}
+
 func (s *Store) FreePort(port int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
