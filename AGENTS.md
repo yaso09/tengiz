@@ -12,12 +12,13 @@
 
 | Package | Responsibility |
 |---------|---------------|
-| `runtime.Manager` | Interface for container lifecycle. `NewDocker()` = exec-based impl, `NewStub()` = test mock. Also: `CreateFromImage`, `RemoveImage`, `KeepLastNImages` for rollback + image cleanup. `ContainerName(name, env)` helper. |
+| `runtime.Manager` | Interface for container lifecycle. `NewDocker()` = exec-based impl, `NewStub()` = test mock. Also: `CreateFromImage`, `RemoveImage`, `KeepLastNImages` for rollback + image cleanup. `PruneContainers/Images/Volumes/Networks/BuildCache` for Docker housekeeping. `ContainerName(name, env)` helper. |
 | `builder` | Framework detection (`detect.go`) + Dockerfile generation (`builder.go`). Supports: Docker, Next.js, Vite, Go, Node, Python, static. Nixpacks backend (`build.builder: nixpacks`) for hundreds of frameworks (Ruby, Rust, PHP, etc). Env-aware image tags (`{env}-{deploymentID}`). |
 | `proxy` | `httputil.ReverseProxy` with host-based routing (`appname.tengiz.local` → port 9000+) and custom domain support. Cold-starts stopped containers on demand. Env-aware via `NewWithEnv`. |
 | `idle` | Per-app timer. `Reset(name)` extends deadline. On expiry: calls `runtime.Stop()`. Default 5m timeout. Env-aware via `NewWithEnv`. |
 | `config` | Loads `.tengiz.yaml` via viper. `LoadWithEnv(path, env)` and `LoadForEnvironment(path, env)` merge `.tengiz.{env}.yaml` overrides (latter adds env name validation + comprehensive scalar merge). `Store` persists apps + port allocations in `~/.tengiz/` (env-scoped). Adds `GetEnv`/`SetEnv`/`UnsetEnv`/`ListEnv` for env var management. |
 | `health` | Periodic HTTP health checks with automatic restart. Env-aware via `NewWithEnv`. |
+| `housekeeping` | Docker cleanup orchestration. `Housekeeper` struct with `Run`/`DryRun`. `CleanupOptions` for category selection, `--all`, `--app`, `--dry-run`. |
 | `gitdeploy` | Git-based deployment pipeline. Env-aware via `NewPipelineWithEnv`. |
 | `preview` | Preview deployment lifecycle (PR-based). `Manager` struct with `Create/Update/Delete/List`. Webhook `pull_request` events trigger auto-create/update/cleanup. |
 | `encrypt` | AES-256-GCM encrypt/decrypt, key generation, key file load/save |
@@ -57,6 +58,7 @@ tengiz volume add/remove/list   → persistent storage volumes
 tengiz preview list <app>       → list preview deployments
 tengiz preview rm <app> <pr>    → remove a preview deployment
 tengiz preview deploy <app> <pr> → create/update preview deployment (webhook preferred)
+tengiz cleanup [--dry-run] [--all] [--containers] [--images] [--volumes] [--networks] [--build-cache] [--app <name>] → prune Docker resources
 tengiz rollback <app>           → rollback to previous deployment
 tengiz notification enable      → enable notifications
 tengiz notification disable     → disable notifications

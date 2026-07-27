@@ -98,6 +98,11 @@ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppCon
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRTForDeploy) PruneContainers(ctx context.Context) (runtime.PruneStats, error) { return runtime.PruneStats{}, nil }
+func (m *mockRTForDeploy) PruneImages(ctx context.Context, all bool) (runtime.PruneStats, error) { return runtime.PruneStats{}, nil }
+func (m *mockRTForDeploy) PruneVolumes(ctx context.Context) (runtime.PruneStats, error) { return runtime.PruneStats{}, nil }
+func (m *mockRTForDeploy) PruneNetworks(ctx context.Context) (runtime.PruneStats, error) { return runtime.PruneStats{}, nil }
+func (m *mockRTForDeploy) PruneBuildCache(ctx context.Context) (runtime.PruneStats, error) { return runtime.PruneStats{}, nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}
@@ -111,6 +116,10 @@ func TestDeployZeroDowntimeCreatesVersionedContainer(t *testing.T) {
 	if m == nil {
 		t.Fatal("mock does not implement Manager")
 	}
+}
+
+func TestDeployCallsCleanup(t *testing.T) {
+	t.Skip("integration test requires Docker daemon")
 }
 
 func TestHealthCmdNoApp(t *testing.T) {
