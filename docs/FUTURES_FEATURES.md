@@ -1942,3 +1942,57 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Every deploy records its source: `git-hook`, `git-sync`, `git-from-archive`, `docker-image`, `tar`, `ps:rebuild`, or `config-redeploy`. Stored as app property and surfaced in build records. Enables deploy origin traceability.
 - **Why add to Tengiz:** Knowing what triggered a deploy is essential for debugging, audit, and rollback decisions. "Was this deploy from a git push or a manual rebuild?" Currently Tengiz has no deploy source tracking. Recorded alongside build metadata, this feeds the audit trail and app report features already on the roadmap.
 - **Detected:** 2026-07-27
+
+## Separate Proxy Container Lifecycle (kamal-proxy as Managed Service)
+- **Source:** Kamal
+- **Description:** Kamal runs its proxy (`ghcr.io/basecamp/kamal-proxy`) as a standalone Docker container with its own lifecycle: `kamal proxy boot` (start proxy container), `kamal proxy upgrade` (upgrade to new version), `kamal proxy stop/restart`. The proxy can be upgraded independently from app deployments. The containerized proxy handles zero-downtime deploys, TLS termination, HTTP/2, and health checks — all managed separately from the deploy tool. Kamal's `configuration/proxy.rb` defines proxy settings (hosts, SSL, app_port, healthcheck, buffering, timeouts, error pages, logging) that are passed as CLI args to the proxy container.
+- **Why add to Tengiz:** Tengiz embeds the reverse proxy in the CLI binary — started as a Go goroutine inside the tengiz process. This ties proxy lifecycle to the CLI session and prevents independent scaling/monitoring. A separate proxy container (e.g., `tengiz-proxy`) with its own lifecycle commands (`tengiz proxy boot/upgrade/stop/restart`) would decouple the proxy from the CLI, enable hot-swap upgrades without downtime, allow independent resource allocation, and provide a dedicated health endpoint. Medium effort (Docker container lifecycle + config generation + CLI commands), significant architectural improvement.
+- **Detected:** 2026-07-27
+
+## App Exec with `--reuse` Flag (Existing Container Execution)
+- **Source:** Kamal
+- **Description:** `kamal app exec -i --reuse "rails console"` runs the command in the EXISTING running container (the one currently serving traffic), not a new ephemeral container. The `--reuse` flag targets the primary running container for that service/role. Critical for production debugging: you enter the exact same container with the same environment, filesystem state, loaded libraries, and network connections as the live app.
+- **Why add to Tengiz:** `tengiz run` creates a new temporary container from the image, useful for migrations but useless for debugging live production issues. You need to inspect the actual running container: check open FDs, view in-memory state, examine network connections. `tengiz exec <app> --reuse <cmd>` finds the running container via `docker ps --filter label=tengiz-app=<app>` and runs the command there. Low effort (Docker label filter + exec passthrough), high debugging value.
+- **Detected:** 2026-07-27
+
+## App Exec `--detach` Mode (Background One-Off Execution)
+- **Source:** Kamal
+- **Description:** `kamal app exec --detach "long-running-migration.sh"` runs a command in the background without interactive TTY allocation. Returns immediately with the container ID. The command continues running independently of the CLI session. Useful for long-running data migrations, batch processing scripts, or maintenance tasks that should not block the CLI.
+- **Why add to Tengiz:** Currently all `tengiz run` commands are foreground-only — they block the CLI until completion. Long-running operations (hour-long migrations, large data imports) tie up the terminal session. `tengiz run <app> <cmd> --detach` runs with Docker `-d` flag, returns the container ID immediately, and the user can check completion via `tengiz run logs <id>`. Low effort (add `-d` flag path in `runtime.Run()`), high operational value for background tasks.
+- **Detected:** 2026-07-27
+
+## Selective Registry Push Control (`--skip-push` / `--push`)
+- **Source:** Kamal
+- **Description:** Kamal's `deploy` command supports `--skip-push` (build but don't push image to registry) and `--push` (force push even if image exists locally). `--skip-push` is useful in development workflows where you only need the local image. `--push` is useful in CI/CD where you need to guarantee the image is on the registry regardless of local cache state.
+- **Why add to Tengiz:** Tengiz always pushes to the registry during deploy if a registry is configured. This wastes time in development (push is unnecessary if only deploying locally) and is inflexible in CI/CD. `tengiz deploy --skip-push` saves time in local development; `tengiz deploy --push` forces fresh registry upload for CI/CD. Low effort (boolean flag checked before push step), high workflow flexibility value.
+- **Detected:** 2026-07-27
+
+## Image Pull Strategy Control (`--pull` Flag)
+- **Source:** Kamal
+- **Description:** Kamal's `--pull` flag controls whether to always pull the latest image from the registry or use the local cached version. When `--pull` is set, `docker pull` is run before deploy to ensure the freshest image. Without it, the locally cached image is used, speeding up deployment.
+- **Why add to Tengiz:** In CI/CD pipelines, you want to guarantee the latest image is used (`--pull`). In development, you want to use the local build without re-pulling (`--no-pull`). `tengiz deploy --pull` gives explicit control. Low effort (Docker `--pull` flag passthrough), complements Selective Push for full registry workflow control.
+- **Detected:** 2026-07-27
+
+## Config Extensions with `x-` Prefix (YAML Anchors/Aliases Support)
+- **Source:** Kamal
+- **Description:** Kamal explicitly supports `x-` prefixed configuration keys that are ignored during validation but usable for YAML anchors and aliases. This enables DRY config management: define a shared block with `x-database: &database`, then reference it across multiple sections with `<<: *database`. Kamal's validator in `configuration/validator.rb` has an `extension?(key)` method that skips validation for any key starting with `x-`.
+- **Why add to Tengiz:** Tengiz config files grow large in multi-app, multi-environment setups. Without a DRY mechanism, users copy-paste repeated blocks (registry config, builder settings, resource limits). Supporting `x-` extension keys with YAML anchor processing in `config.LoadWithEnv()` enables: shared config blocks via `x-global: &global` + `<<: *global`, backwards compatibility, and documentation via `x-doc:` blocks. Low effort (YAML already supports anchors natively — Tengiz just needs to not reject `x-` keys during validation), high maintainability value for complex deployments.
+- **Detected:** 2026-07-27
+
+## App Version and Container Name Display
+- **Source:** Kamal
+- **Description:** `kamal app version` shows the currently deployed version tag for the app. `kamal app container_name` shows the exact Docker container name running the app. These provide quick, scriptable visibility into deployment state without parsing `docker ps` output.
+- **Why add to Tengiz:** Currently no way to see "what version is deployed" or "what's the exact container name" from the CLI. `tengiz app version <name>` and `tengiz app container <name>` provide focused, scriptable access to deployment metadata. Low effort (read from AppEntry + Docker inspect), fills a common operational need.
+- **Detected:** 2026-07-27
+
+## Built-in Config Schema Documentation (`kamal docs` command)
+- **Source:** Kamal
+- **Description:** Kamal provides a `kamal docs` command that displays the validated configuration schema inline. Each configuration section has a YAML doc file (`configuration/docs/`) with key descriptions, types, defaults, and examples. `kamal docs proxy` shows all proxy config options; `kamal docs builder` shows builder config. The documentation is always up-to-date (generated from validation schemas), versioned with code, and available offline.
+- **Why add to Tengiz:** Users currently must read source code or external docs to learn `.tengiz.yaml` format. A `tengiz config docs [section]` command that embeds Go struct tags or a `docs/config.yaml` schema file and prints formatted documentation would: reduce the learning curve, provide offline reference, ensure docs match the actual code. Complements Config Validation and Config Display. Low effort (embed YAML/JSON docs + template output), high UX value.
+- **Detected:** 2026-07-27
+
+## SSH Proxy/Jump Host Support (Multi-Hop SSH for Private Networks)
+- **Source:** Kamal
+- **Description:** Kamal supports SSH connections through intermediate jump hosts for deployments in private networks. Configured via `ssh.proxy` (full proxy string: `user@host:port`), `ssh.proxy_host`, `ssh.proxy_user`, `ssh.proxy_port`, and `ssh.proxy_jump_proxy` (multi-hop proxy chaining). The SSH connection flows: local → jump host → target server. Essential for deployments in AWS private subnets or environments where direct SSH access is restricted.
+- **Why add to Tengiz:** Many production deployments run on cloud VMs in private subnets without public IPs. SSH jump host support enables Tengiz to manage containers on these servers without VPN or bastion host workarounds. Complements SSH Remote Deployment and SSH Multiplexing. `.tengiz.yaml`'da `ssh.proxy_host: bastion.example.com` ile yapılandırılır. Implementation: Go's `golang.org/x/crypto/ssh` supports proxy jumps natively via `ssh.Dial` chain. Medium effort (multi-hop SSH chain configuration + key forwarding), essential for enterprise cloud deployments.
+- **Detected:** 2026-07-27
