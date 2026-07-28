@@ -235,6 +235,26 @@ Rollback to the previous deployment. The previous active container is started on
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup [--dry-run] [--all] [--containers] [--images] [--volumes] [--networks] [--build-cache] [--keep-dangling] [-y]`
+
+Remove unused Docker resources and reclaim disk space.
+
+Without flags, performs a **Tengiz-safe prune**: removes stopped containers and dangling images that are NOT managed by Tengiz (no `tengiz-app` label).
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Show what would be removed without deleting |
+| `--all` | Prune all categories without Tengiz protection |
+| `--containers` | Prune only stopped containers |
+| `--images` | Prune only unused images |
+| `--volumes` | Prune only unused volumes |
+| `--networks` | Prune only unused networks |
+| `--build-cache` | Prune only Docker build cache |
+| `--keep-dangling` | Skip dangling image removal (keep them) |
+| `-y`, `--yes` | Skip confirmation prompt |
+
+Displays disk usage before and after the cleanup for context.
+
 ### `tengiz domain`
 
 Manage custom domains for applications.
@@ -700,6 +720,7 @@ tengiz/
 ├── main.go                  # Entry point
 ├── internal/
 │   ├── builder/             # Framework detection + Dockerfile generation
+│   ├── cleanup/             # Docker housekeeping (prune, disk usage, reporting)
 │   ├── cli/                 # Cobra CLI commands
 │   ├── config/              # .tengiz.yaml loader + state persistence
 │   ├── idle/                # Scale-to-zero timer manager

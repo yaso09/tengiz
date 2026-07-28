@@ -357,6 +357,57 @@ func TestLogsCmdFlagParsing(t *testing.T) {
 	}
 }
 
+func TestCleanupCmdExists(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not found: %v", err)
+	}
+	if cmd == nil {
+		t.Fatal("cleanup command is nil")
+	}
+	if cmd.Use != "cleanup" {
+		t.Errorf("expected Use 'cleanup', got %q", cmd.Use)
+	}
+}
+
+func TestCleanupCmdDryRunFlag(t *testing.T) {
+	cmd, _, _ := rootCmd.Find([]string{"cleanup"})
+	flag := cmd.Flags().Lookup("dry-run")
+	if flag == nil {
+		t.Fatal("cleanup command missing --dry-run flag")
+	}
+}
+
+func TestCleanupCmdAllFlag(t *testing.T) {
+	cmd, _, _ := rootCmd.Find([]string{"cleanup"})
+	flag := cmd.Flags().Lookup("all")
+	if flag == nil {
+		t.Fatal("cleanup command missing --all flag")
+	}
+}
+
+func TestCleanupCmdYesFlag(t *testing.T) {
+	cmd, _, _ := rootCmd.Find([]string{"cleanup"})
+	flag := cmd.Flags().Lookup("yes")
+	if flag == nil {
+		t.Fatal("cleanup command missing --yes flag")
+	}
+	short := flag.Shorthand
+	if short != "y" {
+		t.Errorf("expected shorthand 'y', got %q", short)
+	}
+}
+
+func TestCleanupCmdCategoryFlags(t *testing.T) {
+	cmd, _, _ := rootCmd.Find([]string{"cleanup"})
+	for _, name := range []string{"containers", "images", "volumes", "networks", "build-cache"} {
+		flag := cmd.Flags().Lookup(name)
+		if flag == nil {
+			t.Errorf("cleanup command missing --%s flag", name)
+		}
+	}
+}
+
 func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	configCmd, _, err := rootCmd.Find([]string{"config"})
 	if err != nil {
