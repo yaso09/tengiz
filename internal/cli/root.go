@@ -639,7 +639,7 @@ var startCmd = &cobra.Command{
 
 var rmCmd = &cobra.Command{
 	Use:   "rm <app>",
-	Short: "Remove an application completely",
+	Short: "Remove an application (container + images)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		env := getEnv(cmd)
@@ -665,7 +665,15 @@ var rmCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Printf("[tengiz] removed: %s\n", appName)
+		fmt.Printf("[tengiz] removed container: %s\n", appName)
+
+		fmt.Print("[tengiz] cleaning up images... ")
+		if err := rt.CleanupAppImages(context.Background(), appName); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		} else {
+			fmt.Println("done")
+		}
+
 		return nil
 	},
 }
