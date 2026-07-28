@@ -74,6 +74,7 @@ func init() {
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	deployCmd.Flags().Bool("cleanup", false, "run cleanup after successful deploy")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
@@ -347,6 +348,16 @@ var deployCmd = &cobra.Command{
 				log.Printf("[tengiz] warning: image cleanup: %v", err)
 			}
 
+			if cleanup, _ := cmd.Flags().GetBool("cleanup"); cleanup {
+				fmt.Println("[deploy] Running post-deploy cleanup...")
+				if result, err := rt.PruneContainers(context.Background()); err == nil && result.ContainersRemoved > 0 {
+					fmt.Printf("[deploy] Removed %d orphaned containers\n", result.ContainersRemoved)
+				}
+				if result, err := rt.PruneImages(context.Background()); err == nil && result.ImagesRemoved > 0 {
+					fmt.Printf("[deploy] Removed %d unused images\n", result.ImagesRemoved)
+				}
+			}
+
 			if err := proxy.RegisterRouteWithProxy(cfg.Name, port); err != nil {
 				log.Printf("[tengiz] proxy not available (route will be registered on proxy start): %v", err)
 			}
@@ -465,6 +476,16 @@ var deployCmd = &cobra.Command{
 
 		if err := rt.KeepLastNImages(context.Background(), cfg.Name, 5); err != nil {
 			log.Printf("[tengiz] warning: image cleanup: %v", err)
+		}
+
+		if cleanup, _ := cmd.Flags().GetBool("cleanup"); cleanup {
+			fmt.Println("[deploy] Running post-deploy cleanup...")
+			if result, err := rt.PruneContainers(context.Background()); err == nil && result.ContainersRemoved > 0 {
+				fmt.Printf("[deploy] Removed %d orphaned containers\n", result.ContainersRemoved)
+			}
+			if result, err := rt.PruneImages(context.Background()); err == nil && result.ImagesRemoved > 0 {
+				fmt.Printf("[deploy] Removed %d unused images\n", result.ImagesRemoved)
+			}
 		}
 
 		fmt.Printf("[tengiz] deployed (zero-downtime): %s at http://%s.tengiz.local:%d\n",

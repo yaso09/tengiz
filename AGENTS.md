@@ -38,7 +38,7 @@ go vet ./...                  # static analysis
 ```
 tengiz --env <env> <command> → global flag for multi-environment (dev/staging/prod)
 tengiz init [name]    → create .tengiz.yaml
-tengiz deploy [dir]   → detect, build, run container
+tengiz deploy [dir]   → detect, build, run container (--cleanup for post-deploy housekeeping)
 tengiz proxy [-a app] → start reverse proxy on :8080 (use -a to route all traffic to one app)
 tengiz ps             → list apps from Docker
 tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] app  → stream logs with filtering
@@ -57,6 +57,7 @@ tengiz volume add/remove/list   → persistent storage volumes
 tengiz preview list <app>       → list preview deployments
 tengiz preview rm <app> <pr>    → remove a preview deployment
 tengiz preview deploy <app> <pr> → create/update preview deployment (webhook preferred)
+tengiz cleanup [flags]          → remove unused Docker resources (--containers, --images, --volumes, --networks, --build-cache, --dry-run, --force)
 tengiz rollback <app>           → rollback to previous deployment
 tengiz notification enable      → enable notifications
 tengiz notification disable     → disable notifications
