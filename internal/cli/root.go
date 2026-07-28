@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/yaso09/tengiz/internal/builder"
+	"github.com/yaso09/tengiz/internal/cleanup"
 	"github.com/yaso09/tengiz/internal/config"
 	"github.com/yaso09/tengiz/internal/git"
 	"github.com/yaso09/tengiz/internal/gitdeploy"
@@ -73,6 +74,16 @@ func init() {
 	notificationCmd.AddCommand(notificationSetChannelCmd)
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be deleted without deleting")
+	cleanupCmd.Flags().Bool("all", false, "prune all categories without Tengiz protection")
+	cleanupCmd.Flags().BoolP("yes", "y", false, "skip confirmation prompt")
+	cleanupCmd.Flags().Bool("containers", false, "prune only stopped containers")
+	cleanupCmd.Flags().Bool("images", false, "prune only unused images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune only unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune only unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune only build cache")
+	cleanupCmd.Flags().Bool("keep-dangling", false, "skip dangling image removal (keep them)")
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -1155,6 +1166,94 @@ Examples:
 
 		if err := rt.Run(cmd.Context(), &app.Config, imageTag, command, opts); err != nil {
 			return fmt.Errorf("run: %w", err)
+		}
+
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources and reclaim disk space",
+	Long: `Remove unused Docker resources with label-based safety to protect Tengiz-managed containers.
+
+Without flags, performs a Tengiz-safe prune: removes stopped containers and dangling images
+that are NOT managed by Tengiz (no tengiz-app label).
+
+Examples:
+  tengiz cleanup                  # Tengiz-safe prune (containers + dangling images)
+  tengiz cleanup --all            # Aggressive: all categories, no protection
+  tengiz cleanup --dry-run        # Preview without deleting
+  tengiz cleanup --images         # Only prune unused images
+  tengiz cleanup --volumes        # Only prune unused volumes
+  tengiz cleanup -y               # Skip confirmation prompt`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		all, _ := cmd.Flags().GetBool("all")
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		networks, _ := cmd.Flags().GetBool("networks")
+		buildCache, _ := cmd.Flags().GetBool("build-cache")
+		keepDangling, _ := cmd.Flags().GetBool("keep-dangling")
+		yes, _ := cmd.Flags().GetBool("yes")
+
+		var opts cleanup.PruneOptions
+
+		if all {
+			opts = cleanup.AllPruneOptions()
+		} else if containers || images || volumes || networks || buildCache {
+			opts = cleanup.PruneOptions{
+				Containers:   containers,
+				Images:       images,
+				Volumes:      volumes,
+				Networks:     networks,
+				BuildCache:   buildCache,
+				KeepDangling: keepDangling,
+				TengizSafe:   !all,
+			}
+		} else {
+			opts = cleanup.DefaultPruneOptions()
+		}
+		opts.DryRun = dryRun
+
+		ctx := context.Background()
+
+		before, diskErr := cleanup.DiskUsage(ctx)
+		if diskErr == nil && before != nil {
+			fmt.Print(before.Format())
+			fmt.Println()
+		}
+
+		if !dryRun && !yes {
+			label := "Tengiz-safe"
+			if !opts.TengizSafe {
+				label = "Aggressive (no Tengiz protection)"
+			}
+			fmt.Printf("This will perform a %s cleanup. Continue? [y/N] ", label)
+			var response string
+			fmt.Scanln(&response)
+			if response != "y" && response != "Y" && response != "yes" {
+				fmt.Println("Cleanup cancelled.")
+				return nil
+			}
+		}
+
+		report, err := cleanup.Prune(ctx, opts)
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+
+		var after *cleanup.DiskInfo
+		if !dryRun {
+			after, _ = cleanup.DiskUsage(ctx)
+		}
+
+		if dryRun {
+			fmt.Print(report.Format(nil, after))
+			fmt.Println("\n(DRY RUN — no changes were made. Run without --dry-run to execute.)")
+		} else {
+			fmt.Print(report.Format(before, after))
 		}
 
 		return nil
