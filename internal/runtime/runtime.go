@@ -46,6 +46,16 @@ type Manager interface {
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
+
+	PruneContainers(ctx context.Context) error
+	PruneImages(ctx context.Context) error
+	PruneVolumes(ctx context.Context) error
+	PruneNetworks(ctx context.Context) error
+	PruneBuildCache(ctx context.Context) error
+	CleanupOrphanedContainers(ctx context.Context, activeApps []string) error
+	CleanupOrphanedImages(ctx context.Context, activeApps []string) error
+	CleanupAppImages(ctx context.Context, appName string) error
+	CleanupAppResources(ctx context.Context, appName string) error
 }
 
 type stubManager struct{}
@@ -119,5 +129,41 @@ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int
 }
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
+	return nil
+}
+
+func (m *stubManager) PruneContainers(ctx context.Context) error {
+	return nil
+}
+
+func (m *stubManager) PruneImages(ctx context.Context) error {
+	return nil
+}
+
+func (m *stubManager) PruneVolumes(ctx context.Context) error {
+	return nil
+}
+
+func (m *stubManager) PruneNetworks(ctx context.Context) error {
+	return nil
+}
+
+func (m *stubManager) PruneBuildCache(ctx context.Context) error {
+	return nil
+}
+
+func (m *stubManager) CleanupOrphanedContainers(ctx context.Context, activeApps []string) error {
+	return nil
+}
+
+func (m *stubManager) CleanupOrphanedImages(ctx context.Context, activeApps []string) error {
+	return nil
+}
+
+func (m *stubManager) CleanupAppImages(ctx context.Context, appName string) error {
+	return nil
+}
+
+func (m *stubManager) CleanupAppResources(ctx context.Context, appName string) error {
 	return nil
 }
