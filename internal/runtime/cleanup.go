@@ -9,6 +9,26 @@ import (
 	"strings"
 )
 
+func (r *dockerRuntime) PruneContainers(ctx context.Context) (*CleanupResult, error) {
+	return &CleanupResult{}, nil
+}
+
+func (r *dockerRuntime) PruneImages(ctx context.Context) (*CleanupResult, error) {
+	return &CleanupResult{}, nil
+}
+
+func (r *dockerRuntime) PruneVolumes(ctx context.Context) (*CleanupResult, error) {
+	return &CleanupResult{}, nil
+}
+
+func (r *dockerRuntime) PruneNetworks(ctx context.Context) (*CleanupResult, error) {
+	return &CleanupResult{}, nil
+}
+
+func (r *dockerRuntime) PruneBuildCache(ctx context.Context) (*CleanupResult, error) {
+	return &CleanupResult{}, nil
+}
+
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()
