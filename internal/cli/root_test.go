@@ -98,6 +98,15 @@ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppCon
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRTForDeploy) PruneContainers(ctx context.Context) error { return nil }
+func (m *mockRTForDeploy) PruneImages(ctx context.Context) error { return nil }
+func (m *mockRTForDeploy) PruneVolumes(ctx context.Context) error { return nil }
+func (m *mockRTForDeploy) PruneNetworks(ctx context.Context) error { return nil }
+func (m *mockRTForDeploy) PruneBuildCache(ctx context.Context) error { return nil }
+func (m *mockRTForDeploy) CleanupOrphanedContainers(ctx context.Context, activeApps []string) error { return nil }
+func (m *mockRTForDeploy) CleanupOrphanedImages(ctx context.Context, activeApps []string) error { return nil }
+func (m *mockRTForDeploy) CleanupAppImages(ctx context.Context, appName string) error { return nil }
+func (m *mockRTForDeploy) CleanupAppResources(ctx context.Context, appName string) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}
