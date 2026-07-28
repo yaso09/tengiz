@@ -30,3 +30,22 @@ func TestCleanupRequiresConfirmation(t *testing.T) {
 		t.Error("cleanup command missing --force flag")
 	}
 }
+
+func TestPsHasVerboseFlag(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"ps"})
+	if err != nil {
+		t.Fatalf("ps command not found: %v", err)
+	}
+	flag := cmd.Flags().Lookup("verbose")
+	if flag == nil {
+		t.Error("ps command missing --verbose flag")
+	}
+}
+
+func TestPsVerboseOutput(t *testing.T) {
+	rootCmd.SetArgs([]string{"ps", "--verbose"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Logf("ps --verbose error (expected if no docker): %v", err)
+	}
+}

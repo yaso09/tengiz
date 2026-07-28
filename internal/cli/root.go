@@ -73,6 +73,7 @@ func init() {
 	cleanupCmd.Flags().Bool("all", false, "prune all resource types")
 	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without removing")
 	cleanupCmd.Flags().BoolP("force", "f", false, "skip confirmation prompt")
+	psCmd.Flags().BoolP("verbose", "v", false, "show container and image sizes")
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
@@ -566,6 +567,8 @@ var psCmd = &cobra.Command{
 			return fmt.Errorf("docker: %w", err)
 		}
 
+		verbose, _ := cmd.Flags().GetBool("verbose")
+
 		apps, err := rt.List(context.Background())
 		if err != nil {
 			return fmt.Errorf("list: %w", err)
@@ -588,7 +591,18 @@ var psCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", "NAME", "STATE", "PORT", "ENVIRONMENT", "HEALTH")
+		if verbose {
+			fmt.Printf("%-20s %-10s %-8s %-12s %-10s %-12s %-12s\n",
+				"NAME", "STATE", "PORT", "ENVIRONMENT", "HEALTH", "SIZE", "IMAGE SIZE")
+		} else {
+			fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", "NAME", "STATE", "PORT", "ENVIRONMENT", "HEALTH")
+		}
+
+		storeAppMap := make(map[string]types.AppEntry, len(storeApps))
+		for _, sa := range storeApps {
+			storeAppMap[sa.Name] = sa
+		}
+
 		for _, a := range apps {
 			portStr := fmt.Sprintf("%d", a.Port)
 			if a.Port == 0 {
@@ -602,10 +616,71 @@ var psCmd = &cobra.Command{
 			if env == "" {
 				env = "-"
 			}
-			fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", a.Name, a.State, portStr, env, health)
+
+			if verbose {
+				appEnv := envMap[a.Name]
+				containerName := runtime.ContainerName(a.Name, appEnv)
+				containerSize := getContainerSize(context.Background(), containerName)
+				storeEntry, hasEntry := storeAppMap[a.Name]
+				imageTag := ""
+				if hasEntry {
+					imageTag = storeEntry.ImageTag
+				}
+				imageSize := getImageSize(context.Background(), a.Name, imageTag)
+				fmt.Printf("%-20s %-10s %-8s %-12s %-10s %-12s %-12s\n",
+					a.Name, a.State, portStr, env, health, containerSize, imageSize)
+			} else {
+				fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", a.Name, a.State, portStr, env, health)
+			}
 		}
 		return nil
 	},
+}
+
+func getContainerSize(ctx context.Context, containerName string) string {
+	cmd := exec.CommandContext(ctx, "docker", "ps",
+		"--filter", fmt.Sprintf("name=%s", containerName),
+		"--format", "{{.Size}}",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return "-"
+	}
+	s := strings.TrimSpace(string(out))
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+func getImageSize(ctx context.Context, appName string, currentImageTag string) string {
+	if currentImageTag != "" {
+		cmd := exec.CommandContext(ctx, "docker", "images",
+			"--filter", fmt.Sprintf("reference=%s", currentImageTag),
+			"--format", "{{.Size}}",
+		)
+		out, err := cmd.Output()
+		if err == nil {
+			s := strings.TrimSpace(string(out))
+			if s != "" {
+				return s
+			}
+		}
+	}
+	cmd := exec.CommandContext(ctx, "docker", "images",
+		"--filter", fmt.Sprintf("reference=tengiz-apps/%s:*", appName),
+		"--format", "{{.Size}}",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return "-"
+	}
+	s := strings.TrimSpace(string(out))
+	if s == "" {
+		return "-"
+	}
+	lines := strings.Split(s, "\n")
+	return lines[0]
 }
 
 var cleanupCmd = &cobra.Command{
