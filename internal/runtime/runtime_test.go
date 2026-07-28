@@ -247,6 +247,32 @@ func TestStubRun(t *testing.T) {
 	}
 }
 
+func TestInterfaceHasPruneMethods(t *testing.T) {
+	m := NewStub()
+	ctx := context.Background()
+
+	_, err := m.PruneContainers(ctx)
+	if err != nil {
+		t.Errorf("PruneContainers: %v", err)
+	}
+	_, err = m.PruneImages(ctx)
+	if err != nil {
+		t.Errorf("PruneImages: %v", err)
+	}
+	_, err = m.PruneVolumes(ctx)
+	if err != nil {
+		t.Errorf("PruneVolumes: %v", err)
+	}
+	_, err = m.PruneBuildCache(ctx)
+	if err != nil {
+		t.Errorf("PruneBuildCache: %v", err)
+	}
+	_, err = m.PruneSystem(ctx)
+	if err != nil {
+		t.Errorf("PruneSystem: %v", err)
+	}
+}
+
 func TestStubRunInteractive(t *testing.T) {
 	m := NewStub()
 	cfg := &types.AppConfig{Name: "testapp", Env: map[string]string{"FOO": "bar"}}

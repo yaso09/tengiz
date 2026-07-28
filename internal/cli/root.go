@@ -65,6 +65,15 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers")
+	cleanupCmd.Flags().Bool("images", false, "prune unused images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune builder cache")
+	cleanupCmd.Flags().Bool("all", false, "prune all resource types")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without removing")
+	cleanupCmd.Flags().BoolP("force", "f", false, "skip confirmation prompt")
+	psCmd.Flags().BoolP("verbose", "v", false, "show container and image sizes")
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
@@ -558,6 +567,8 @@ var psCmd = &cobra.Command{
 			return fmt.Errorf("docker: %w", err)
 		}
 
+		verbose, _ := cmd.Flags().GetBool("verbose")
+
 		apps, err := rt.List(context.Background())
 		if err != nil {
 			return fmt.Errorf("list: %w", err)
@@ -580,7 +591,18 @@ var psCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", "NAME", "STATE", "PORT", "ENVIRONMENT", "HEALTH")
+		if verbose {
+			fmt.Printf("%-20s %-10s %-8s %-12s %-10s %-12s %-12s\n",
+				"NAME", "STATE", "PORT", "ENVIRONMENT", "HEALTH", "SIZE", "IMAGE SIZE")
+		} else {
+			fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", "NAME", "STATE", "PORT", "ENVIRONMENT", "HEALTH")
+		}
+
+		storeAppMap := make(map[string]types.AppEntry, len(storeApps))
+		for _, sa := range storeApps {
+			storeAppMap[sa.Name] = sa
+		}
+
 		for _, a := range apps {
 			portStr := fmt.Sprintf("%d", a.Port)
 			if a.Port == 0 {
@@ -594,10 +616,208 @@ var psCmd = &cobra.Command{
 			if env == "" {
 				env = "-"
 			}
-			fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", a.Name, a.State, portStr, env, health)
+
+			if verbose {
+				appEnv := envMap[a.Name]
+				containerName := runtime.ContainerName(a.Name, appEnv)
+				containerSize := getContainerSize(context.Background(), containerName)
+				storeEntry, hasEntry := storeAppMap[a.Name]
+				imageTag := ""
+				if hasEntry {
+					imageTag = storeEntry.ImageTag
+				}
+				imageSize := getImageSize(context.Background(), a.Name, imageTag)
+				fmt.Printf("%-20s %-10s %-8s %-12s %-10s %-12s %-12s\n",
+					a.Name, a.State, portStr, env, health, containerSize, imageSize)
+			} else {
+				fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", a.Name, a.State, portStr, env, health)
+			}
 		}
 		return nil
 	},
+}
+
+func getContainerSize(ctx context.Context, containerName string) string {
+	cmd := exec.CommandContext(ctx, "docker", "ps",
+		"--filter", fmt.Sprintf("name=%s", containerName),
+		"--format", "{{.Size}}",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return "-"
+	}
+	s := strings.TrimSpace(string(out))
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+func getImageSize(ctx context.Context, appName string, currentImageTag string) string {
+	if currentImageTag != "" {
+		cmd := exec.CommandContext(ctx, "docker", "images",
+			"--filter", fmt.Sprintf("reference=%s", currentImageTag),
+			"--format", "{{.Size}}",
+		)
+		out, err := cmd.Output()
+		if err == nil {
+			s := strings.TrimSpace(string(out))
+			if s != "" {
+				return s
+			}
+		}
+	}
+	cmd := exec.CommandContext(ctx, "docker", "images",
+		"--filter", fmt.Sprintf("reference=tengiz-apps/%s:*", appName),
+		"--format", "{{.Size}}",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return "-"
+	}
+	s := strings.TrimSpace(string(out))
+	if s == "" {
+		return "-"
+	}
+	lines := strings.Split(s, "\n")
+	return lines[0]
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Prune unused Docker resources",
+	Long: `Remove unused Docker containers, images, volumes, and build cache.
+Uses label-based filtering to only affect Tengiz-managed resources.
+
+Flags control which resource types to prune:
+  --containers    Remove stopped containers
+  --images        Remove unused images
+  --volumes       Remove unused volumes (global, not just Tengiz)
+  --build-cache   Remove builder cache
+  --all           Prune all resource types (default)
+
+Use --dry-run to preview what would be removed.
+Use --force to skip confirmation prompt.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		buildCache, _ := cmd.Flags().GetBool("build-cache")
+		all, _ := cmd.Flags().GetBool("all")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		force, _ := cmd.Flags().GetBool("force")
+
+		if !containers && !images && !volumes && !buildCache && !all {
+			all = true
+		}
+
+		ctx := context.Background()
+
+		if dryRun {
+			fmt.Println("[tengiz] dry-run mode: no resources will be removed")
+			fmt.Println()
+		}
+
+		if all {
+			containers = true
+			images = true
+			volumes = true
+			buildCache = true
+		}
+
+		if !force && !dryRun {
+			fmt.Print("[tengiz] this will remove unused Docker resources. continue? [y/N] ")
+			var response string
+			fmt.Scanln(&response)
+			response = strings.TrimSpace(strings.ToLower(response))
+			if response != "y" && response != "yes" {
+				fmt.Println("[tengiz] cancelled")
+				return nil
+			}
+		}
+
+		var totalReclaimed string
+
+		if containers {
+			if dryRun {
+				fmt.Println("[tengiz] [dry-run] would prune stopped containers (label: tengiz-app)")
+			} else {
+				result, err := rt.PruneContainers(ctx)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[tengiz] warning: container prune: %v\n", err)
+				} else {
+					fmt.Printf("[tengiz] containers: %s\n", result)
+					totalReclaimed = extractReclaimed(result, totalReclaimed)
+				}
+			}
+		}
+
+		if images {
+			if dryRun {
+				fmt.Println("[tengiz] [dry-run] would prune unused images (label: tengiz-app)")
+			} else {
+				result, err := rt.PruneImages(ctx)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[tengiz] warning: image prune: %v\n", err)
+				} else {
+					fmt.Printf("[tengiz] images: %s\n", result)
+					totalReclaimed = extractReclaimed(result, totalReclaimed)
+				}
+			}
+		}
+
+		if volumes {
+			if dryRun {
+				fmt.Println("[tengiz] [dry-run] would prune unused volumes")
+			} else {
+				result, err := rt.PruneVolumes(ctx)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[tengiz] warning: volume prune: %v\n", err)
+				} else {
+					fmt.Printf("[tengiz] volumes: %s\n", result)
+					totalReclaimed = extractReclaimed(result, totalReclaimed)
+				}
+			}
+		}
+
+		if buildCache {
+			if dryRun {
+				fmt.Println("[tengiz] [dry-run] would prune build cache")
+			} else {
+				result, err := rt.PruneBuildCache(ctx)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[tengiz] warning: build cache prune: %v\n", err)
+				} else {
+					fmt.Printf("[tengiz] build cache: %s\n", result)
+					totalReclaimed = extractReclaimed(result, totalReclaimed)
+				}
+			}
+		}
+
+		if !dryRun {
+			if totalReclaimed != "" {
+				fmt.Printf("[tengiz] total reclaimed: %s\n", totalReclaimed)
+			}
+			fmt.Println("[tengiz] cleanup complete")
+		}
+
+		return nil
+	},
+}
+
+func extractReclaimed(result string, current string) string {
+	lines := strings.Split(result, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "reclaimed") || strings.Contains(line, "Reclaimed") {
+			return line
+		}
+	}
+	return current
 }
 
 var stopCmd = &cobra.Command{
