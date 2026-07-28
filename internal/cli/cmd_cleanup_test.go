@@ -22,6 +22,26 @@ func TestCleanupDryRun(t *testing.T) {
 	}
 }
 
+func TestCleanupDryRunShowsCategories(t *testing.T) {
+	rootCmd.SetArgs([]string{"cleanup", "--dry-run", "--force", "--containers", "--images"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("cleanup --dry-run --force --containers --images: %v", err)
+	}
+}
+
+func TestCleanupForceFlag(t *testing.T) {
+	rootCmd.SetArgs([]string{"cleanup"})
+	cmd, _, _ := rootCmd.Find([]string{"cleanup"})
+	flag := cmd.Flags().Lookup("force")
+	if flag == nil {
+		t.Error("cleanup missing --force flag")
+	}
+	if flag != nil && flag.Shorthand != "f" {
+		t.Error("cleanup --force should have -f shorthand")
+	}
+}
+
 func TestCleanupRequiresConfirmation(t *testing.T) {
 	rootCmd.SetArgs([]string{"cleanup", "--all"})
 	cmd, _, _ := rootCmd.Find([]string{"cleanup"})
