@@ -63,6 +63,7 @@ tengiz notification disable     → disable notifications
 tengiz notification config <app> [--events ...] [--all] → configure which events trigger notifications
 tengiz notification set-channel <type> [--webhook-url ...] [--smtp-server ...] → configure a notification channel
 tengiz notification show        → show current notification configuration
+tengiz cleanup [--containers] [--images] [--volumes] [--networks] [--build-cache] [--all] [--dry-run] [--app <name>] → prune unused Docker resources (protects Tengiz-managed resources)
 ```
 
 ## Rules

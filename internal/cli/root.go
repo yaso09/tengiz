@@ -73,6 +73,15 @@ func init() {
 	notificationCmd.AddCommand(notificationSetChannelCmd)
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers not managed by Tengiz")
+	cleanupCmd.Flags().Bool("images", false, "prune unused images not managed by Tengiz")
+	cleanupCmd.Flags().Bool("volumes", false, "prune dangling volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune builder cache")
+	cleanupCmd.Flags().Bool("all", true, "prune all resource types (default)")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be deleted without making changes")
+	cleanupCmd.Flags().String("app", "", "clean up all resources for a specific app")
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -630,7 +639,7 @@ var startCmd = &cobra.Command{
 
 var rmCmd = &cobra.Command{
 	Use:   "rm <app>",
-	Short: "Remove an application completely",
+	Short: "Remove an application (container + images)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		env := getEnv(cmd)
@@ -656,7 +665,15 @@ var rmCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Printf("[tengiz] removed: %s\n", appName)
+		fmt.Printf("[tengiz] removed container: %s\n", appName)
+
+		fmt.Print("[tengiz] cleaning up images... ")
+		if err := rt.CleanupAppImages(context.Background(), appName); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		} else {
+			fmt.Println("done")
+		}
+
 		return nil
 	},
 }
