@@ -46,6 +46,11 @@ type Manager interface {
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
+	PruneContainers(ctx context.Context) error
+	PruneImages(ctx context.Context, all bool) error
+	PruneVolumes(ctx context.Context) error
+	PruneNetworks(ctx context.Context) error
+	PruneBuildCache(ctx context.Context) error
 }
 
 type stubManager struct{}
@@ -121,3 +126,9 @@ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
 	return nil
 }
+
+func (m *stubManager) PruneContainers(_ context.Context) error { return nil }
+func (m *stubManager) PruneImages(_ context.Context, _ bool) error { return nil }
+func (m *stubManager) PruneVolumes(_ context.Context) error { return nil }
+func (m *stubManager) PruneNetworks(_ context.Context) error { return nil }
+func (m *stubManager) PruneBuildCache(_ context.Context) error { return nil }

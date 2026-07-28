@@ -235,6 +235,23 @@ Rollback to the previous deployment. The previous active container is started on
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup [--all] [--containers] [--images] [--all-images] [--volumes] [--networks] [--build-cache] [--dry-run]`
+
+Prune unused Docker resources to reclaim disk space. Uses label-based filtering (`label!=tengiz-app`) to protect Tengiz-managed containers from accidental deletion.
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--all` | `-A` | Prune all resource types |
+| `--containers` | `-c` | Prune stopped containers (excluding tengiz-* labeled) |
+| `--images` | `-i` | Prune dangling images |
+| `--all-images` | | Prune all unused images (requires `--images` or `--all`) |
+| `--volumes` | `-v` | Prune unused volumes |
+| `--networks` | `-n` | Prune unused networks |
+| `--build-cache` | `-b` | Prune build cache |
+| `--dry-run` | | Show what would be pruned without deleting |
+
+After each deploy (`tengiz deploy` or git webhook), dangling images and stopped containers are automatically pruned.
+
 ### `tengiz domain`
 
 Manage custom domains for applications.

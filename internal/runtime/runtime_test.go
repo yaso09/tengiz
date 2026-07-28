@@ -247,6 +247,28 @@ func TestStubRun(t *testing.T) {
 	}
 }
 
+func TestStubPruneMethods(t *testing.T) {
+	m := NewStub()
+	if err := m.PruneContainers(context.Background()); err != nil {
+		t.Fatalf("PruneContainers() error = %v", err)
+	}
+	if err := m.PruneImages(context.Background(), false); err != nil {
+		t.Fatalf("PruneImages() error = %v", err)
+	}
+	if err := m.PruneImages(context.Background(), true); err != nil {
+		t.Fatalf("PruneImages(all) error = %v", err)
+	}
+	if err := m.PruneVolumes(context.Background()); err != nil {
+		t.Fatalf("PruneVolumes() error = %v", err)
+	}
+	if err := m.PruneNetworks(context.Background()); err != nil {
+		t.Fatalf("PruneNetworks() error = %v", err)
+	}
+	if err := m.PruneBuildCache(context.Background()); err != nil {
+		t.Fatalf("PruneBuildCache() error = %v", err)
+	}
+}
+
 func TestStubRunInteractive(t *testing.T) {
 	m := NewStub()
 	cfg := &types.AppConfig{Name: "testapp", Env: map[string]string{"FOO": "bar"}}
