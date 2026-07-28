@@ -348,6 +348,14 @@ var deployCmd = &cobra.Command{
 				log.Printf("[tengiz] warning: image cleanup: %v", err)
 			}
 
+			fmt.Println("[tengiz] Running post-deploy cleanup...")
+			if err := rt.PruneContainers(context.Background()); err != nil {
+				log.Printf("[tengiz] container prune error: %v", err)
+			}
+			if err := rt.PruneImages(context.Background(), false); err != nil {
+				log.Printf("[tengiz] image prune error: %v", err)
+			}
+
 			if err := proxy.RegisterRouteWithProxy(cfg.Name, port); err != nil {
 				log.Printf("[tengiz] proxy not available (route will be registered on proxy start): %v", err)
 			}
@@ -466,6 +474,14 @@ var deployCmd = &cobra.Command{
 
 		if err := rt.KeepLastNImages(context.Background(), cfg.Name, 5); err != nil {
 			log.Printf("[tengiz] warning: image cleanup: %v", err)
+		}
+
+		fmt.Println("[tengiz] Running post-deploy cleanup...")
+		if err := rt.PruneContainers(context.Background()); err != nil {
+			log.Printf("[tengiz] container prune error: %v", err)
+		}
+		if err := rt.PruneImages(context.Background(), false); err != nil {
+			log.Printf("[tengiz] image prune error: %v", err)
 		}
 
 		fmt.Printf("[tengiz] deployed (zero-downtime): %s at http://%s.tengiz.local:%d\n",
