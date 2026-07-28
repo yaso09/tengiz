@@ -568,6 +568,68 @@ func (r *dockerRuntime) GetContainerPort(ctx context.Context, name string, suffi
 	return hostPort, nil
 }
 
+func (r *dockerRuntime) PruneContainers(ctx context.Context) (string, error) {
+	args := []string{"container", "prune",
+		"--filter", fmt.Sprintf("label=%s", labelKey),
+		"--force",
+	}
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker container prune: %w\n%s", err, string(out))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func (r *dockerRuntime) PruneImages(ctx context.Context) (string, error) {
+	args := []string{"image", "prune",
+		"--filter", fmt.Sprintf("label=%s", labelKey),
+		"--all",
+		"--force",
+	}
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker image prune: %w\n%s", err, string(out))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func (r *dockerRuntime) PruneVolumes(ctx context.Context) (string, error) {
+	args := []string{"volume", "prune", "--force"}
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker volume prune: %w\n%s", err, string(out))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func (r *dockerRuntime) PruneBuildCache(ctx context.Context) (string, error) {
+	args := []string{"builder", "prune", "--all", "--force"}
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker builder prune: %w\n%s", err, string(out))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func (r *dockerRuntime) PruneSystem(ctx context.Context) (string, error) {
+	args := []string{"system", "prune",
+		"--filter", fmt.Sprintf("label=%s", labelKey),
+		"--all",
+		"--volumes",
+		"--force",
+	}
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker system prune: %w\n%s", err, string(out))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 func (r *dockerRuntime) WaitForReady(ctx context.Context, name string, internalPort int) error {
 	containerName := name
 	// Wait for container to be running
