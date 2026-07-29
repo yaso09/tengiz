@@ -28,6 +28,27 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type PruneOptions struct {
+	Containers bool `json:"containers"`
+	Images     bool `json:"images"`
+	Volumes    bool `json:"volumes"`
+	Networks   bool `json:"networks"`
+	BuildCache bool `json:"build_cache"`
+	All        bool `json:"all"`
+	DryRun     bool `json:"dry_run"`
+}
+
+type PruneReport struct {
+	ContainersReclaimed int64 `json:"containers_reclaimed"`
+	ImagesReclaimed     int64 `json:"images_reclaimed"`
+	VolumesReclaimed    int64 `json:"volumes_reclaimed"`
+	BuildCacheReclaimed int64 `json:"build_cache_reclaimed"`
+	TotalReclaimed      int64 `json:"total_reclaimed"`
+	ContainerCount      int   `json:"container_count"`
+	ImageCount          int   `json:"image_count"`
+	VolumeCount         int   `json:"volume_count"`
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
@@ -46,6 +67,7 @@ type Manager interface {
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
+	Prune(ctx context.Context, opts PruneOptions) (*PruneReport, error)
 }
 
 type stubManager struct{}
@@ -120,4 +142,8 @@ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
 	return nil
+}
+
+func (m *stubManager) Prune(ctx context.Context, opts PruneOptions) (*PruneReport, error) {
+	return &PruneReport{}, nil
 }
