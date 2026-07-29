@@ -20,7 +20,7 @@ func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error 
 
 func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error {
 	cmd := exec.CommandContext(ctx, "docker", "images",
-		"--filter", fmt.Sprintf("reference=tengiz-apps/%s:*", appName),
+		"--filter", fmt.Sprintf("label=tengiz-app=%s", appName),
 		"--format", "{{.Repository}}:{{.Tag}}|{{.CreatedAt}}",
 	)
 	out, err := cmd.CombinedOutput()

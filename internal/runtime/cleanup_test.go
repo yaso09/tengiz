@@ -43,3 +43,14 @@ func TestStubPruneImages(t *testing.T) {
 		t.Errorf("len(removed) = %d, want 0", len(removed))
 	}
 }
+
+func TestStubKeepLastNImagesRefactored(t *testing.T) {
+	m := NewStub()
+	removed, err := m.PruneImages(context.Background(), "testapp", 5)
+	if err != nil {
+		t.Fatalf("PruneImages() error = %v", err)
+	}
+	if len(removed) != 0 {
+		t.Errorf("len(removed) = %d, want 0", len(removed))
+	}
+}
