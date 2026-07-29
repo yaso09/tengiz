@@ -43,6 +43,7 @@ tengiz proxy [-a app] → start reverse proxy on :8080 (use -a to route all traf
 tengiz ps             → list apps from Docker
 tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] app  → stream logs with filtering
 tengiz build-logs <app> [deployment-id] → show build logs from previous deployments (--tail N)
+tengiz cleanup [--all|--containers|--images|--networks|--build-cache] [--app <name>] [--env <env>] [--dry-run] → prune unused Docker resources
 tengiz run <app> <cmd> [-i] [-e KEY=VALUE] → one-off command in temporary container
 tengiz stop/start/rm  → lifecycle
 tengiz config set/get/unset/show → env vars
