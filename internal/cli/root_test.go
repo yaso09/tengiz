@@ -98,6 +98,13 @@ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppCon
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRTForDeploy) PruneContainers(ctx context.Context, dryRun bool) (runtime.PruneReport, error) { return runtime.PruneReport{}, nil }
+func (m *mockRTForDeploy) PruneImages(ctx context.Context, dryRun bool) (runtime.PruneReport, error) { return runtime.PruneReport{}, nil }
+func (m *mockRTForDeploy) PruneVolumes(ctx context.Context, dryRun bool) (runtime.PruneReport, error) { return runtime.PruneReport{}, nil }
+func (m *mockRTForDeploy) PruneNetworks(ctx context.Context, dryRun bool) (runtime.PruneReport, error) { return runtime.PruneReport{}, nil }
+func (m *mockRTForDeploy) PruneBuildCache(ctx context.Context, dryRun bool) (runtime.PruneReport, error) { return runtime.PruneReport{}, nil }
+func (m *mockRTForDeploy) PruneAll(ctx context.Context, dryRun bool) (runtime.PruneReport, error) { return runtime.PruneReport{}, nil }
+func (m *mockRTForDeploy) DiskUsage(ctx context.Context) (runtime.DiskUsageInfo, error) { return runtime.DiskUsageInfo{}, nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}

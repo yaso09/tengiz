@@ -32,6 +32,13 @@ func (m *mockRuntime) WaitForHealth(ctx context.Context, name string, hc *types.
 func (m *mockRuntime) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRuntime) PruneContainers(ctx context.Context, dryRun bool) (runtime.PruneReport, error) { return runtime.PruneReport{}, nil }
+func (m *mockRuntime) PruneImages(ctx context.Context, dryRun bool) (runtime.PruneReport, error) { return runtime.PruneReport{}, nil }
+func (m *mockRuntime) PruneVolumes(ctx context.Context, dryRun bool) (runtime.PruneReport, error) { return runtime.PruneReport{}, nil }
+func (m *mockRuntime) PruneNetworks(ctx context.Context, dryRun bool) (runtime.PruneReport, error) { return runtime.PruneReport{}, nil }
+func (m *mockRuntime) PruneBuildCache(ctx context.Context, dryRun bool) (runtime.PruneReport, error) { return runtime.PruneReport{}, nil }
+func (m *mockRuntime) PruneAll(ctx context.Context, dryRun bool) (runtime.PruneReport, error) { return runtime.PruneReport{}, nil }
+func (m *mockRuntime) DiskUsage(ctx context.Context) (runtime.DiskUsageInfo, error) { return runtime.DiskUsageInfo{}, nil }
 
 func TestResetExtendsTimer(t *testing.T) {
 	mock := &mockRuntime{}
