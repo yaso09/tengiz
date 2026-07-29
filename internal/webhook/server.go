@@ -12,6 +12,9 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/yaso09/tengiz/internal/runtime"
 )
 
 type DeployFunc func(ctx context.Context, repoURL, branch, provider string) error
@@ -30,6 +33,11 @@ type Server struct {
 	deployFn   DeployFunc
 	previewFn  PreviewFunc
 	httpServer *http.Server
+	rt         runtime.Manager
+}
+
+func (s *Server) SetRuntime(rt runtime.Manager) {
+	s.rt = rt
 }
 
 func New(dataDir string, cfg *Config, fn DeployFunc) *Server {
@@ -57,6 +65,11 @@ func (s *Server) Start(ctx context.Context, port int) error {
 		Handler: mux,
 	}
 
+	// Start periodic Docker housekeeping if runtime is set
+	if s.rt != nil {
+		go periodicCleanup(ctx, s.rt)
+	}
+
 	errCh := make(chan error, 1)
 	go func() {
 		log.Printf("[tengiz] webhook server listening on :%d", port)
@@ -70,6 +83,30 @@ func (s *Server) Start(ctx context.Context, port int) error {
 		return s.httpServer.Shutdown(context.Background())
 	case err := <-errCh:
 		return err
+	}
+}
+
+func periodicCleanup(ctx context.Context, rt runtime.Manager) {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			log.Printf("[tengiz] running periodic Docker housekeeping")
+			report, err := rt.Prune(ctx, runtime.PruneOptions{
+				Containers: true,
+				Images:     true,
+				Networks:   true,
+				BuildCache: true,
+			})
+			if err != nil {
+				log.Printf("[tengiz] periodic cleanup error: %v", err)
+			} else if report.SpaceReclaimedBytes > 0 {
+				log.Printf("[tengiz] periodic cleanup reclaimed %d bytes", report.SpaceReclaimedBytes)
+			}
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 

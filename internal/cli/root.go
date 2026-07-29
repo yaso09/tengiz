@@ -1345,6 +1345,7 @@ var webhookCmd = &cobra.Command{
 
 		s := webhook.New(dataDir, whCfg, deployFn)
 		s.SetPreviewFunc(previewFn)
+		s.SetRuntime(rt)
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
 

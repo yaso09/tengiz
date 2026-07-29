@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/yaso09/tengiz/internal/runtime"
 )
 
 type eventCase struct {
@@ -479,6 +481,15 @@ func TestPullRequestOpenedEvent(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Error("previewFn was not called")
 	}
+}
+
+func TestPeriodicCleanupNoPanic(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	rt := runtime.NewStub()
+	go periodicCleanup(ctx, rt)
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestPullRequestClosedEvent(t *testing.T) {
