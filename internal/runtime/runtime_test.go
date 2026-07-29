@@ -247,6 +247,44 @@ func TestStubRun(t *testing.T) {
 	}
 }
 
+func TestPruneOptionsDefaults(t *testing.T) {
+	opts := PruneOptions{}
+	if opts.All {
+		t.Error("PruneOptions{} default All should be false")
+	}
+	if opts.DryRun {
+		t.Error("PruneOptions{} default DryRun should be false")
+	}
+}
+
+func TestPruneReportReclaimTotals(t *testing.T) {
+	r := &PruneReport{
+		ContainersReclaimed: 1024,
+		ImagesReclaimed:     2048,
+		VolumesReclaimed:    4096,
+		BuildCacheReclaimed: 512,
+		TotalReclaimed:      1024 + 2048 + 4096 + 512,
+		ContainerCount:      3,
+		ImageCount:          5,
+		VolumeCount:         2,
+	}
+	expected := int64(1024 + 2048 + 4096 + 512)
+	if r.TotalReclaimed != expected {
+		t.Errorf("TotalReclaimed = %d, want %d", r.TotalReclaimed, expected)
+	}
+}
+
+func TestStubPrune(t *testing.T) {
+	m := NewStub()
+	report, err := m.Prune(context.Background(), PruneOptions{All: true, DryRun: false})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if report == nil {
+		t.Fatal("Prune() returned nil report")
+	}
+}
+
 func TestStubRunInteractive(t *testing.T) {
 	m := NewStub()
 	cfg := &types.AppConfig{Name: "testapp", Env: map[string]string{"FOO": "bar"}}
