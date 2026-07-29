@@ -73,6 +73,14 @@ func init() {
 	notificationCmd.AddCommand(notificationSetChannelCmd)
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("all", false, "prune all resource types")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers")
+	cleanupCmd.Flags().Bool("images", false, "prune dangling images")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune build cache")
+	cleanupCmd.Flags().String("app", "", "only prune resources for this app")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without doing it")
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -1480,6 +1488,102 @@ var notificationShowCmd = &cobra.Command{
 	},
 }
 
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Prune unused Docker resources (containers, images, networks, build cache)",
+	Long: `Prune unused Docker resources with label-based safety filters.
+Tengiz-managed containers are protected by default.
+
+Categories (default: containers + dangling images):
+  --containers    Remove stopped containers not managed by Tengiz
+  --images        Remove dangling and unused images
+  --networks      Remove unused networks
+  --build-cache   Remove BuildKit build cache
+  --all           All of the above
+
+Scope:
+  --app <name>    Only prune resources for a specific app
+  --env <env>     Filter by environment label (e.g. staging)
+
+Safety:
+  --dry-run       Show what would be removed without doing it
+
+Examples:
+  tengiz cleanup                    # prune stopped containers + dangling images
+  tengiz cleanup --all              # full cleanup
+  tengiz cleanup --build-cache      # only build cache
+  tengiz cleanup --app myapp        # prune resources for myapp only
+  tengiz cleanup --dry-run --all    # see what --all would remove
+`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		all, _ := cmd.Flags().GetBool("all")
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		networks, _ := cmd.Flags().GetBool("networks")
+		buildCache, _ := cmd.Flags().GetBool("build-cache")
+		appName, _ := cmd.Flags().GetString("app")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		env := getEnv(cmd)
+
+		if !all && !containers && !images && !networks && !buildCache {
+			containers = true
+			images = true
+		}
+
+		opts := runtime.PruneOptions{
+			Containers: containers,
+			Images:     images,
+			Networks:   networks,
+			BuildCache: buildCache,
+			All:        all,
+			AppName:    appName,
+			Env:        env,
+			DryRun:     dryRun,
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		if dryRun {
+			fmt.Println("[tengiz] DRY RUN — no resources will be removed")
+		}
+
+		report, err := rt.Prune(cmd.Context(), opts)
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+
+		fmt.Println()
+		if dryRun {
+			fmt.Println("[tengiz] dry-run complete — nothing was removed")
+			return nil
+		}
+
+		fmt.Println("[tengiz] cleanup complete:")
+		if containers || all {
+			fmt.Printf("  containers removed: %d\n", report.ContainersRemoved)
+		}
+		if images || all {
+			fmt.Printf("  images removed:     %d\n", report.ImagesRemoved)
+		}
+		if networks || all {
+			fmt.Printf("  networks removed:   %d\n", report.NetworksRemoved)
+		}
+		if buildCache || all {
+			fmt.Printf("  build cache freed:  %s\n", humanBytes(report.BuildCacheFreed))
+		}
+
+		total := report.ContainersRemoved + report.ImagesRemoved + report.NetworksRemoved
+		if total == 0 && report.BuildCacheFreed == 0 {
+			fmt.Println("  nothing to clean up")
+		}
+
+		return nil
+	},
+}
+
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage environment variables for an application",
@@ -1756,6 +1860,19 @@ func getSecretManager(cmd *cobra.Command, dataDir, env string) (*secrets.Manager
 	dopplerProject, _ := cmd.Flags().GetString("doppler-project")
 	dopplerConfig, _ := cmd.Flags().GetString("doppler-config")
 	return secrets.NewManagerFromConfig(dataDir, env, provider, vaultAddr, vaultToken, dopplerToken, dopplerProject, dopplerConfig)
+}
+
+func humanBytes(b int64) string {
+	if b < 1024 {
+		return fmt.Sprintf("%dB", b)
+	}
+	if b < 1024*1024 {
+		return fmt.Sprintf("%.1fkB", float64(b)/1024)
+	}
+	if b < 1024*1024*1024 {
+		return fmt.Sprintf("%.1fMB", float64(b)/(1024*1024))
+	}
+	return fmt.Sprintf("%.1fGB", float64(b)/(1024*1024*1024))
 }
 
 func maskSecret(s string) string {
