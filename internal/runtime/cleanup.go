@@ -9,6 +9,10 @@ import (
 	"strings"
 )
 
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneReport, error) {
+	return PruneReport{}, nil
+}
+
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()
