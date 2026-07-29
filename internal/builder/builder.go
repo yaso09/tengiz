@@ -67,6 +67,9 @@ func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName s
 	defer cleanup()
 
 	args := []string{"build"}
+	args = append(args, "--label", fmt.Sprintf("tengiz-app=%s", appName))
+	args = append(args, "--label", fmt.Sprintf("tengiz-env=%s", env))
+	args = append(args, "--label", "tengiz-managed=true")
 	args = append(args, b.buildSecretArgs()...)
 	args = append(args, "-t", tag, dir)
 

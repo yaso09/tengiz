@@ -63,6 +63,7 @@ func init() {
 	volumeCmd.AddCommand(volumeListCmd)
 	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(rollbackCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
@@ -73,6 +74,14 @@ func init() {
 	notificationCmd.AddCommand(notificationSetChannelCmd)
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers only")
+	cleanupCmd.Flags().Bool("images", false, "prune unused images only")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks only")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes only")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune build cache only")
+	cleanupCmd.Flags().Bool("all", false, "include non-Tengiz managed resources (dangerous)")
+	cleanupCmd.Flags().Bool("force", false, "skip confirmation prompts")
+	cleanupCmd.Flags().Int("keep", 0, "keep N most recent images per app when pruning images")
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -866,6 +875,76 @@ var volumeCmd = &cobra.Command{
 	Short: "Manage persistent storage volumes",
 }
 
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Prune unused Docker resources (containers, images, networks, volumes, build cache)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		networks, _ := cmd.Flags().GetBool("networks")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		buildCache, _ := cmd.Flags().GetBool("build-cache")
+		all, _ := cmd.Flags().GetBool("all")
+		force, _ := cmd.Flags().GetBool("force")
+		keep, _ := cmd.Flags().GetInt("keep")
+
+		if !containers && !images && !networks && !volumes && !buildCache {
+			containers = true
+			images = true
+			networks = true
+			volumes = true
+			buildCache = true
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+		opts := runtime.PruneOptions{
+			Containers: containers,
+			Images:     images,
+			Networks:   networks,
+			Volumes:    volumes,
+			BuildCache: buildCache,
+			All:        all,
+			Force:      force,
+			Keep:       keep,
+		}
+
+		report, err := rt.Prune(context.Background(), opts)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("[tengiz] cleanup complete\n")
+		fmt.Printf("  containers pruned:  %d\n", report.ContainersReclaimed)
+		fmt.Printf("  images pruned:      %d\n", report.ImagesReclaimed)
+		fmt.Printf("  networks pruned:    %d\n", report.NetworksReclaimed)
+		fmt.Printf("  volumes pruned:     %d\n", report.VolumesReclaimed)
+		fmt.Printf("  build cache pruned: %d\n", report.BuildCacheReclaimed)
+		if report.SpaceReclaimedBytes > 0 {
+			fmt.Printf("  space reclaimed:    %s\n", formatBytes(report.SpaceReclaimedBytes))
+		}
+		for _, errMsg := range report.Errors {
+			fmt.Fprintf(os.Stderr, "[tengiz] warning: %s\n", errMsg)
+		}
+		return nil
+	},
+}
+
+func formatBytes(b int64) string {
+	switch {
+	case b >= 1024*1024*1024:
+		return fmt.Sprintf("%.2f GB", float64(b)/(1024*1024*1024))
+	case b >= 1024*1024:
+		return fmt.Sprintf("%.2f MB", float64(b)/(1024*1024))
+	case b >= 1024:
+		return fmt.Sprintf("%.2f KB", float64(b)/1024)
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
+}
+
 var volumeAddCmd = &cobra.Command{
 	Use:   "add <app> <host_path>:<container_path>",
 	Short: "Mount a volume to an app",
@@ -1269,6 +1348,7 @@ var webhookCmd = &cobra.Command{
 
 		s := webhook.New(dataDir, whCfg, deployFn)
 		s.SetPreviewFunc(previewFn)
+		s.SetRuntime(rt)
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
 

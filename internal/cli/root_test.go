@@ -98,6 +98,8 @@ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppCon
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRTForDeploy) Prune(ctx context.Context, opts runtime.PruneOptions) (runtime.PruneReport, error) { return runtime.PruneReport{}, nil }
+func (m *mockRTForDeploy) PruneImages(ctx context.Context, appName string, keepN int) ([]string, error) { return nil, nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}
@@ -374,5 +376,54 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
 		}
+	}
+}
+
+func TestCleanupCmd_PruneAll(t *testing.T) {
+	m := runtime.NewStub()
+	report, err := m.Prune(context.Background(), runtime.PruneOptions{
+		Containers: true,
+		Images:     true,
+		Networks:   true,
+		Volumes:    true,
+		BuildCache: true,
+		Force:      true,
+	})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if report.SpaceReclaimedBytes != 0 {
+		t.Errorf("expected 0 reclaimed bytes, got %d", report.SpaceReclaimedBytes)
+	}
+}
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not found")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+	// Verify flags exist
+	for _, flag := range []string{"containers", "images", "networks", "volumes", "build-cache", "all", "force", "keep"} {
+		if cmd.Flags().Lookup(flag) == nil {
+			t.Errorf("cleanup command missing --%s flag", flag)
+		}
+	}
+}
+
+func TestCleanupCmdWithKeepFlag(t *testing.T) {
+	m := runtime.NewStub()
+	opts := runtime.PruneOptions{
+		Images: true,
+		Keep:   5,
+	}
+	report, err := m.Prune(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if report.SpaceReclaimedBytes != 0 {
+		t.Errorf("expected 0 reclaimed bytes, got %d", report.SpaceReclaimedBytes)
 	}
 }
