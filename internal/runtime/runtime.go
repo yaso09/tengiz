@@ -46,6 +46,7 @@ type Manager interface {
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
+	Cleanup(ctx context.Context, opts types.CleanupOptions) (*types.CleanupReport, error)
 }
 
 type stubManager struct{}
@@ -120,4 +121,8 @@ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
 	return nil
+}
+
+func (m *stubManager) Cleanup(ctx context.Context, opts types.CleanupOptions) (*types.CleanupReport, error) {
+	return &types.CleanupReport{}, nil
 }
