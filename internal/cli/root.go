@@ -81,6 +81,7 @@ func init() {
 	cleanupCmd.Flags().Bool("build-cache", false, "prune build cache only")
 	cleanupCmd.Flags().Bool("all", false, "include non-Tengiz managed resources (dangerous)")
 	cleanupCmd.Flags().Bool("force", false, "skip confirmation prompts")
+	cleanupCmd.Flags().Int("keep", 0, "keep N most recent images per app when pruning images")
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -885,6 +886,7 @@ var cleanupCmd = &cobra.Command{
 		buildCache, _ := cmd.Flags().GetBool("build-cache")
 		all, _ := cmd.Flags().GetBool("all")
 		force, _ := cmd.Flags().GetBool("force")
+		keep, _ := cmd.Flags().GetInt("keep")
 
 		if !containers && !images && !networks && !volumes && !buildCache {
 			containers = true
@@ -906,6 +908,7 @@ var cleanupCmd = &cobra.Command{
 			BuildCache: buildCache,
 			All:        all,
 			Force:      force,
+			Keep:       keep,
 		}
 
 		report, err := rt.Prune(context.Background(), opts)

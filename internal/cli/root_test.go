@@ -406,9 +406,24 @@ func TestCleanupCommandRegistered(t *testing.T) {
 		t.Fatal("cleanup command not found")
 	}
 	// Verify flags exist
-	for _, flag := range []string{"containers", "images", "networks", "volumes", "build-cache", "all", "force"} {
+	for _, flag := range []string{"containers", "images", "networks", "volumes", "build-cache", "all", "force", "keep"} {
 		if cmd.Flags().Lookup(flag) == nil {
 			t.Errorf("cleanup command missing --%s flag", flag)
 		}
+	}
+}
+
+func TestCleanupCmdWithKeepFlag(t *testing.T) {
+	m := runtime.NewStub()
+	opts := runtime.PruneOptions{
+		Images: true,
+		Keep:   5,
+	}
+	report, err := m.Prune(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if report.SpaceReclaimedBytes != 0 {
+		t.Errorf("expected 0 reclaimed bytes, got %d", report.SpaceReclaimedBytes)
 	}
 }

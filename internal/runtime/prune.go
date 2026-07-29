@@ -51,19 +51,34 @@ func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneRepo
 	}
 
 	if opts.Images {
-		args := []string{"image", "prune", "-f"}
-		if !opts.All {
-			args = append(args, "--filter", "label!=tengiz-managed=true")
-		}
-		for k, v := range opts.Filter {
-			args = append(args, "--filter", fmt.Sprintf("%s=%s", k, v))
-		}
-		reclaimed, err := r.execPrune(ctx, args)
-		if err != nil {
-			report.Errors = append(report.Errors, fmt.Sprintf("images: %v", err))
+		if opts.Keep > 0 {
+			apps, err := r.listTengizApps(ctx)
+			if err != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("list-tengiz-apps: %v", err))
+			} else {
+				for _, app := range apps {
+					removed, err := r.PruneImages(ctx, app, opts.Keep)
+					if err != nil {
+						report.Errors = append(report.Errors, fmt.Sprintf("prune-images %s: %v", app, err))
+					}
+					report.ImagesReclaimed += int64(len(removed))
+				}
+			}
 		} else {
-			report.ImagesReclaimed = 1
-			report.SpaceReclaimedBytes += reclaimed
+			args := []string{"image", "prune", "-f"}
+			if !opts.All {
+				args = append(args, "--filter", "label!=tengiz-managed=true")
+			}
+			for k, v := range opts.Filter {
+				args = append(args, "--filter", fmt.Sprintf("%s=%s", k, v))
+			}
+			reclaimed, err := r.execPrune(ctx, args)
+			if err != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("images: %v", err))
+			} else {
+				report.ImagesReclaimed = 1
+				report.SpaceReclaimedBytes += reclaimed
+			}
 		}
 	}
 
@@ -171,6 +186,28 @@ func (r *dockerRuntime) pruneImagesByLabel(ctx context.Context, label string, ke
 		removed = append(removed, tag)
 	}
 	return removed, nil
+}
+
+func (r *dockerRuntime) listTengizApps(ctx context.Context) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "images",
+		"--filter", "label=tengiz-managed=true",
+		"--format", "{{.Label \"tengiz-app\"}}",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	seen := make(map[string]bool)
+	var apps []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" && !seen[line] {
+			seen[line] = true
+			apps = append(apps, line)
+		}
+	}
+	return apps, nil
 }
 
 func parseReclaimedSpace(output string) int64 {
