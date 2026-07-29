@@ -28,6 +28,14 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type DiskUsageInfo struct {
+	Containers int
+	Images     int
+	Volumes    int
+	BuildCache int
+	Size       string
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
@@ -46,6 +54,12 @@ type Manager interface {
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
+	PruneContainers(ctx context.Context) (reclaimedBytes uint64, err error)
+	PruneImages(ctx context.Context, all bool) (reclaimedBytes uint64, err error)
+	PruneVolumes(ctx context.Context) (reclaimedBytes uint64, err error)
+	PruneNetworks(ctx context.Context) (reclaimedBytes uint64, err error)
+	PruneBuildCache(ctx context.Context, all bool) (reclaimedBytes uint64, err error)
+	DiskUsage(ctx context.Context) (*DiskUsageInfo, error)
 }
 
 type stubManager struct{}
@@ -121,3 +135,10 @@ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
 	return nil
 }
+
+func (m *stubManager) PruneContainers(ctx context.Context) (uint64, error) { return 0, nil }
+func (m *stubManager) PruneImages(ctx context.Context, all bool) (uint64, error) { return 0, nil }
+func (m *stubManager) PruneVolumes(ctx context.Context) (uint64, error) { return 0, nil }
+func (m *stubManager) PruneNetworks(ctx context.Context) (uint64, error) { return 0, nil }
+func (m *stubManager) PruneBuildCache(ctx context.Context, all bool) (uint64, error) { return 0, nil }
+func (m *stubManager) DiskUsage(ctx context.Context) (*DiskUsageInfo, error) { return &DiskUsageInfo{}, nil }
