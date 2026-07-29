@@ -63,6 +63,14 @@ func init() {
 	volumeCmd.AddCommand(volumeListCmd)
 	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(rollbackCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("all", true, "prune all resource types (containers, images, volumes, networks, build cache)")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers not managed by Tengiz")
+	cleanupCmd.Flags().Bool("images", false, "prune unused images not managed by Tengiz")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes not managed by Tengiz")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks not managed by Tengiz")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune Docker build cache")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be freed without deleting")
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
@@ -1011,6 +1019,64 @@ var rollbackCmd = &cobra.Command{
 		})
 
 		fmt.Printf("[tengiz] rolled back %s to deployment %s (port %d)\n", appName, prevDep.ID, newPort)
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Free disk space by pruning unused Docker resources",
+	Long: `Remove unused Docker resources to reclaim disk space.
+By default (--all), prunes containers, images, volumes, and build cache.
+Tengiz-managed resources (labeled tengiz-app=*) are protected.
+
+Examples:
+  tengiz cleanup                      # prune all (containers, images, volumes, build cache)
+  tengiz cleanup --dry-run            # show what would be freed without deleting
+  tengiz cleanup --containers         # only prune stopped containers
+  tengiz cleanup --images --volumes   # prune images and volumes only
+`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		all, _ := cmd.Flags().GetBool("all")
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		networks, _ := cmd.Flags().GetBool("networks")
+		buildCache, _ := cmd.Flags().GetBool("build-cache")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		opts := runtime.PruneOptions{
+			All:        all,
+			Containers: containers,
+			Images:     images,
+			Volumes:    volumes,
+			Networks:   networks,
+			BuildCache: buildCache,
+			DryRun:     dryRun,
+		}
+
+		if opts.DryRun {
+			fmt.Println("[tengiz] dry-run mode — no resources will be deleted")
+			fmt.Println()
+		}
+
+		report, err := rt.Prune(cmd.Context(), opts)
+		if err != nil {
+			return err
+		}
+
+		if !opts.DryRun {
+			fmt.Println()
+			fmt.Printf("[tengiz] cleanup complete: %d containers, %d images, %d volumes\n",
+				report.ContainerCount, report.ImageCount, report.VolumeCount)
+			fmt.Printf("[tengiz] reclaimed %d bytes total\n", report.TotalReclaimed)
+		}
+
 		return nil
 	},
 }
