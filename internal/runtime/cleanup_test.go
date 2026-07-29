@@ -3,7 +3,20 @@ package runtime
 import (
 	"context"
 	"testing"
+
+	"github.com/yaso09/tengiz/internal/types"
 )
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	report, err := m.Cleanup(context.Background(), types.CleanupOptions{})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if report == nil {
+		t.Fatal("Cleanup() returned nil report")
+	}
+}
 
 func TestStubRemoveImage(t *testing.T) {
 	m := NewStub()
