@@ -73,6 +73,7 @@ func init() {
 	notificationCmd.AddCommand(notificationSetChannelCmd)
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -1480,6 +1481,149 @@ var notificationShowCmd = &cobra.Command{
 	},
 }
 
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources (containers, images, volumes, networks, build cache)",
+	Long: `Remove unused Docker resources and reclaim disk space.
+
+By default, prunes only stopped containers and dangling images.
+Use --all to prune all unused resources across all categories.
+Use individual flags for surgical pruning.
+
+Uses label-based filtering to protect Tengiz-managed containers,
+volumes, and networks — only non-Tengiz resources are pruned.
+Images and build cache are always pruned without restrictions.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		all, _ := cmd.Flags().GetBool("all")
+		pruneContainers, _ := cmd.Flags().GetBool("containers")
+		pruneImages, _ := cmd.Flags().GetBool("images")
+		pruneVolumes, _ := cmd.Flags().GetBool("volumes")
+		pruneNetworks, _ := cmd.Flags().GetBool("networks")
+		pruneBuildCache, _ := cmd.Flags().GetBool("build-cache")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		hasSpecific := pruneContainers || pruneImages || pruneVolumes || pruneNetworks || pruneBuildCache
+		if !hasSpecific && !all {
+			pruneContainers = true
+			pruneImages = true
+		}
+		if all {
+			pruneContainers = true
+			pruneImages = true
+			pruneVolumes = true
+			pruneNetworks = true
+			pruneBuildCache = true
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		info, err := rt.DiskUsage(cmd.Context())
+		if err == nil {
+			fmt.Printf("[tengiz] disk usage before cleanup:\n")
+			fmt.Printf("  Containers: %d\n", info.Containers)
+			fmt.Printf("  Images:     %d\n", info.Images)
+			fmt.Printf("  Volumes:    %d\n", info.Volumes)
+			fmt.Printf("  Build Cache:%d\n", info.BuildCache)
+		}
+
+		var totalReclaimed uint64
+
+		if pruneContainers {
+			if dryRun {
+				fmt.Println("[tengiz] [dry-run] would prune stopped containers")
+			} else {
+				reclaimed, err := rt.PruneContainers(cmd.Context())
+				if err != nil {
+					log.Printf("[tengiz] warning: container prune: %v", err)
+				} else {
+					totalReclaimed += reclaimed
+				}
+			}
+		}
+		if pruneImages {
+			if dryRun {
+				fmt.Println("[tengiz] [dry-run] would prune unused images")
+			} else {
+				reclaimed, err := rt.PruneImages(cmd.Context(), all)
+				if err != nil {
+					log.Printf("[tengiz] warning: image prune: %v", err)
+				} else {
+					totalReclaimed += reclaimed
+				}
+			}
+		}
+		if pruneVolumes {
+			if dryRun {
+				fmt.Println("[tengiz] [dry-run] would prune unused volumes")
+			} else {
+				reclaimed, err := rt.PruneVolumes(cmd.Context())
+				if err != nil {
+					log.Printf("[tengiz] warning: volume prune: %v", err)
+				} else {
+					totalReclaimed += reclaimed
+				}
+			}
+		}
+		if pruneNetworks {
+			if dryRun {
+				fmt.Println("[tengiz] [dry-run] would prune unused networks")
+			} else {
+				reclaimed, err := rt.PruneNetworks(cmd.Context())
+				if err != nil {
+					log.Printf("[tengiz] warning: network prune: %v", err)
+				} else {
+					totalReclaimed += reclaimed
+				}
+			}
+		}
+		if pruneBuildCache {
+			if dryRun {
+				fmt.Println("[tengiz] [dry-run] would prune build cache")
+			} else {
+				reclaimed, err := rt.PruneBuildCache(cmd.Context(), all)
+				if err != nil {
+					log.Printf("[tengiz] warning: build cache prune: %v", err)
+				} else {
+					totalReclaimed += reclaimed
+				}
+			}
+		}
+
+		if totalReclaimed > 0 {
+			fmt.Printf("[tengiz] total reclaimed: %s\n", formatBytes(totalReclaimed))
+		} else if !dryRun {
+			fmt.Println("[tengiz] nothing to clean")
+		}
+
+		infoAfter, err := rt.DiskUsage(cmd.Context())
+		if err == nil {
+			fmt.Printf("[tengiz] disk usage after cleanup:\n")
+			fmt.Printf("  Containers: %d\n", infoAfter.Containers)
+			fmt.Printf("  Images:     %d\n", infoAfter.Images)
+			fmt.Printf("  Volumes:    %d\n", infoAfter.Volumes)
+			fmt.Printf("  Build Cache:%d\n", infoAfter.BuildCache)
+		}
+
+		return nil
+	},
+}
+
+func formatBytes(b uint64) string {
+	switch {
+	case b >= 1000*1000*1000:
+		return fmt.Sprintf("%.2fGB", float64(b)/(1000*1000*1000))
+	case b >= 1000*1000:
+		return fmt.Sprintf("%.2fMB", float64(b)/(1000*1000))
+	case b >= 1000:
+		return fmt.Sprintf("%.2fkB", float64(b)/1000)
+	default:
+		return fmt.Sprintf("%dB", b)
+	}
+}
+
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage environment variables for an application",
@@ -1798,6 +1942,13 @@ func Execute() {
 	notificationSetChannelCmd.Flags().String("username", "", "SMTP username")
 	notificationSetChannelCmd.Flags().String("password", "", "SMTP password")
 	notificationSetChannelCmd.Flags().Bool("tls", false, "use TLS for SMTP")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers")
+	cleanupCmd.Flags().Bool("images", false, "prune unused images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune build cache")
+	cleanupCmd.Flags().Bool("all", false, "prune all unused resources")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be pruned without actually pruning")
 	addSecretProviderFlags(secretSetCmd)
 	addSecretProviderFlags(secretGetCmd)
 	addSecretProviderFlags(secretUnsetCmd)
