@@ -102,6 +102,23 @@ func TestNixpacksConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestCleanupOptionsDefaults(t *testing.T) {
+	opts := CleanupOptions{}
+	if opts.All || opts.Containers || opts.Images || opts.Volumes || opts.BuildCache || opts.DryRun {
+		t.Error("all fields should default to false")
+	}
+}
+
+func TestCleanupReportZeroValues(t *testing.T) {
+	r := CleanupReport{}
+	if r.ContainersRemoved != 0 || r.ImagesRemoved != 0 || r.VolumesRemoved != 0 || r.TotalSpaceFreed != 0 {
+		t.Error("all numeric fields should be zero")
+	}
+	if r.DryRun {
+		t.Error("DryRun should be false")
+	}
+}
+
 func TestNixpacksConfigFields(t *testing.T) {
 	cfg := BuildConfig{
 		Builder: "nixpacks",

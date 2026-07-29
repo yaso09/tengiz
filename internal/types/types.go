@@ -169,6 +169,24 @@ const (
 	HealthUnhealthy = "unhealthy"
 )
 
+type CleanupOptions struct {
+	All        bool
+	Containers bool
+	Images     bool
+	Volumes    bool
+	BuildCache bool
+	DryRun     bool
+}
+
+type CleanupReport struct {
+	ContainersRemoved int   `json:"containers_removed"`
+	ImagesRemoved     int   `json:"images_removed"`
+	VolumesRemoved    int   `json:"volumes_removed"`
+	BuildCacheFreed   int64 `json:"build_cache_freed_bytes"`
+	TotalSpaceFreed   int64 `json:"total_space_freed_bytes"`
+	DryRun            bool  `json:"dry_run"`
+}
+
 type AppEntry struct {
 	Name             string            `json:"name"`
 	ImageTag         string            `json:"image_tag"`
