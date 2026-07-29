@@ -19,6 +19,7 @@
 - **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
+- **Docker housekeeping** — `tengiz cleanup` prunes unused containers, images, volumes, networks, and build cache with label-based safety.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
 
@@ -234,6 +235,30 @@ Rollback to the previous deployment. The previous active container is started on
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name (required) |
+
+### `tengiz cleanup`
+
+Remove unused Docker resources managed by Tengiz to free disk space.
+
+By default, prunes all resource types (containers, images, volumes, networks, build cache). All operations use `--filter label=tengiz-app` to ensure only Tengiz-managed resources are affected.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--all` | `true` | Prune all resource types |
+| `--containers` | `false` | Prune stopped containers |
+| `--images` | `false` | Prune unused images |
+| `--volumes` | `false` | Prune unused volumes |
+| `--networks` | `false` | Prune unused networks |
+| `--build-cache` | `false` | Prune builder cache |
+| `--dry-run` | `false` | Preview what would be removed without actually removing |
+
+**Examples:**
+```
+tengiz cleanup                    # prune all unused Tengiz resources
+tengiz cleanup --dry-run          # preview what would be removed
+tengiz cleanup --images --volumes # prune only images and volumes
+tengiz cleanup --containers       # prune only stopped containers
+```
 
 ### `tengiz domain`
 
