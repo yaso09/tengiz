@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+
+	"github.com/yaso09/tengiz/internal/types"
 )
 
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
@@ -16,6 +18,10 @@ func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error 
 		return fmt.Errorf("docker rmi: %w\n%s", err, string(out))
 	}
 	return nil
+}
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts types.CleanupOptions) (types.CleanupReport, error) {
+	return types.CleanupReport{}, nil
 }
 
 func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error {

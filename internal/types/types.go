@@ -184,3 +184,23 @@ type AppEntry struct {
 	GitBranch        string            `json:"git_branch,omitempty"`
 	GitProvider      string            `json:"git_provider,omitempty"`
 }
+
+type CleanupOptions struct {
+	Containers bool
+	Images     bool
+	Volumes    bool
+	Networks   bool
+	BuildCache bool
+	All        bool
+	KeepImages int
+	Force      bool
+}
+
+type CleanupReport struct {
+	ContainersRemoved int    `json:"containers_removed"`
+	ImagesRemoved     int    `json:"images_removed"`
+	VolumesRemoved    int    `json:"volumes_removed"`
+	NetworksRemoved   int    `json:"networks_removed"`
+	BuildCacheCleaned bool   `json:"build_cache_cleaned"`
+	SpaceReclaimed    string `json:"space_reclaimed"`
+}
