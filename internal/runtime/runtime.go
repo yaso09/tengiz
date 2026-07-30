@@ -46,6 +46,13 @@ type Manager interface {
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
+	PruneSystem(ctx context.Context, dryRun bool) error
+	PruneContainers(ctx context.Context, dryRun bool) error
+	PruneImages(ctx context.Context, dryRun bool) error
+	PruneVolumes(ctx context.Context, dryRun bool) error
+	PruneBuildCache(ctx context.Context) error
+	DetectStaleContainers(ctx context.Context) ([]string, error)
+	KeepLastNContainers(ctx context.Context, appName string, n int) error
 }
 
 type stubManager struct{}
@@ -121,3 +128,11 @@ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
 	return nil
 }
+
+func (m *stubManager) PruneSystem(ctx context.Context, dryRun bool) error  { return nil }
+func (m *stubManager) PruneContainers(ctx context.Context, dryRun bool) error  { return nil }
+func (m *stubManager) PruneImages(ctx context.Context, dryRun bool) error  { return nil }
+func (m *stubManager) PruneVolumes(ctx context.Context, dryRun bool) error { return nil }
+func (m *stubManager) PruneBuildCache(ctx context.Context) error { return nil }
+func (m *stubManager) DetectStaleContainers(ctx context.Context) ([]string, error) { return nil, nil }
+func (m *stubManager) KeepLastNContainers(ctx context.Context, appName string, n int) error { return nil }

@@ -18,6 +18,34 @@ func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error 
 	return nil
 }
 
+func (r *dockerRuntime) PruneSystem(ctx context.Context, dryRun bool) error {
+	return nil
+}
+
+func (r *dockerRuntime) PruneContainers(ctx context.Context, dryRun bool) error {
+	return nil
+}
+
+func (r *dockerRuntime) PruneImages(ctx context.Context, dryRun bool) error {
+	return nil
+}
+
+func (r *dockerRuntime) PruneVolumes(ctx context.Context, dryRun bool) error {
+	return nil
+}
+
+func (r *dockerRuntime) PruneBuildCache(ctx context.Context) error {
+	return nil
+}
+
+func (r *dockerRuntime) DetectStaleContainers(ctx context.Context) ([]string, error) {
+	return nil, nil
+}
+
+func (r *dockerRuntime) KeepLastNContainers(ctx context.Context, appName string, n int) error {
+	return nil
+}
+
 func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error {
 	cmd := exec.CommandContext(ctx, "docker", "images",
 		"--filter", fmt.Sprintf("reference=tengiz-apps/%s:*", appName),
