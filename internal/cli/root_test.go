@@ -96,7 +96,12 @@ func (m *mockRTForDeploy) WaitForReady(ctx context.Context, name string, interna
 func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
 func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
-func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, env string, n int) error { return nil }
+func (m *mockRTForDeploy) PruneContainers(ctx context.Context, appName string) error { return nil }
+func (m *mockRTForDeploy) PruneImages(ctx context.Context, appName string, keep int) error { return nil }
+func (m *mockRTForDeploy) PruneBuildCache(ctx context.Context) error { return nil }
+func (m *mockRTForDeploy) PruneOrphanedImages(ctx context.Context) error { return nil }
+func (m *mockRTForDeploy) ListOrphanedResources(ctx context.Context) ([]types.OrphanedResource, error) { return nil, nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
@@ -354,6 +359,33 @@ func TestLogsCmdFlagParsing(t *testing.T) {
 		if !strings.Contains(helpText, flag) {
 			t.Errorf("help text missing flag %q", flag)
 		}
+	}
+}
+
+func TestCleanupCmdRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCmdFlags(t *testing.T) {
+	expectedFlags := []string{"dry-run", "force", "containers", "images", "cache", "orphans", "app"}
+	for _, name := range expectedFlags {
+		flag := cleanupCmd.Flags().Lookup(name)
+		if flag == nil {
+			t.Errorf("cleanupCmd missing --%s flag", name)
+		}
+	}
+}
+
+func TestCleanupCmdDryRunDefault(t *testing.T) {
+	dryRun, _ := cleanupCmd.Flags().GetBool("dry-run")
+	if !dryRun {
+		t.Error("--dry-run should default to true")
 	}
 }
 

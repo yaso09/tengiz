@@ -526,6 +526,41 @@ func (s *Store) UpdatePreviewStatus(appName string, prNumber int, status string)
 	return s.savePreviews(previews)
 }
 
+func (s *Store) FreeOrphanedPorts() (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ports := make(map[int]string)
+	s.readJSON(s.envFile("ports.json"), &ports)
+	if len(ports) == 0 {
+		return 0, nil
+	}
+
+	apps := make(map[string]types.AppEntry)
+	s.readJSON(s.envFile("apps.json"), &apps)
+
+	knownApps := make(map[string]bool, len(apps))
+	for name := range apps {
+		knownApps[name] = true
+	}
+
+	freed := 0
+	for port, appName := range ports {
+		if !knownApps[appName] {
+			delete(ports, port)
+			freed++
+		}
+	}
+
+	if freed > 0 {
+		if err := s.writeJSON(s.envFile("ports.json"), ports); err != nil {
+			return freed, fmt.Errorf("write ports: %w", err)
+		}
+	}
+
+	return freed, nil
+}
+
 func (s *Store) readJSON(name string, v interface{}) {
 	data, err := os.ReadFile(filepath.Join(s.dataDir, name))
 	if err == nil {

@@ -592,6 +592,43 @@ func TestPreviewFullLifecycleNaming(t *testing.T) {
 	}
 }
 
+func TestStoreListApps(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	if err := s.SaveApp(types.AppEntry{Name: "app1", Port: 9000}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveApp(types.AppEntry{Name: "app2", Port: 9001}); err != nil {
+		t.Fatal(err)
+	}
+
+	apps, err := s.ListApps()
+	if err != nil {
+		t.Fatalf("ListApps() error = %v", err)
+	}
+	if len(apps) != 2 {
+		t.Fatalf("expected 2 apps, got %d", len(apps))
+	}
+}
+
+func TestStoreFreeOrphanedPorts(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+
+	_ = s.SaveApp(types.AppEntry{Name: "app1", Port: 9000})
+	_, _ = s.AllocatePort("app1")
+	_, _ = s.AllocatePort("orphan-app")
+
+	freed, err := s.FreeOrphanedPorts()
+	if err != nil {
+		t.Fatalf("FreeOrphanedPorts() error = %v", err)
+	}
+	if freed != 1 {
+		t.Errorf("expected 1 orphaned port, got %d", freed)
+	}
+}
+
 func TestPruneBuildLogs(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)
