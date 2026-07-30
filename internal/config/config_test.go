@@ -379,3 +379,30 @@ env:
 		t.Errorf("API_KEY = %q, want %q", cfg.Env["api_key"], "staging-key")
 	}
 }
+
+func TestCleanupConfigLoading(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), []byte(`name: testapp
+cleanup:
+  container_max_age: 48h
+  image_max_age: 7d
+  prune_dangling_only: false
+`), 0644)
+
+	cfg, err := LoadWithEnv(dir, "production")
+	if err != nil {
+		t.Fatalf("LoadWithEnv: %v", err)
+	}
+	if cfg.Cleanup == nil {
+		t.Fatal("Cleanup config not loaded")
+	}
+	if cfg.Cleanup.ContainerMaxAge != "48h" {
+		t.Errorf("ContainerMaxAge = %q, want %q", cfg.Cleanup.ContainerMaxAge, "48h")
+	}
+	if cfg.Cleanup.ImageMaxAge != "7d" {
+		t.Errorf("ImageMaxAge = %q, want %q", cfg.Cleanup.ImageMaxAge, "7d")
+	}
+	if cfg.Cleanup.PruneDanglingOnly != false {
+		t.Errorf("PruneDanglingOnly = %v, want false", cfg.Cleanup.PruneDanglingOnly)
+	}
+}
