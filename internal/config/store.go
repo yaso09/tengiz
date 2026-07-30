@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -591,6 +592,71 @@ func (s *Store) ListBuildLogs(appName string) ([]string, error) {
 	}
 	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
 	return ids, nil
+}
+
+func (s *Store) PruneOrphanedPorts(knownApps []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	knownSet := make(map[string]bool, len(knownApps))
+	for _, app := range knownApps {
+		knownSet[app] = true
+	}
+
+	ports := make(map[int]string)
+	s.readJSON(s.envFile("ports.json"), &ports)
+
+	changed := false
+	for port, appName := range ports {
+		if !knownSet[appName] {
+			delete(ports, port)
+			changed = true
+		}
+	}
+
+	if changed {
+		return s.writeJSON(s.envFile("ports.json"), ports)
+	}
+	return nil
+}
+
+func (s *Store) PruneDeployments(appName string, keep int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	deployments := make(map[string][]types.DeploymentEntry)
+	s.readJSON(s.envFile("deployments.json"), &deployments)
+
+	deps, ok := deployments[appName]
+	if !ok {
+		return nil
+	}
+
+	if len(deps) <= keep {
+		return nil
+	}
+
+	sort.Slice(deps, func(i, j int) bool {
+		return deps[i].CreatedAt.Before(deps[j].CreatedAt)
+	})
+
+	deps = deps[len(deps)-keep:]
+	deployments[appName] = deps
+
+	return s.writeJSON(s.envFile("deployments.json"), deployments)
+}
+
+func (s *Store) PruneBuildLogsAll(keep int) error {
+	apps, err := s.ListApps()
+	if err != nil {
+		return err
+	}
+	for _, app := range apps {
+		if err := s.PruneBuildLogs(app.Name, keep); err != nil {
+			slog.Warn("failed to prune build logs", "app", app.Name, "error", err)
+		}
+	}
+	return nil
 }
 
 func (s *Store) PruneBuildLogs(appName string, keep int) error {

@@ -592,6 +592,68 @@ func TestPreviewFullLifecycleNaming(t *testing.T) {
 	}
 }
 
+func TestPruneOrphanedPorts(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStoreWithEnv(dir, "test")
+
+	port1, _ := s.AllocatePort("app1")
+	port2, _ := s.AllocatePort("app2")
+	port3, _ := s.AllocatePort("orphaned")
+
+	s.SaveApp(types.AppEntry{Name: "app1"})
+	s.SaveApp(types.AppEntry{Name: "app2"})
+
+	err := s.PruneOrphanedPorts([]string{"app1", "app2"})
+	if err != nil {
+		t.Fatalf("PruneOrphanedPorts failed: %v", err)
+	}
+
+	port4, err := s.AllocatePort("new-app")
+	if err != nil {
+		t.Fatalf("expected to allocate freed port, got error: %v", err)
+	}
+	if port4 != port3 {
+		t.Errorf("expected port %d to be freed, got %d", port3, port4)
+	}
+
+	s.FreePort(port1)
+	s.FreePort(port2)
+	s.FreePort(port4)
+}
+
+func TestPruneDeployments(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStoreWithEnv(dir, "test")
+
+	for i := 0; i < 15; i++ {
+		s.AddDeployment("myapp", types.DeploymentEntry{
+			ID:        fmt.Sprintf("dep-%d", i),
+			ImageTag:  fmt.Sprintf("myapp:v%d", i),
+			CreatedAt: time.Now().Add(-time.Duration(15-i) * time.Hour),
+			Status:    "previous",
+		})
+	}
+
+	err := s.PruneDeployments("myapp", 10)
+	if err != nil {
+		t.Fatalf("PruneDeployments failed: %v", err)
+	}
+
+	deps, _ := s.GetDeployments("myapp")
+	if len(deps) != 10 {
+		t.Errorf("expected 10 deployments, got %d", len(deps))
+	}
+
+	for _, dep := range deps {
+		idStr := strings.TrimPrefix(dep.ID, "dep-")
+		n := 0
+		fmt.Sscanf(idStr, "%d", &n)
+		if n < 5 {
+			t.Errorf("expected oldest deployments to be pruned, but found dep-%d", n)
+		}
+	}
+}
+
 func TestPruneBuildLogs(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)
