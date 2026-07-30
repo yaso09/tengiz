@@ -681,3 +681,7 @@ func (g *grepReader) Read(p []byte) (int, error) {
 func (g *grepReader) Close() error {
 	return g.reader.Close()
 }
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (*PruneReport, error) {
+	return &PruneReport{}, nil
+}
