@@ -665,6 +665,16 @@ var rmCmd = &cobra.Command{
 			}
 		}
 
+		// Remove all Docker images for this app (env-qualified)
+		qualifiedName := config.AppQualifiedName(appName, env)
+		if err := rt.KeepLastNImages(context.Background(), qualifiedName, 0); err != nil {
+			log.Printf("[tengiz] warning: image cleanup: %v", err)
+		}
+		latestTag := fmt.Sprintf("tengiz-apps/%s:%s-latest", qualifiedName, env)
+		if err := rt.RemoveImage(context.Background(), latestTag); err != nil {
+			log.Printf("[tengiz] warning: could not remove latest image: %v", err)
+		}
+
 		fmt.Printf("[tengiz] removed: %s\n", appName)
 		return nil
 	},

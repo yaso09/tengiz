@@ -6,6 +6,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func TestRmCommandReturnsImageCleanupInfo(t *testing.T) {
+	if rmCmd.Use != "rm <app>" {
+		t.Errorf("rmCmd.Use = %q, want %q", rmCmd.Use, "rm <app>")
+	}
+}
+
 func TestCleanupCommandRegistered(t *testing.T) {
 	found := false
 	for _, c := range rootCmd.Commands() {
