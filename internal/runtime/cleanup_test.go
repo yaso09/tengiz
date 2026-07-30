@@ -33,6 +33,39 @@ func TestStubCleanup(t *testing.T) {
 	}
 }
 
+func TestParsePruneOutputCount(t *testing.T) {
+	output := "Deleted Containers:\n123abc\n456def\n\nTotal reclaimed space: 1.234GB\n"
+	count, space := parsePruneOutput(output)
+	if count != 2 {
+		t.Errorf("expected 2 items, got %d", count)
+	}
+	if space != "1.234GB" {
+		t.Errorf("expected space '1.234GB', got %q", space)
+	}
+}
+
+func TestParsePruneOutputEmpty(t *testing.T) {
+	output := "Total reclaimed space: 0B\n"
+	count, space := parsePruneOutput(output)
+	if count != 0 {
+		t.Errorf("expected 0 items, got %d", count)
+	}
+	if space != "0B" {
+		t.Errorf("expected space '0B', got %q", space)
+	}
+}
+
+func TestParsePruneOutputBuilder(t *testing.T) {
+	output := "TYPE      SIZE     DESCRIPTION\nbuild     1.5GB    Build cache\n\nTotal: 1.5GB\n"
+	count, space := parsePruneOutput(output)
+	if count != 1 {
+		t.Errorf("expected 1 item, got %d", count)
+	}
+	if space != "1.5GB" {
+		t.Errorf("expected space '1.5GB', got %q", space)
+	}
+}
+
 func TestCleanupOptionsDefaults(t *testing.T) {
 	opts := types.CleanupOptions{}
 	if opts.All {
