@@ -18,3 +18,28 @@ func TestStubKeepLastNImages(t *testing.T) {
 		t.Fatalf("KeepLastNImages() error = %v", err)
 	}
 }
+
+func TestStubPruneMethods(t *testing.T) {
+	m := NewStub()
+	ctx := context.Background()
+
+	if err := m.PruneContainers(ctx, ""); err != nil {
+		t.Errorf("PruneContainers() error = %v", err)
+	}
+	if err := m.PruneImages(ctx, "", 5); err != nil {
+		t.Errorf("PruneImages() error = %v", err)
+	}
+	if err := m.PruneBuildCache(ctx); err != nil {
+		t.Errorf("PruneBuildCache() error = %v", err)
+	}
+	if err := m.PruneOrphanedImages(ctx); err != nil {
+		t.Errorf("PruneOrphanedImages() error = %v", err)
+	}
+	resources, err := m.ListOrphanedResources(ctx)
+	if err != nil {
+		t.Errorf("ListOrphanedResources() error = %v", err)
+	}
+	if len(resources) != 0 {
+		t.Errorf("expected 0 orphaned resources, got %d", len(resources))
+	}
+}

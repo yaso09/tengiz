@@ -169,6 +169,21 @@ const (
 	HealthUnhealthy = "unhealthy"
 )
 
+type OrphanedResourceType string
+
+const (
+	OrphanedContainer OrphanedResourceType = "container"
+	OrphanedImage     OrphanedResourceType = "image"
+	OrphanedPort      OrphanedResourceType = "port"
+)
+
+type OrphanedResource struct {
+	Type   OrphanedResourceType `json:"type"`
+	ID     string               `json:"id"`
+	App    string               `json:"app,omitempty"`
+	Detail string               `json:"detail,omitempty"`
+}
+
 type AppEntry struct {
 	Name             string            `json:"name"`
 	ImageTag         string            `json:"image_tag"`
