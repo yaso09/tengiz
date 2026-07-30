@@ -67,6 +67,7 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
 	notificationCmd.AddCommand(notificationDisableCmd)
 	notificationCmd.AddCommand(notificationConfigCmd)
@@ -86,6 +87,13 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without removing")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped non-Tengiz containers only")
+	cleanupCmd.Flags().Bool("images", false, "prune unused non-Tengiz images only")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes only")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune Docker build cache only")
+	cleanupCmd.Flags().Bool("all", false, "prune everything (default if no specific flag)")
+	cleanupCmd.Flags().Int("keep", 5, "number of images/containers to retain per app")
 }
 
 var rootCmd = &cobra.Command{
@@ -346,6 +354,9 @@ var deployCmd = &cobra.Command{
 			if err := rt.KeepLastNImages(context.Background(), cfg.Name, 5); err != nil {
 				log.Printf("[tengiz] warning: image cleanup: %v", err)
 			}
+			if err := rt.KeepLastNContainers(context.Background(), cfg.Name, 5); err != nil {
+				log.Printf("[tengiz] warning: container cleanup: %v", err)
+			}
 
 			if err := proxy.RegisterRouteWithProxy(cfg.Name, port); err != nil {
 				log.Printf("[tengiz] proxy not available (route will be registered on proxy start): %v", err)
@@ -465,6 +476,9 @@ var deployCmd = &cobra.Command{
 
 		if err := rt.KeepLastNImages(context.Background(), cfg.Name, 5); err != nil {
 			log.Printf("[tengiz] warning: image cleanup: %v", err)
+		}
+		if err := rt.KeepLastNContainers(context.Background(), cfg.Name, 5); err != nil {
+			log.Printf("[tengiz] warning: container cleanup: %v", err)
 		}
 
 		fmt.Printf("[tengiz] deployed (zero-downtime): %s at http://%s.tengiz.local:%d\n",
@@ -1010,6 +1024,13 @@ var rollbackCmd = &cobra.Command{
 			DeploymentSuffix: prevDep.ID,
 		})
 
+		if err := rt.KeepLastNContainers(context.Background(), appName, 5); err != nil {
+			log.Printf("[tengiz] warning: container cleanup: %v", err)
+		}
+		if err := rt.KeepLastNImages(context.Background(), appName, 5); err != nil {
+			log.Printf("[tengiz] warning: image cleanup: %v", err)
+		}
+
 		fmt.Printf("[tengiz] rolled back %s to deployment %s (port %d)\n", appName, prevDep.ID, newPort)
 		return nil
 	},
@@ -1155,6 +1176,95 @@ Examples:
 
 		if err := rt.Run(cmd.Context(), &app.Config, imageTag, command, opts); err != nil {
 			return fmt.Errorf("run: %w", err)
+		}
+
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Free disk space by pruning unused Docker resources",
+	Long: `Prunes Docker resources not managed by Tengiz (containers, images, volumes, build cache).
+By default prunes everything. Use specific flags to limit scope.
+All Tengiz-managed resources are protected by labels -- never pruned automatically.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		pruneContainers, _ := cmd.Flags().GetBool("containers")
+		pruneImages, _ := cmd.Flags().GetBool("images")
+		pruneVolumes, _ := cmd.Flags().GetBool("volumes")
+		pruneBuildCache, _ := cmd.Flags().GetBool("build-cache")
+		pruneAll, _ := cmd.Flags().GetBool("all")
+		keep, _ := cmd.Flags().GetInt("keep")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		doAll := pruneAll || (!pruneContainers && !pruneImages && !pruneVolumes && !pruneBuildCache)
+
+		if dryRun {
+			fmt.Println("[tengiz] DRY RUN — no resources will be removed")
+		}
+
+		stale, err := rt.DetectStaleContainers(context.Background())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[tengiz] warning: stale detection: %v\n", err)
+		} else if len(stale) > 0 {
+			fmt.Printf("[tengiz] stopped Tengiz containers (%d):\n", len(stale))
+			for _, c := range stale {
+				fmt.Printf("  - %s\n", c)
+			}
+			fmt.Println("  (use --containers to prune stopped Tengiz containers)")
+		}
+
+		if doAll || pruneContainers {
+			if err := rt.PruneContainers(context.Background(), dryRun); err != nil {
+				fmt.Fprintf(os.Stderr, "[tengiz] container prune: %v\n", err)
+			} else {
+				fmt.Println("[tengiz] pruned non-Tengiz containers")
+			}
+		}
+
+		if doAll || pruneImages {
+			if err := rt.PruneImages(context.Background(), dryRun); err != nil {
+				fmt.Fprintf(os.Stderr, "[tengiz] image prune: %v\n", err)
+			} else {
+				fmt.Println("[tengiz] pruned non-Tengiz images")
+			}
+		}
+
+		if doAll || pruneVolumes {
+			if err := rt.PruneVolumes(context.Background(), dryRun); err != nil {
+				fmt.Fprintf(os.Stderr, "[tengiz] volume prune: %v\n", err)
+			} else {
+				fmt.Println("[tengiz] pruned unused volumes")
+			}
+		}
+
+		if doAll || pruneBuildCache {
+			if err := rt.PruneBuildCache(context.Background()); err != nil {
+				fmt.Fprintf(os.Stderr, "[tengiz] build cache prune: %v\n", err)
+			} else {
+				fmt.Println("[tengiz] pruned build cache")
+			}
+		}
+
+		store := config.NewStore(dataDir)
+		apps, err := store.ListApps()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[tengiz] warning: list apps: %v\n", err)
+		} else {
+			for _, app := range apps {
+				if err := rt.KeepLastNContainers(context.Background(), app.Name, keep); err != nil {
+					fmt.Fprintf(os.Stderr, "[tengiz] warning: container retention for %s: %v\n", app.Name, err)
+				}
+				if err := rt.KeepLastNImages(context.Background(), app.Name, keep); err != nil {
+					fmt.Fprintf(os.Stderr, "[tengiz] warning: image retention for %s: %v\n", app.Name, err)
+				}
+			}
+			fmt.Printf("[tengiz] retention applied: kept %d per app\n", keep)
 		}
 
 		return nil
