@@ -77,3 +77,14 @@ func TestStubPruneReturnsEmptyReport(t *testing.T) {
 		t.Fatal("expected non-nil report")
 	}
 }
+
+func TestStubOrphanedDetection(t *testing.T) {
+	m := NewStub()
+	containers, err := m.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(containers) != 0 {
+		t.Errorf("expected 0 containers, got %d", len(containers))
+	}
+}

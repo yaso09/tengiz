@@ -708,6 +708,15 @@ func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (*PruneRep
 	}
 	if opts.All || opts.Images {
 		categories = append(categories, "image")
+		keepN := opts.KeepImages
+		if keepN <= 0 {
+			keepN = 5
+		}
+		for _, appName := range opts.KnownApps {
+			if err := r.KeepLastNImages(ctx, appName, keepN); err != nil {
+				slog.Warn("failed to keep images for app", "app", appName, "error", err)
+			}
+		}
 	}
 	if opts.All || opts.Volumes {
 		categories = append(categories, "volume")
