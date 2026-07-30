@@ -44,7 +44,8 @@ tengiz ps             → list apps from Docker
 tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] app  → stream logs with filtering
 tengiz build-logs <app> [deployment-id] → show build logs from previous deployments (--tail N)
 tengiz run <app> <cmd> [-i] [-e KEY=VALUE] → one-off command in temporary container
-tengiz stop/start/rm  → lifecycle
+tengiz stop/start/rm  → lifecycle (rm auto-cleans images)
+tengiz cleanup [app] [--all] [--force] [--images] → prune unused Docker resources
 tengiz config set/get/unset/show → env vars
 tengiz config set <app> <key> <value> --secret → store as encrypted secret
 tengiz secret set <app> <key> <value> → set an encrypted secret

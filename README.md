@@ -21,6 +21,7 @@
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
+- **Disk housekeeping** — `tengiz cleanup` prunes unused Docker resources with label-based safety, preventing disk-full scenarios on single-server deployments. Auto-cleanup on `tengiz rm` removes app images.
 
 ## Prerequisites
 
@@ -219,9 +220,21 @@ Stop a running container (5s grace period).
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup [app]`
+
+Prune unused Docker resources to free disk space. Without arguments, prunes resources **not** managed by Tengiz (safe for production). With an app name, prunes resources specific to that app. With `--all`, also prunes unused Tengiz images and build cache.
+
+| Flag | Description |
+|------|-------------|
+| `--force` | Non-interactive mode (bypass confirmation) |
+| `--all` | Also prune unused Tengiz images and build cache |
+| `--images` | Prune images only (skip containers and networks) |
+
+When run with an app name that exists in the store, keeps the last 5 images. If the app is not found (e.g. removed), removes all containers and images matching that app.
+
 ### `tengiz rm <app>`
 
-Remove an application completely — stops the container, deletes it, and cleans up `~/.tengiz/apps.json`.
+Remove an application completely — stops the container, deletes it, removes all associated Docker images, and cleans up `~/.tengiz/apps.json`.
 
 | Argument | Description |
 |----------|-------------|

@@ -33,6 +33,10 @@ func (m *mockRuntime) WaitForHealth(ctx context.Context, name string, hc *types.
 func (m *mockRuntime) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRuntime) PruneSystem(ctx context.Context, force bool) (runtime.PruneReport, error) { return runtime.PruneReport{}, nil }
+func (m *mockRuntime) PruneBuildCache(ctx context.Context, force bool) (runtime.PruneReport, error) { return runtime.PruneReport{}, nil }
+func (m *mockRuntime) PruneContainers(ctx context.Context, appName string) error { return nil }
+func (m *mockRuntime) PruneImages(ctx context.Context, appName string, keep int) error { return nil }
 
 func TestExtractApp(t *testing.T) {
 	p := New(nil, 8080)
