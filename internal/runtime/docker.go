@@ -633,26 +633,6 @@ func waitForPort(ctx context.Context, host string, port int, timeout time.Durati
 	}
 }
 
-func (r *dockerRuntime) PruneContainers(ctx context.Context, appName string) error {
-	return nil
-}
-
-func (r *dockerRuntime) PruneImages(ctx context.Context, appName string, keep int) error {
-	return nil
-}
-
-func (r *dockerRuntime) PruneBuildCache(ctx context.Context) error {
-	return nil
-}
-
-func (r *dockerRuntime) PruneOrphanedImages(ctx context.Context) error {
-	return nil
-}
-
-func (r *dockerRuntime) ListOrphanedResources(ctx context.Context) ([]types.OrphanedResource, error) {
-	return nil, nil
-}
-
 func sanitizeContainerName(name string) string {
 	s := strings.ToLower(name)
 	var buf bytes.Buffer
