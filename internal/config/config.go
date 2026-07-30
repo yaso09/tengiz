@@ -139,6 +139,10 @@ func LoadForEnvironment(path, env string) (*types.AppConfig, error) {
 		cfg.Volumes = envCfg.Volumes
 	}
 
+	if envCfg.Cleanup != nil {
+		cfg.Cleanup = envCfg.Cleanup
+	}
+
 	if envCfg.Env != nil {
 		if cfg.Env == nil {
 			cfg.Env = make(map[string]string)

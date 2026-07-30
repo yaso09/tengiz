@@ -87,6 +87,17 @@ type AppConfig struct {
 	Environment string              `mapstructure:"environment" json:"environment,omitempty"`
 	Git         *GitConfig          `mapstructure:"git,omitempty" json:"git,omitempty"`
 	Volumes     []VolumeConfig      `mapstructure:"volumes,omitempty" yaml:"volumes,omitempty" json:"volumes,omitempty"`
+	Cleanup     *CleanupConfig      `mapstructure:"cleanup,omitempty" json:"cleanup,omitempty"`
+}
+
+type CleanupConfig struct {
+	ContainerMaxAge    string `mapstructure:"container_max_age,omitempty" yaml:"container_max_age,omitempty"`
+	ImageMaxAge        string `mapstructure:"image_max_age,omitempty" yaml:"image_max_age,omitempty"`
+	VolumeMaxAge       string `mapstructure:"volume_max_age,omitempty" yaml:"volume_max_age,omitempty"`
+	NetworkMaxAge      string `mapstructure:"network_max_age,omitempty" yaml:"network_max_age,omitempty"`
+	BuildCacheMaxAge   string `mapstructure:"build_cache_max_age,omitempty" yaml:"build_cache_max_age,omitempty"`
+	PruneDanglingOnly  bool   `mapstructure:"prune_dangling_only,omitempty" yaml:"prune_dangling_only,omitempty"`
+	KeepBuildCacheBytes string `mapstructure:"keep_build_cache_bytes,omitempty" yaml:"keep_build_cache_bytes,omitempty"`
 }
 
 type ResourceConfig struct {
