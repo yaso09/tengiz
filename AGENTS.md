@@ -12,11 +12,11 @@
 
 | Package | Responsibility |
 |---------|---------------|
-| `runtime.Manager` | Interface for container lifecycle. `NewDocker()` = exec-based impl, `NewStub()` = test mock. Also: `CreateFromImage`, `RemoveImage`, `KeepLastNImages` for rollback + image cleanup. `ContainerName(name, env)` helper. |
+| `runtime.Manager` | Interface for container lifecycle. `NewDocker()` = exec-based impl, `NewStub()` = test mock. Also: `CreateFromImage`, `RemoveImage`, `KeepLastNImages` for rollback + image cleanup, `PruneContainers`/`PruneImages`/`PruneBuildCache`/`PruneOrphanedImages`/`ListOrphanedResources` for cleanup operations. `ContainerName(name, env)` helper. |
 | `builder` | Framework detection (`detect.go`) + Dockerfile generation (`builder.go`). Supports: Docker, Next.js, Vite, Go, Node, Python, static. Nixpacks backend (`build.builder: nixpacks`) for hundreds of frameworks (Ruby, Rust, PHP, etc). Env-aware image tags (`{env}-{deploymentID}`). |
 | `proxy` | `httputil.ReverseProxy` with host-based routing (`appname.tengiz.local` → port 9000+) and custom domain support. Cold-starts stopped containers on demand. Env-aware via `NewWithEnv`. |
 | `idle` | Per-app timer. `Reset(name)` extends deadline. On expiry: calls `runtime.Stop()`. Default 5m timeout. Env-aware via `NewWithEnv`. |
-| `config` | Loads `.tengiz.yaml` via viper. `LoadWithEnv(path, env)` and `LoadForEnvironment(path, env)` merge `.tengiz.{env}.yaml` overrides (latter adds env name validation + comprehensive scalar merge). `Store` persists apps + port allocations in `~/.tengiz/` (env-scoped). Adds `GetEnv`/`SetEnv`/`UnsetEnv`/`ListEnv` for env var management. |
+| `config` | Loads `.tengiz.yaml` via viper. `LoadWithEnv(path, env)` and `LoadForEnvironment(path, env)` merge `.tengiz.{env}.yaml` overrides (latter adds env name validation + comprehensive scalar merge). `Store` persists apps + port allocations in `~/.tengiz/` (env-scoped). Adds `GetEnv`/`SetEnv`/`UnsetEnv`/`ListEnv` for env var management. `FreeOrphanedPorts()` for port cleanup. |
 | `health` | Periodic HTTP health checks with automatic restart. Env-aware via `NewWithEnv`. |
 | `gitdeploy` | Git-based deployment pipeline. Env-aware via `NewPipelineWithEnv`. |
 | `preview` | Preview deployment lifecycle (PR-based). `Manager` struct with `Create/Update/Delete/List`. Webhook `pull_request` events trigger auto-create/update/cleanup. |
@@ -63,6 +63,7 @@ tengiz notification disable     → disable notifications
 tengiz notification config <app> [--events ...] [--all] → configure which events trigger notifications
 tengiz notification set-channel <type> [--webhook-url ...] [--smtp-server ...] → configure a notification channel
 tengiz notification show        → show current notification configuration
+tengiz cleanup [--force] [--containers] [--images] [--cache] [--orphans] [--app <name>] → prune Docker resources (dry-run by default)
 ```
 
 ## Rules
