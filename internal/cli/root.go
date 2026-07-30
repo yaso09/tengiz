@@ -73,6 +73,7 @@ func init() {
 	notificationCmd.AddCommand(notificationSetChannelCmd)
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
