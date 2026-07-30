@@ -212,7 +212,7 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 			log.Printf("[tengiz] proxy not available: %v", err)
 		}
 
-		if err := p.rt.KeepLastNImages(ctx, appName, 5); err != nil {
+		if err := p.rt.KeepLastNImages(ctx, appName, p.env, 5); err != nil {
 			log.Printf("[tengiz] warning: image cleanup: %v", err)
 		}
 
@@ -312,7 +312,7 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		GitProvider:      provider,
 	})
 
-	if err := p.rt.KeepLastNImages(ctx, appName, 5); err != nil {
+	if err := p.rt.KeepLastNImages(ctx, appName, p.env, 5); err != nil {
 		log.Printf("[tengiz] warning: image cleanup: %v", err)
 	}
 

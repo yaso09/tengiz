@@ -33,7 +33,7 @@ type Manager interface {
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
 	RemoveImage(ctx context.Context, imageTag string) error
-	KeepLastNImages(ctx context.Context, appName string, n int) error
+	KeepLastNImages(ctx context.Context, appName string, env string, n int) error
 	PruneContainers(ctx context.Context, appName string) error
 	PruneImages(ctx context.Context, appName string, keep int) error
 	PruneBuildCache(ctx context.Context) error
@@ -119,7 +119,7 @@ func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
 	return nil
 }
 
-func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
+func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, env string, n int) error {
 	return nil
 }
 

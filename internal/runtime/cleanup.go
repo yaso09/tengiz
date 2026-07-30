@@ -18,9 +18,17 @@ func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error 
 	return nil
 }
 
-func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error {
+func imageFilterPattern(appName, env string) string {
+	if env == "" || env == "production" {
+		return fmt.Sprintf("reference=tengiz-apps/%s:*", appName)
+	}
+	return fmt.Sprintf("reference=tengiz-apps/%s:%s-*", appName, env)
+}
+
+func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, env string, n int) error {
+	pattern := imageFilterPattern(appName, env)
 	cmd := exec.CommandContext(ctx, "docker", "images",
-		"--filter", fmt.Sprintf("reference=tengiz-apps/%s:*", appName),
+		"--filter", pattern,
 		"--format", "{{.Repository}}:{{.Tag}}|{{.CreatedAt}}",
 	)
 	out, err := cmd.CombinedOutput()
@@ -29,6 +37,9 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
+		return nil
+	}
 	if len(lines) <= n {
 		return nil
 	}
@@ -48,7 +59,7 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 			continue
 		}
 		tag := parts[0]
-		if strings.HasSuffix(tag, ":latest") {
+		if strings.Contains(tag, "latest") {
 			continue
 		}
 		if err := r.RemoveImage(ctx, tag); err != nil {

@@ -96,7 +96,7 @@ func (m *mockRTForDeploy) WaitForReady(ctx context.Context, name string, interna
 func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
 func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
-func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, env string, n int) error { return nil }
 func (m *mockRTForDeploy) PruneContainers(ctx context.Context, appName string) error { return nil }
 func (m *mockRTForDeploy) PruneImages(ctx context.Context, appName string, keep int) error { return nil }
 func (m *mockRTForDeploy) PruneBuildCache(ctx context.Context) error { return nil }
