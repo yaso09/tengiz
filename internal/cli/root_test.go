@@ -362,6 +362,33 @@ func TestLogsCmdFlagParsing(t *testing.T) {
 	}
 }
 
+func TestCleanupCmdRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCmdFlags(t *testing.T) {
+	expectedFlags := []string{"dry-run", "force", "containers", "images", "cache", "orphans", "app"}
+	for _, name := range expectedFlags {
+		flag := cleanupCmd.Flags().Lookup(name)
+		if flag == nil {
+			t.Errorf("cleanupCmd missing --%s flag", name)
+		}
+	}
+}
+
+func TestCleanupCmdDryRunDefault(t *testing.T) {
+	dryRun, _ := cleanupCmd.Flags().GetBool("dry-run")
+	if !dryRun {
+		t.Error("--dry-run should default to true")
+	}
+}
+
 func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	configCmd, _, err := rootCmd.Find([]string{"config"})
 	if err != nil {

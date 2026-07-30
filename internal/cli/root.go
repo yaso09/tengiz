@@ -73,6 +73,14 @@ func init() {
 	notificationCmd.AddCommand(notificationSetChannelCmd)
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("dry-run", true, "show what would be pruned without actually pruning")
+	cleanupCmd.Flags().Bool("force", false, "actually execute pruning (default is dry-run)")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers")
+	cleanupCmd.Flags().Bool("images", false, "prune unused images (keeps 5 most recent per app:env)")
+	cleanupCmd.Flags().Bool("cache", false, "prune Docker build cache")
+	cleanupCmd.Flags().Bool("orphans", false, "remove orphaned ports (ports for non-existent apps)")
+	cleanupCmd.Flags().String("app", "", "prune only resources for this app")
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -1728,6 +1736,113 @@ var secretListCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Prune unused Docker resources managed by Tengiz",
+	Long: `Remove stopped containers, unused images, build cache, and orphaned state.
+
+By default runs in dry-run mode (no actual pruning). Use --force to execute.
+
+Examples:
+  tengiz cleanup                        # show what would be pruned (dry-run)
+  tengiz cleanup --force                # prune all resource types
+  tengiz cleanup --force --containers   # only prune stopped containers
+  tengiz cleanup --force --app myapp    # only prune resources for myapp
+`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		force, _ := cmd.Flags().GetBool("force")
+		pruneContainers, _ := cmd.Flags().GetBool("containers")
+		pruneImages, _ := cmd.Flags().GetBool("images")
+		pruneCache, _ := cmd.Flags().GetBool("cache")
+		pruneOrphans, _ := cmd.Flags().GetBool("orphans")
+		appFilter, _ := cmd.Flags().GetString("app")
+
+		if !force && !dryRun {
+			dryRun = true
+		}
+
+		if !pruneContainers && !pruneImages && !pruneCache && !pruneOrphans {
+			pruneContainers = true
+			pruneImages = true
+			pruneCache = true
+			pruneOrphans = true
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+		store := config.NewStore(dataDir)
+
+		if dryRun {
+			fmt.Println("[tengiz] DRY RUN \u2014 no changes will be made")
+		}
+
+		if pruneContainers {
+			if dryRun {
+				fmt.Printf("[tengiz] would prune stopped containers (app: %s)\n", orAll(appFilter))
+			} else {
+				fmt.Printf("[tengiz] pruning stopped containers (app: %s)...\n", orAll(appFilter))
+				if err := rt.PruneContainers(cmd.Context(), appFilter); err != nil {
+					log.Printf("[tengiz] container prune error: %v", err)
+				}
+			}
+		}
+
+		if pruneImages {
+			if dryRun {
+				fmt.Printf("[tengiz] would prune unused images (app: %s, keep: 5 per env)\n", orAll(appFilter))
+			} else {
+				fmt.Printf("[tengiz] pruning unused images (app: %s)...\n", orAll(appFilter))
+				if err := rt.PruneImages(cmd.Context(), appFilter, 5); err != nil {
+					log.Printf("[tengiz] image prune error: %v", err)
+				}
+			}
+		}
+
+		if pruneCache {
+			if dryRun {
+				fmt.Println("[tengiz] would prune Docker build cache")
+			} else {
+				fmt.Println("[tengiz] pruning Docker build cache...")
+				if err := rt.PruneBuildCache(cmd.Context()); err != nil {
+					log.Printf("[tengiz] build cache prune error: %v", err)
+				}
+			}
+		}
+
+		if pruneOrphans {
+			if dryRun {
+				fmt.Println("[tengiz] would remove orphaned ports")
+			} else {
+				fmt.Println("[tengiz] removing orphaned ports...")
+				freed, err := store.FreeOrphanedPorts()
+				if err != nil {
+					log.Printf("[tengiz] orphaned port cleanup error: %v", err)
+				} else if freed > 0 {
+					fmt.Printf("[tengiz] freed %d orphaned port(s)\n", freed)
+				} else {
+					fmt.Println("[tengiz] no orphaned ports found")
+				}
+			}
+		}
+
+		if dryRun {
+			fmt.Println("[tengiz] run with --force to execute")
+		}
+
+		return nil
+	},
+}
+
+func orAll(appFilter string) string {
+	if appFilter == "" {
+		return "all apps"
+	}
+	return appFilter
 }
 
 func addToSlice(s []string, v string) []string {
