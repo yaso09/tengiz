@@ -365,6 +365,8 @@ var deployCmd = &cobra.Command{
 					"image":       imageTag,
 				},
 			})
+
+			go postDeployCleanup(rt, store, cfg.Name)
 			return nil
 		}
 
@@ -481,6 +483,8 @@ var deployCmd = &cobra.Command{
 				"image":       imageTag,
 			},
 		})
+
+		go postDeployCleanup(rt, store, cfg.Name)
 		return nil
 	},
 }
@@ -1887,6 +1891,30 @@ func getSecretManager(cmd *cobra.Command, dataDir, env string) (*secrets.Manager
 	dopplerProject, _ := cmd.Flags().GetString("doppler-project")
 	dopplerConfig, _ := cmd.Flags().GetString("doppler-config")
 	return secrets.NewManagerFromConfig(dataDir, env, provider, vaultAddr, vaultToken, dopplerToken, dopplerProject, dopplerConfig)
+}
+
+func postDeployCleanup(rt runtime.Manager, store *config.Store, appName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	opts := runtime.PruneOptions{
+		Images:     true,
+		DryRun:     false,
+		KeepImages: 5,
+		KnownApps:  []string{appName},
+	}
+	if _, err := rt.Prune(ctx, opts); err != nil {
+		slog.Debug("post-deploy cleanup: image prune failed", "error", err)
+	}
+
+	apps, _ := store.ListApps()
+	known := make([]string, len(apps))
+	for i, a := range apps {
+		known[i] = a.Name
+	}
+	if err := store.PruneOrphanedPorts(known); err != nil {
+		slog.Debug("post-deploy cleanup: port prune failed", "error", err)
+	}
 }
 
 func maskSecret(s string) string {
