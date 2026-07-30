@@ -73,6 +73,15 @@ func init() {
 	notificationCmd.AddCommand(notificationSetChannelCmd)
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers not managed by Tengiz")
+	cleanupCmd.Flags().Bool("images", false, "prune old Docker images (keeps last N per app)")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused Docker networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune Docker build cache")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused Docker volumes")
+	cleanupCmd.Flags().Bool("all", false, "prune all categories")
+	cleanupCmd.Flags().Bool("aggressive", false, "remove all unused images including tagged ones")
+	cleanupCmd.Flags().Int("keep-images", 5, "number of old images to keep per app (default: 5)")
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -343,7 +352,7 @@ var deployCmd = &cobra.Command{
 				Status:    string(types.DeployActive),
 			})
 
-			if err := rt.KeepLastNImages(context.Background(), cfg.Name, 5); err != nil {
+			if err := rt.KeepLastNImages(context.Background(), config.AppQualifiedName(cfg.Name, envFlag), 5); err != nil {
 				log.Printf("[tengiz] warning: image cleanup: %v", err)
 			}
 
@@ -463,7 +472,7 @@ var deployCmd = &cobra.Command{
 			DeploymentSuffix: deploymentID,
 		})
 
-		if err := rt.KeepLastNImages(context.Background(), cfg.Name, 5); err != nil {
+		if err := rt.KeepLastNImages(context.Background(), config.AppQualifiedName(cfg.Name, envFlag), 5); err != nil {
 			log.Printf("[tengiz] warning: image cleanup: %v", err)
 		}
 
@@ -654,6 +663,16 @@ var rmCmd = &cobra.Command{
 					sm.Unset(appName, k)
 				}
 			}
+		}
+
+		// Remove all Docker images for this app (env-qualified)
+		qualifiedName := config.AppQualifiedName(appName, env)
+		if err := rt.KeepLastNImages(context.Background(), qualifiedName, 0); err != nil {
+			log.Printf("[tengiz] warning: image cleanup: %v", err)
+		}
+		latestTag := fmt.Sprintf("tengiz-apps/%s:%s-latest", qualifiedName, env)
+		if err := rt.RemoveImage(context.Background(), latestTag); err != nil {
+			log.Printf("[tengiz] warning: could not remove latest image: %v", err)
 		}
 
 		fmt.Printf("[tengiz] removed: %s\n", appName)

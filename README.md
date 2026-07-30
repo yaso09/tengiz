@@ -19,6 +19,7 @@
 - **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
+- **Docker housekeeping** — `tengiz cleanup` command with granular per-category pruning (containers, images, networks, volumes, build cache), label-based Tengiz container protection, and disk space reporting.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
 
@@ -221,11 +222,35 @@ Stop a running container (5s grace period).
 
 ### `tengiz rm <app>`
 
-Remove an application completely — stops the container, deletes it, and cleans up `~/.tengiz/apps.json`.
+Remove an application completely — stops the container, deletes it, removes all Docker images, clears secrets, and cleans up `~/.tengiz/apps.json`.
 
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name (required) |
+
+### `tengiz cleanup`
+
+Prune unused Docker resources and free disk space. Protects Tengiz-managed containers from removal using label-based filtering. Before pruning images, keeps the last N images per app (default: 5) for rollback support.
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Prune stopped containers not managed by Tengiz |
+| `--images` | Prune old Docker images (keeps last N per app) |
+| `--networks` | Prune unused Docker networks |
+| `--build-cache` | Prune Docker build cache |
+| `--volumes` | Prune unused Docker volumes |
+| `--all` | Prune all categories |
+| `--aggressive` | Remove all unused images including tagged ones (skips label protection) |
+| `--keep-images N` | Number of old images to keep per app (default: 5) |
+
+Examples:
+```
+tengiz cleanup --containers          # remove stopped non-Tengiz containers
+tengiz cleanup --images              # prune old images (keeps last 5 per app)
+tengiz cleanup --all                 # full system cleanup
+tengiz cleanup --all --aggressive    # clean everything including tagged images
+tengiz cleanup --all --keep-images 3 # keep only 3 old images per app
+```
 
 ### `tengiz rollback <app>`
 

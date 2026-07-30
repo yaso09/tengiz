@@ -205,6 +205,13 @@ func LoadWebhookConfig(path string) (*types.WebhookConfig, error) {
 	return &wc, nil
 }
 
+func AppQualifiedName(name, env string) string {
+	if env == "" || env == "production" {
+		return name
+	}
+	return name + "-" + env
+}
+
 func FindProjectRoot(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
