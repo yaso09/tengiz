@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -73,6 +74,7 @@ func init() {
 	notificationCmd.AddCommand(notificationSetChannelCmd)
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -1480,6 +1482,135 @@ var notificationShowCmd = &cobra.Command{
 	},
 }
 
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup [app-name]",
+	Short: "Clean up unused Docker resources and orphaned state",
+	Long: `Remove unused Docker containers, images, volumes, networks, and build cache.
+Protects Tengiz-managed resources via label filtering.
+Optionally target a specific app to prune its deployments and build logs.
+
+Flags control which categories to clean. Default (no flags): --all.
+
+Examples:
+  tengiz cleanup                  # prune all resource types for all apps
+  tengiz cleanup myapp            # prune all resources + app-specific state
+  tengiz cleanup --images         # prune only unused images
+  tengiz cleanup --dry-run        # show what would be removed without doing it`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker not available: %w", err)
+		}
+		store := config.NewStoreWithEnv(dataDir, env)
+
+		all, _ := cmd.Flags().GetBool("all")
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		networks, _ := cmd.Flags().GetBool("networks")
+		buildCache, _ := cmd.Flags().GetBool("build-cache")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		keepImages, _ := cmd.Flags().GetInt("keep-images")
+		keepDeployments, _ := cmd.Flags().GetInt("keep-deployments")
+
+		if !containers && !images && !volumes && !networks && !buildCache {
+			all = true
+		}
+
+		apps, err := store.ListApps()
+		if err != nil {
+			return fmt.Errorf("failed to list apps: %w", err)
+		}
+		knownApps := make([]string, 0, len(apps))
+		for _, app := range apps {
+			knownApps = append(knownApps, app.Name)
+		}
+
+		opts := runtime.PruneOptions{
+			Containers: containers || all,
+			Images:     images || all,
+			Volumes:    volumes || all,
+			Networks:   networks || all,
+			BuildCache: buildCache || all,
+			DryRun:     dryRun,
+			KeepImages: keepImages,
+			KnownApps:  knownApps,
+		}
+
+		if dryRun {
+			fmt.Println("[tengiz] Dry-run mode — no resources will be removed")
+		}
+
+		report, err := rt.Prune(context.Background(), opts)
+		if err != nil {
+			return fmt.Errorf("prune failed: %w", err)
+		}
+
+		printCleanupReport(report)
+
+		if !dryRun {
+			if err := store.PruneOrphanedPorts(knownApps); err != nil {
+				slog.Warn("failed to prune orphaned ports", "error", err)
+			}
+
+			if opts.Images {
+				for _, app := range apps {
+					if err := store.PruneDeployments(app.Name, keepDeployments); err != nil {
+						slog.Warn("failed to prune deployments", "app", app.Name, "error", err)
+					}
+				}
+				store.PruneBuildLogsAll(keepDeployments)
+			}
+
+			if len(args) == 1 {
+				appName := args[0]
+				if _, err := store.GetApp(appName); err != nil {
+					fmt.Printf("[tengiz] App '%s' not found in store, skipping\n", appName)
+				}
+			}
+		}
+
+		return nil
+	},
+}
+
+func printCleanupReport(r *runtime.PruneReport) {
+	fmt.Println("[tengiz] Cleanup Report:")
+	if r.ContainersRemoved > 0 || r.ContainersReclaimed > 0 {
+		fmt.Printf("  Containers: %d removed, %s reclaimed\n", r.ContainersRemoved, formatBytes(r.ContainersReclaimed))
+	}
+	if r.ImagesRemoved > 0 || r.ImagesReclaimed > 0 {
+		fmt.Printf("  Images:     %d removed, %s reclaimed\n", r.ImagesRemoved, formatBytes(r.ImagesReclaimed))
+	}
+	if r.VolumesRemoved > 0 || r.VolumesReclaimed > 0 {
+		fmt.Printf("  Volumes:    %d removed, %s reclaimed\n", r.VolumesRemoved, formatBytes(r.VolumesReclaimed))
+	}
+	if r.NetworksRemoved > 0 || r.NetworksReclaimed > 0 {
+		fmt.Printf("  Networks:   %d removed, %s reclaimed\n", r.NetworksRemoved, formatBytes(r.NetworksReclaimed))
+	}
+	if r.BuildCacheReclaimed > 0 {
+		fmt.Printf("  Build Cache: %s reclaimed\n", formatBytes(r.BuildCacheReclaimed))
+	}
+	if r.ContainersRemoved == 0 && r.ImagesRemoved == 0 && r.VolumesRemoved == 0 && r.NetworksRemoved == 0 && r.BuildCacheReclaimed == 0 {
+		fmt.Println("  Nothing to clean up.")
+	}
+}
+
+func formatBytes(b int64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.2f GB", float64(b)/float64(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.2f MB", float64(b)/float64(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%.2f KB", float64(b)/float64(1<<10))
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
+}
+
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage environment variables for an application",
@@ -1802,6 +1933,15 @@ func Execute() {
 	addSecretProviderFlags(secretGetCmd)
 	addSecretProviderFlags(secretUnsetCmd)
 	addSecretProviderFlags(secretListCmd)
+	cleanupCmd.Flags().BoolP("all", "a", false, "prune all resource types")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers")
+	cleanupCmd.Flags().Bool("images", false, "prune unused images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune build cache")
+	cleanupCmd.Flags().BoolP("dry-run", "n", false, "show what would be removed without actually doing it")
+	cleanupCmd.Flags().Int("keep-images", 5, "number of recent images to keep per app")
+	cleanupCmd.Flags().Int("keep-deployments", 10, "number of recent deployments to keep per app")
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
