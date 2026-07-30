@@ -18,3 +18,25 @@ func TestStubKeepLastNImages(t *testing.T) {
 		t.Fatalf("KeepLastNImages() error = %v", err)
 	}
 }
+
+func TestStubPruneContainers(t *testing.T) {
+	m := NewStub()
+	report, err := m.PruneContainers(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("PruneContainers() error = %v", err)
+	}
+	if report.ItemsRemoved != 0 {
+		t.Errorf("ItemsRemoved = %d, want 0", report.ItemsRemoved)
+	}
+}
+
+func TestStubPruneImages(t *testing.T) {
+	m := NewStub()
+	report, err := m.PruneImages(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("PruneImages() error = %v", err)
+	}
+	if report.ItemsRemoved != 0 {
+		t.Errorf("ItemsRemoved = %d, want 0", report.ItemsRemoved)
+	}
+}

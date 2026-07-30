@@ -28,6 +28,12 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type PruneReport struct {
+	ReclaimedBytes uint64   `json:"reclaimed_bytes"`
+	ItemsRemoved   int      `json:"items_removed"`
+	Details        []string `json:"details,omitempty"`
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
@@ -46,6 +52,11 @@ type Manager interface {
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
+	PruneContainers(ctx context.Context, cfg *types.CleanupConfig) (PruneReport, error)
+	PruneImages(ctx context.Context, cfg *types.CleanupConfig) (PruneReport, error)
+	PruneVolumes(ctx context.Context, cfg *types.CleanupConfig) (PruneReport, error)
+	PruneNetworks(ctx context.Context, cfg *types.CleanupConfig) (PruneReport, error)
+	PruneBuildCache(ctx context.Context, cfg *types.CleanupConfig) (PruneReport, error)
 }
 
 type stubManager struct{}
@@ -120,4 +131,24 @@ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
 	return nil
+}
+
+func (m *stubManager) PruneContainers(ctx context.Context, cfg *types.CleanupConfig) (PruneReport, error) {
+	return PruneReport{}, nil
+}
+
+func (m *stubManager) PruneImages(ctx context.Context, cfg *types.CleanupConfig) (PruneReport, error) {
+	return PruneReport{}, nil
+}
+
+func (m *stubManager) PruneVolumes(ctx context.Context, cfg *types.CleanupConfig) (PruneReport, error) {
+	return PruneReport{}, nil
+}
+
+func (m *stubManager) PruneNetworks(ctx context.Context, cfg *types.CleanupConfig) (PruneReport, error) {
+	return PruneReport{}, nil
+}
+
+func (m *stubManager) PruneBuildCache(ctx context.Context, cfg *types.CleanupConfig) (PruneReport, error) {
+	return PruneReport{}, nil
 }
