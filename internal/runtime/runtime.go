@@ -28,6 +28,14 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type PruneReport struct {
+	Containers int64 `json:"containers"`
+	Images     int64 `json:"images"`
+	Networks   int64 `json:"networks"`
+	BuildCache int64 `json:"build_cache"`
+	BytesFreed int64 `json:"bytes_freed"`
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
@@ -46,6 +54,10 @@ type Manager interface {
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
+	PruneSystem(ctx context.Context, force bool) (PruneReport, error)
+	PruneBuildCache(ctx context.Context, force bool) (PruneReport, error)
+	PruneContainers(ctx context.Context, appName string) error
+	PruneImages(ctx context.Context, appName string, keep int) error
 }
 
 type stubManager struct{}
@@ -119,5 +131,21 @@ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int
 }
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
+	return nil
+}
+
+func (m *stubManager) PruneSystem(ctx context.Context, force bool) (PruneReport, error) {
+	return PruneReport{}, nil
+}
+
+func (m *stubManager) PruneBuildCache(ctx context.Context, force bool) (PruneReport, error) {
+	return PruneReport{}, nil
+}
+
+func (m *stubManager) PruneContainers(ctx context.Context, appName string) error {
+	return nil
+}
+
+func (m *stubManager) PruneImages(ctx context.Context, appName string, keep int) error {
 	return nil
 }
