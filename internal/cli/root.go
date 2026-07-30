@@ -67,6 +67,7 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
 	notificationCmd.AddCommand(notificationDisableCmd)
 	notificationCmd.AddCommand(notificationConfigCmd)
@@ -86,6 +87,9 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("force", false, "non-interactive mode (bypass confirmation)")
+	cleanupCmd.Flags().Bool("all", false, "also prune unused Tengiz images and build cache")
+	cleanupCmd.Flags().Bool("images", false, "prune images only (skip containers and networks)")
 }
 
 var rootCmd = &cobra.Command{
@@ -479,6 +483,110 @@ var deployCmd = &cobra.Command{
 				"image":       imageTag,
 			},
 		})
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup [app]",
+	Short: "Prune unused Docker resources to free disk space",
+	Long: `Remove unused Docker resources (containers, images, networks, build cache).
+
+Without arguments, prunes resources NOT managed by Tengiz (safe for production).
+With an app name, prunes resources specific to that app.
+With --all, also prunes dangling Tengiz images (images no longer referenced by any container).
+With --images, only prunes images (skips containers and networks).
+With --force, non-interactive mode (no confirmation prompt).`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		force, _ := cmd.Flags().GetBool("force")
+		all, _ := cmd.Flags().GetBool("all")
+		imagesOnly, _ := cmd.Flags().GetBool("images")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		if len(args) == 1 {
+			appName := args[0]
+			fmt.Printf("[tengiz] cleaning up resources for %s\n", appName)
+
+			store := config.NewStoreWithEnv(dataDir, env)
+			if _, err := store.GetApp(appName); err == nil {
+				fmt.Printf("[tengiz] app %s exists — keeping last 5 images\n", appName)
+				if err := rt.PruneImages(cmd.Context(), appName, 5); err != nil {
+					log.Printf("[tengiz] warning: image prune for %s: %v", appName, err)
+				}
+			} else {
+				fmt.Printf("[tengiz] app %s not found — removing all images\n", appName)
+				if err := rt.PruneContainers(cmd.Context(), appName); err != nil {
+					log.Printf("[tengiz] warning: container prune for %s: %v", appName, err)
+				}
+				if err := rt.PruneImages(cmd.Context(), appName, 0); err != nil {
+					log.Printf("[tengiz] warning: image prune for %s: %v", appName, err)
+				}
+			}
+
+			fmt.Printf("[tengiz] cleanup complete for %s\n", appName)
+			return nil
+		}
+
+		store := config.NewStoreWithEnv(dataDir, env)
+		storeApps, _ := store.ListApps()
+
+		if imagesOnly {
+			fmt.Println("[tengiz] pruning unused images...")
+			report, err := rt.PruneBuildCache(cmd.Context(), true)
+			if err != nil {
+				return fmt.Errorf("build cache prune: %w", err)
+			}
+			if report.BytesFreed > 0 {
+				fmt.Printf("[tengiz] freed %d bytes of build cache\n", report.BytesFreed)
+			}
+
+			if all {
+				for _, app := range storeApps {
+					if err := rt.PruneImages(cmd.Context(), app.Name, 5); err != nil {
+						log.Printf("[tengiz] warning: keeping images for %s: %v", app.Name, err)
+					}
+				}
+			}
+			fmt.Println("[tengiz] image cleanup complete")
+			return nil
+		}
+
+		fmt.Println("[tengiz] pruning non-Tengiz resources...")
+		report, err := rt.PruneSystem(cmd.Context(), force)
+		if err != nil {
+			return fmt.Errorf("system prune: %w", err)
+		}
+		if report.BytesFreed > 0 {
+			fmt.Printf("[tengiz] reclaimed %d bytes (%s)\n",
+				report.BytesFreed, formatBytes(report.BytesFreed))
+		}
+		fmt.Printf("[tengiz] removed: %d containers, %d images, %d networks\n",
+			report.Containers, report.Images, report.Networks)
+
+		if all {
+			fmt.Println("[tengiz] pruning build cache...")
+			bcReport, err := rt.PruneBuildCache(cmd.Context(), true)
+			if err != nil {
+				log.Printf("[tengiz] warning: build cache prune: %v", err)
+			} else if bcReport.BytesFreed > 0 {
+				fmt.Printf("[tengiz] freed %d bytes of build cache\n", bcReport.BytesFreed)
+			}
+
+			fmt.Println("[tengiz] pruning unused Tengiz images...")
+			for _, app := range storeApps {
+				if err := rt.PruneImages(cmd.Context(), app.Name, 5); err != nil {
+					log.Printf("[tengiz] warning: keeping images for %s: %v", app.Name, err)
+				}
+			}
+		}
+
+		fmt.Println("[tengiz] cleanup complete")
 		return nil
 	},
 }
@@ -1756,6 +1864,19 @@ func getSecretManager(cmd *cobra.Command, dataDir, env string) (*secrets.Manager
 	dopplerProject, _ := cmd.Flags().GetString("doppler-project")
 	dopplerConfig, _ := cmd.Flags().GetString("doppler-config")
 	return secrets.NewManagerFromConfig(dataDir, env, provider, vaultAddr, vaultToken, dopplerToken, dopplerProject, dopplerConfig)
+}
+
+func formatBytes(b int64) string {
+	switch {
+	case b >= 1024*1024*1024:
+		return fmt.Sprintf("%.1fGB", float64(b)/(1024*1024*1024))
+	case b >= 1024*1024:
+		return fmt.Sprintf("%.1fMB", float64(b)/(1024*1024))
+	case b >= 1024:
+		return fmt.Sprintf("%.1fKB", float64(b)/1024)
+	default:
+		return fmt.Sprintf("%dB", b)
+	}
 }
 
 func maskSecret(s string) string {

@@ -59,6 +59,30 @@ func TestMultiEnvironmentConfigMerge(t *testing.T) {
 	}
 }
 
+func TestCleanupCommandFlags(t *testing.T) {
+	cmd := cleanupCmd
+	force, _ := cmd.Flags().GetBool("force")
+	all, _ := cmd.Flags().GetBool("all")
+	images, _ := cmd.Flags().GetBool("images")
+	if force {
+		t.Error("default --force should be false")
+	}
+	if all {
+		t.Error("default --all should be false")
+	}
+	if images {
+		t.Error("default --images should be false")
+	}
+
+	cmd.ParseFlags([]string{"--force", "--all", "--images"})
+	force, _ = cmd.Flags().GetBool("force")
+	all, _ = cmd.Flags().GetBool("all")
+	images, _ = cmd.Flags().GetBool("images")
+	if !force || !all || !images {
+		t.Error("flag parsing failed")
+	}
+}
+
 func TestMultiEnvironmentStoreIsolation(t *testing.T) {
 	dir := t.TempDir()
 
