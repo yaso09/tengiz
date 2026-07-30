@@ -1646,13 +1646,39 @@ Examples:
 			return nil
 		}
 
+		env := getEnv(cmd)
+		store := config.NewStoreWithEnv(dataDir, env)
+
 		rt, err := runtime.NewDocker()
 		if err != nil {
 			return fmt.Errorf("docker: %w", err)
 		}
 
-		cfg := &types.CleanupConfig{
+		appCleanup := &types.CleanupConfig{
 			PruneDanglingOnly: true,
+		}
+		apps, _ := store.ListApps()
+		for _, app := range apps {
+			if app.Config.Cleanup != nil {
+				if app.Config.Cleanup.ContainerMaxAge != "" {
+					appCleanup.ContainerMaxAge = app.Config.Cleanup.ContainerMaxAge
+				}
+				if app.Config.Cleanup.ImageMaxAge != "" {
+					appCleanup.ImageMaxAge = app.Config.Cleanup.ImageMaxAge
+				}
+				if app.Config.Cleanup.VolumeMaxAge != "" {
+					appCleanup.VolumeMaxAge = app.Config.Cleanup.VolumeMaxAge
+				}
+				if app.Config.Cleanup.NetworkMaxAge != "" {
+					appCleanup.NetworkMaxAge = app.Config.Cleanup.NetworkMaxAge
+				}
+				if app.Config.Cleanup.BuildCacheMaxAge != "" {
+					appCleanup.BuildCacheMaxAge = app.Config.Cleanup.BuildCacheMaxAge
+				}
+				if !app.Config.Cleanup.PruneDanglingOnly {
+					appCleanup.PruneDanglingOnly = false
+				}
+			}
 		}
 
 		var totalReclaimed uint64
@@ -1665,7 +1691,7 @@ Examples:
 		if containers {
 			report := dryRunPreview("containers")
 			if !dryRun {
-				report, err = rt.PruneContainers(cmd.Context(), cfg)
+				report, err = rt.PruneContainers(cmd.Context(), appCleanup)
 				if err != nil {
 					log.Printf("[tengiz] container prune warning: %v", err)
 				}
@@ -1678,7 +1704,7 @@ Examples:
 		if images {
 			report := dryRunPreview("images")
 			if !dryRun {
-				report, err = rt.PruneImages(cmd.Context(), cfg)
+				report, err = rt.PruneImages(cmd.Context(), appCleanup)
 				if err != nil {
 					log.Printf("[tengiz] image prune warning: %v", err)
 				}
@@ -1691,7 +1717,7 @@ Examples:
 		if volumes {
 			report := dryRunPreview("volumes")
 			if !dryRun {
-				report, err = rt.PruneVolumes(cmd.Context(), cfg)
+				report, err = rt.PruneVolumes(cmd.Context(), appCleanup)
 				if err != nil {
 					log.Printf("[tengiz] volume prune warning: %v", err)
 				}
@@ -1704,7 +1730,7 @@ Examples:
 		if networks {
 			report := dryRunPreview("networks")
 			if !dryRun {
-				report, err = rt.PruneNetworks(cmd.Context(), cfg)
+				report, err = rt.PruneNetworks(cmd.Context(), appCleanup)
 				if err != nil {
 					log.Printf("[tengiz] network prune warning: %v", err)
 				}
@@ -1717,7 +1743,7 @@ Examples:
 		if buildCache {
 			report := dryRunPreview("build cache")
 			if !dryRun {
-				report, err = rt.PruneBuildCache(cmd.Context(), cfg)
+				report, err = rt.PruneBuildCache(cmd.Context(), appCleanup)
 				if err != nil {
 					log.Printf("[tengiz] build cache prune warning: %v", err)
 				}

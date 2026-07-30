@@ -4,6 +4,14 @@ import (
 	"testing"
 )
 
+func TestCleanupUsesStoreConfig(t *testing.T) {
+	cmd, _, _ := rootCmd.Find([]string{"cleanup"})
+	env := getEnv(cmd)
+	if env != "production" {
+		t.Errorf("default env = %q, want %q", env, "production")
+	}
+}
+
 func TestCleanupCmdRegistered(t *testing.T) {
 	cmd, _, err := rootCmd.Find([]string{"cleanup"})
 	if err != nil {
