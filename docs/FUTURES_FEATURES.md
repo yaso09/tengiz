@@ -252,7 +252,35 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 | — | **Persistent Storage (Volume Management)** | Yüksek | Düşük-Orta | Mükemmel | ✅ Implemented (2026-07-15) |
 | — | **Webhook ile Otomatik Deploy** | Çok Yüksek | Düşük | Mükemmel | ✅ Implemented (2026-07-17) |
 
----
+## Structured Access Log System (Proxy-Level HTTP Access Logs)
+- **Source:** Dokploy
+- **Description:** Full structured access log system for the reverse proxy. Captures every HTTP request as structured JSON: client IP, request method/path/host, downstream status/duration, origin status/duration, user-agent, content type, router name, entrypoint. Auto-rotates logs via cron (daily tail-truncation), sends SIGHUP to proxy (Traefik) on rotation. Configurable cleanup schedule through platform settings.
+- **Why add to Tengiz:** Tengiz has basic log streaming per container, but zero proxy-level access logging. Structured access logs enable analytics (request count, latency percentiles, error rates), security auditing (who hit what endpoint, brute force detection), and debugging (trace request through proxy to origin). The Go proxy (`httputil.ReverseProxy`) can log every request with `log/slog` in structured JSON Lines format. Log rotation via cron prevents disk filling. This is a fundamental observability tool for production deployments.
+- **Detected:** 2026-07-30
+
+## Forward Auth (OIDC Proxy Authentication Middleware)
+- **Source:** Dokploy
+- **Description:** Deploys an `oauth2-proxy` sidecar container configured with OIDC (any OpenID Connect provider: Google, GitHub, Azure AD, Keycloak, Auth0). At the reverse proxy level, all requests to a protected domain are intercepted and redirected to the OIDC provider for authentication before traffic reaches the application. Configurable cookie domains, email domain allowlists, scope selection, and TLS settings. Full lifecycle management: create, update, remove, status check.
+- **Why add to Tengiz:** Zero-config authentication for ANY application, with no code changes. Currently Tengiz has HTTP Basic Auth (#51, simple username/password) and platform-level auth ideas (#82, #157), but no OIDC-based proxy auth. Forward Auth is the industry-standard pattern for protecting staging/preview/internal apps (used by Kubernetes ingress, Traefik, nginx). Tengiz's proxy can check a cookie/session before proxying, or delegate auth to a sidecar. `.tengiz.yaml`'da `auth.forward.oidc` ile yapılandırılır. Complements existing auth rate limiting (#58) and well-known paths (#59).
+- **Detected:** 2026-07-30
+
+## Volume Backup & Restore with S3 Destinations
+- **Source:** Dokploy
+- **Description:** Scheduled backup of Docker named volumes to S3-compatible storage destinations (AWS S3, MinIO, DigitalOcean Spaces, Backblaze B2). Features: rclone-based upload, optional app shutdown during backup for data consistency, file-based locking for concurrent backup prevention, per-backup prefix/directory structure, automated cron scheduling with init at startup, restore from backup, per-volume retention. Supports both Docker Compose and standalone app volumes.
+- **Why add to Tengiz:** App volumes store persistent data (databases, uploads, user content). Currently Tengiz has volume management (#22) but no backup capability. This is different from #23 (System Backup — which backs up Tengiz state) and #127 (Database Backups — which are DB-specific and use pg_dump/mysqldump). Volume backup is a general mechanism that works for any Docker volume regardless of content. Combined with the existing `destination` concept (#186), it provides a complete data protection story. Implementation: `tengiz volume backup <volume> [--destination s3://bucket]` and `tengiz volume restore <backup>`.
+- **Detected:** 2026-07-30
+
+## Server Security Audit (SSH-Based Posture Assessment)
+- **Source:** Dokploy
+- **Description:** Automated SSH-based security audit of managed servers. Checks: UFW firewall status (installed, active, default incoming policy), SSH daemon config (key-based auth enabled, root login policy, password authentication, PAM status), Fail2ban status (installed, enabled, active, SSH jail status, aggressive mode). Returns structured JSON results for programmatic consumption. Designed as a first-run diagnostic tool.
+- **Why add to Tengiz:** Single-server deployment security is critical. Currently Tengiz has no server security assessment capability. This provides a quick posture check: is the firewall on? Is SSH key-only? Is Fail2ban protecting against brute force? Different from #182 (Server Security Hardening — which is about setup/configuration). A security audit is a read-only check that can be run before production deployment. Implementation: `tengiz server audit` runs SSH checks and returns a pass/fail report with recommendations. Complements `tengiz doctor` (#114, system readiness check) with security-specific checks.
+- **Detected:** 2026-07-30
+
+## CDN-Hosted Template Registry with Auto-Cache
+- **Source:** Dokploy
+- **Description:** Remote template registry served from a CDN (`templates.dokploy.com`). Templates defined in TOML format (`template.toml`) with metadata (name, description, version, tags, logo), variables for user configuration, and linked `docker-compose.yml`. System auto-fetches templates on demand, caches them to local disk, falls back to cache on network failure. Includes structured `fetchTemplatesList`, `fetchTemplateFiles`, `fetchTemplateLogo` APIs with timeout handling and MIME type detection.
+- **Why add to Tengiz:** While One-Click Service Templates (#64, #104) are already listed, Dokploy's specific architecture — CDN-hosted registry, TOML-based definitions, auto-cache with fallback — is a superior implementation pattern worth documenting. Tengiz's template system should follow this pattern rather than bundling templates in the binary. Go's `embed` package can bundle a default template index, with CDN fetch for updates. `tengiz service list` fetches from CDN, `tengiz service create wordpress` grabs the compose file and provisions. Auto-cache handles offline scenarios gracefully.
+- **Detected:** 2026-07-30
 
 ## Özellikler
 
