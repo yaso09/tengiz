@@ -23,6 +23,32 @@ type LogOptions struct {
 	Grep   string
 }
 
+type PruneOptions struct {
+	Containers bool
+	Images     bool
+	Volumes    bool
+	Networks   bool
+	BuildCache bool
+	All        bool
+	DryRun     bool
+	KeepImages int
+	KnownApps  []string
+}
+
+type PruneReport struct {
+	ContainersRemoved   int
+	ContainersReclaimed int64
+	ImagesRemoved       int
+	ImagesReclaimed     int64
+	VolumesRemoved      int
+	VolumesReclaimed    int64
+	NetworksRemoved     int
+	NetworksReclaimed   int64
+	BuildCacheReclaimed int64
+	OrphanedContainers  int
+	OrphanedImages      int
+}
+
 type RunOptions struct {
 	Interactive bool
 	ExtraEnv    map[string]string
@@ -46,6 +72,7 @@ type Manager interface {
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
+	Prune(ctx context.Context, opts PruneOptions) (*PruneReport, error)
 }
 
 type stubManager struct{}
@@ -120,4 +147,8 @@ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
 	return nil
+}
+
+func (m *stubManager) Prune(ctx context.Context, opts PruneOptions) (*PruneReport, error) {
+	return &PruneReport{}, nil
 }

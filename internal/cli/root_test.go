@@ -98,6 +98,7 @@ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppCon
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRTForDeploy) Prune(ctx context.Context, opts runtime.PruneOptions) (*runtime.PruneReport, error) { return &runtime.PruneReport{}, nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}
@@ -354,6 +355,28 @@ func TestLogsCmdFlagParsing(t *testing.T) {
 		if !strings.Contains(helpText, flag) {
 			t.Errorf("help text missing flag %q", flag)
 		}
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		input    int64
+		expected string
+	}{
+		{0, "0 B"},
+		{500, "500 B"},
+		{1536, "1.50 KB"},
+		{1048576, "1.00 MB"},
+		{1073741824, "1.00 GB"},
+		{3221225472, "3.00 GB"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			result := formatBytes(tt.input)
+			if result != tt.expected {
+				t.Errorf("formatBytes(%d) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
 	}
 }
 
