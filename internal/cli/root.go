@@ -86,6 +86,14 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("all", false, "prune all resource types")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers")
+	cleanupCmd.Flags().Bool("images", false, "prune unused images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune builder cache")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without doing it")
 }
 
 var rootCmd = &cobra.Command{
@@ -1595,6 +1603,153 @@ var configShowCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Clean up unused Docker resources",
+	Long: `Remove unused Docker containers, images, volumes, networks, and build cache.
+Tengiz-managed resources (labeled with tengiz-app) are preserved.
+
+Examples:
+  tengiz cleanup --containers                   # prune only exited containers
+  tengiz cleanup --all                           # prune everything
+  tengiz cleanup --all --dry-run                 # show what would be removed
+  tengiz cleanup --images --build-cache          # prune images + build cache
+`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		all, _ := cmd.Flags().GetBool("all")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		networks, _ := cmd.Flags().GetBool("networks")
+		buildCache, _ := cmd.Flags().GetBool("build-cache")
+
+		if all {
+			containers = true
+			images = true
+			volumes = true
+			networks = true
+			buildCache = true
+		}
+
+		if !containers && !images && !volumes && !networks && !buildCache {
+			fmt.Println("No cleanup categories selected. Use --all or specific flags:")
+			fmt.Println("  --containers    Remove stopped containers")
+			fmt.Println("  --images        Remove unused images")
+			fmt.Println("  --volumes       Remove unused volumes")
+			fmt.Println("  --networks      Remove unused networks")
+			fmt.Println("  --build-cache   Remove builder cache")
+			fmt.Println("  --dry-run       Show what would be removed without doing it")
+			return nil
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		cfg := &types.CleanupConfig{
+			PruneDanglingOnly: true,
+		}
+
+		var totalReclaimed uint64
+		var totalItems int
+
+		if dryRun {
+			fmt.Println("[tengiz] DRY RUN — no resources will be removed")
+		}
+
+		if containers {
+			report := dryRunPreview("containers")
+			if !dryRun {
+				report, err = rt.PruneContainers(cmd.Context(), cfg)
+				if err != nil {
+					log.Printf("[tengiz] container prune warning: %v", err)
+				}
+				totalReclaimed += report.ReclaimedBytes
+				totalItems += report.ItemsRemoved
+			}
+			fmt.Printf("  containers: %d removed, %s reclaimed\n", report.ItemsRemoved, formatBytes(report.ReclaimedBytes))
+		}
+
+		if images {
+			report := dryRunPreview("images")
+			if !dryRun {
+				report, err = rt.PruneImages(cmd.Context(), cfg)
+				if err != nil {
+					log.Printf("[tengiz] image prune warning: %v", err)
+				}
+				totalReclaimed += report.ReclaimedBytes
+				totalItems += report.ItemsRemoved
+			}
+			fmt.Printf("  images:     %d removed, %s reclaimed\n", report.ItemsRemoved, formatBytes(report.ReclaimedBytes))
+		}
+
+		if volumes {
+			report := dryRunPreview("volumes")
+			if !dryRun {
+				report, err = rt.PruneVolumes(cmd.Context(), cfg)
+				if err != nil {
+					log.Printf("[tengiz] volume prune warning: %v", err)
+				}
+				totalReclaimed += report.ReclaimedBytes
+				totalItems += report.ItemsRemoved
+			}
+			fmt.Printf("  volumes:    %d removed, %s reclaimed\n", report.ItemsRemoved, formatBytes(report.ReclaimedBytes))
+		}
+
+		if networks {
+			report := dryRunPreview("networks")
+			if !dryRun {
+				report, err = rt.PruneNetworks(cmd.Context(), cfg)
+				if err != nil {
+					log.Printf("[tengiz] network prune warning: %v", err)
+				}
+				totalReclaimed += report.ReclaimedBytes
+				totalItems += report.ItemsRemoved
+			}
+			fmt.Printf("  networks:   %d removed, %s reclaimed\n", report.ItemsRemoved, formatBytes(report.ReclaimedBytes))
+		}
+
+		if buildCache {
+			report := dryRunPreview("build cache")
+			if !dryRun {
+				report, err = rt.PruneBuildCache(cmd.Context(), cfg)
+				if err != nil {
+					log.Printf("[tengiz] build cache prune warning: %v", err)
+				}
+				totalReclaimed += report.ReclaimedBytes
+				totalItems += report.ItemsRemoved
+			}
+			fmt.Printf("  build cache: %d removed, %s reclaimed\n", report.ItemsRemoved, formatBytes(report.ReclaimedBytes))
+		}
+
+		if !dryRun {
+			fmt.Printf("[tengiz] total: %d items removed, %s reclaimed\n", totalItems, formatBytes(totalReclaimed))
+		}
+		return nil
+	},
+}
+
+func dryRunPreview(kind string) runtime.PruneReport {
+	fmt.Printf("[tengiz] would prune %s (use --dry-run to preview again)\n", kind)
+	return runtime.PruneReport{}
+}
+
+func formatBytes(b uint64) string {
+	switch {
+	case b >= 1024*1024*1024:
+		return fmt.Sprintf("%.1f GB", float64(b)/(1024*1024*1024))
+	case b >= 1024*1024:
+		return fmt.Sprintf("%.1f MB", float64(b)/(1024*1024))
+	case b >= 1024:
+		return fmt.Sprintf("%.1f KB", float64(b)/1024)
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
 }
 
 var secretCmd = &cobra.Command{
