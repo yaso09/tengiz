@@ -1,5 +1,35 @@
 # Tengiz Gelecek Özellikler
 
+## Service Update Override (Raw Docker API Passthrough)
+- **Source:** CapRover
+- **Description:** An escape hatch where users inject raw Docker Service Update YAML/JSON to customize container behavior beyond what Tengiz explicitly exposes. Supports: resource limits, cap-add/drop, custom DNS config, custom mounts (bind/volumes), custom command/args, read-only root filesystem, placement constraints, log driver config, rolling update strategy, rollback config, and any other Docker API field. The override is merged with Tengiz's generated config. Modeled on CapRover's `serviceUpdateOverride` feature.
+- **Why add to Tengiz:** Instead of building CLI/UI for every Docker feature, a single passthrough covers all of them. Power users get access to any Docker API field without waiting for Tengiz to add support. Complements Custom Docker Options (#36, CLI flags) at the Docker API level — this is more powerful and structured. `.tengiz.yaml`'da `service_update_override:` bölümü ile raw YAML/JSON tanımlanır. Low implementation effort (YAML merge into Docker API call), high power-user value.
+- **Detected:** 2026-07-30
+
+## Inline Dockerfile Definition (dockerfileLines)
+- **Source:** CapRover
+- **Description:** Define a Dockerfile inline as a JSON array of Dockerfile instructions in the app config, eliminating the need for a separate Dockerfile in the project root. CapRover's `captain-definition.json` supports `dockerfileLines` as an alternative to `dockerfilePath`. Each array element is one Dockerfile line (`["FROM node:18", "WORKDIR /app", ...]`). The platform concatenates them at build time.
+- **Why add to Tengiz:** Useful for: simple apps that don't want a Dockerfile cluttering the repo, CI/CD pipelines generating dynamic Dockerfiles, quick prototype deploys from existing images with small modifications, and deployment of pre-built artifacts with a thin container wrapper. Different from Custom Build Commands (#12) which overrides install/build/start — this defines the entire Dockerfile. `.tengiz.yaml`'da `dockerfile_lines:` listesi olarak tanımlanır. Low effort (join array → write temp Dockerfile → build), high convenience value.
+- **Detected:** 2026-07-30
+
+## Tarball Upload Deploy (Archive-Based Deployment)
+- **Source:** CapRover
+- **Description:** Deploy an app by uploading a `.tar` or `.tar.gz` archive containing the application source code. CapRover accepts tarball uploads via the web dashboard as an alternative to Git-based or CLI-based deploys. Tengiz could extend this to CLI: `tengiz deploy --archive ./app.tar.gz` extracts and deploys the archive contents. Supports `.tar`, `.tar.gz`, `.tgz`, and `.zip` formats.
+- **Why add to Tengiz:** Enables deployment from environments without Git: CI/CD artifacts from platforms that produce tarballs, quick deploys from local directories without Git init, and integration with non-Git workflows (FTP uploads, S3 artifact stores, npm pack output). Different from Explicit Image Name Deploy (#13, pre-built image deploy) — this deploys source code from an archive. Different from our deploy from directory — this accepts a compressed package. Implementation: extract archive to temp dir, run existing deploy pipeline. Low-medium effort, fills a CI/CD gap.
+- **Detected:** 2026-07-30
+
+## Pre-Deploy Script Hooks (Programmatic Config Mutation)
+- **Source:** CapRover
+- **Description:** A JavaScript function that runs before every service update, receiving the app config object and the Docker service update object. Can modify them arbitrarily — inject labels, modify environment variables, call external APIs, add sidecar annotations. Has access to all Node.js dependencies platform-side. The function returns the modified Docker update object which is then used for deployment.
+- **Why add to Tengiz:** Extends Pre-Deploy Hooks (#15, shell commands) with a full programming environment for config mutation. Use cases: auto-inject platform labels based on external state, conditionally modify resource limits based on time of day, call an external API for pre-deploy validation, dynamically generate environment variables. Implementation: embed a JS runtime (goja) or shell out to a script with JSON stdin/stdout. The hook receives `{app, dockerConfig}` on stdin and must output the modified `dockerConfig`. `.tengiz.yaml`'da `pre_deploy_script: path/to/script.js`. Medium effort, differentiator over shell-only hook systems.
+- **Detected:** 2026-07-30
+
+## Pro Features / Enterprise Tiering System
+- **Source:** CapRover
+- **Description:** CapRover's codebase contains an `IProFeatures` interface and `ProDataStore` for enterprise feature gating. Features flagged as "pro" are conditionally enabled, allowing CapRover to offer a community edition with core features and a paid enterprise edition with advanced features (SSO, audit logging, RBAC, priority support, advanced backup). Gating is per-server/app and persisted in the data store.
+- **Why add to Tengiz:** Establishes a sustainable business model for Tengiz development. Features that could be gated: OIDC/SSO (#128), RBAC (#196), Audit Trail (#48), Granular Scoped API Keys (#78), Prometheus Metrics (#47), Forward Auth (#41). Implementation: a `features` package with a `FeatureSet` interface, CLI-level check `if !License.HasFeature("sso")`, and a license key file at `~/.tengiz/license.key`. Community edition is fully functional for single-user/small-team; enterprise adds team management and enterprise security features. The Go `tags` build system or runtime config check both work. This is the foundation for Tengiz's long-term sustainability.
+- **Detected:** 2026-07-30
+
 Bu dosya, günlük analiz workflow'u tarafından otomatik olarak güncellenir.
 Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan özellikler buraya kaydedilir.
 
