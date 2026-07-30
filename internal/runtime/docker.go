@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -682,6 +684,119 @@ func (g *grepReader) Close() error {
 	return g.reader.Close()
 }
 
+func pruneArgsForCategory(category string, opts PruneOptions) []string {
+	args := []string{category, "prune"}
+	if !opts.DryRun {
+		args = append(args, "-f")
+	}
+	switch category {
+	case "container", "image", "volume", "network":
+		args = append(args, "--filter", "label!=tengiz-app")
+	}
+	if category == "image" && opts.KeepImages > 0 {
+		args = append(args, "--filter", "until=24h")
+	}
+	return args
+}
+
 func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (*PruneReport, error) {
-	return &PruneReport{}, nil
+	report := &PruneReport{}
+
+	categories := []string{}
+	if opts.All || opts.Containers {
+		categories = append(categories, "container")
+	}
+	if opts.All || opts.Images {
+		categories = append(categories, "image")
+	}
+	if opts.All || opts.Volumes {
+		categories = append(categories, "volume")
+	}
+	if opts.All || opts.Networks {
+		categories = append(categories, "network")
+	}
+	if opts.All || opts.BuildCache {
+		categories = append(categories, "builder")
+	}
+
+	for _, cat := range categories {
+		args := pruneArgsForCategory(cat, opts)
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			slog.Warn("docker prune failed", "category", cat, "error", err, "output", string(output))
+			continue
+		}
+		parsePruneOutput(cat, string(output), report)
+	}
+
+	return report, nil
+}
+
+func parsePruneOutput(category, output string, report *PruneReport) {
+	var reclaimed int64
+	switch category {
+	case "container":
+		report.ContainersRemoved = countRemoved(output)
+		reclaimed = parseReclaimedSpace(output)
+		report.ContainersReclaimed = reclaimed
+	case "image":
+		report.ImagesRemoved = countRemoved(output)
+		reclaimed = parseReclaimedSpace(output)
+		report.ImagesReclaimed = reclaimed
+	case "volume":
+		report.VolumesRemoved = countRemoved(output)
+		reclaimed = parseReclaimedSpace(output)
+		report.VolumesReclaimed = reclaimed
+	case "network":
+		report.NetworksRemoved = countRemoved(output)
+		reclaimed = parseReclaimedSpace(output)
+		report.NetworksReclaimed = reclaimed
+	case "builder":
+		reclaimed = parseReclaimedSpace(output)
+		report.BuildCacheReclaimed = reclaimed
+	}
+}
+
+func countRemoved(output string) int {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	count := 0
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "Total") && !strings.HasPrefix(line, "Deleted") {
+			count++
+		}
+	}
+	return count
+}
+
+func parseReclaimedSpace(output string) int64 {
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, "reclaimed") || strings.Contains(line, "Total:") {
+			return parseSize(strings.TrimSpace(line))
+		}
+	}
+	return 0
+}
+
+func parseSize(s string) int64 {
+	re := regexp.MustCompile(`([\d.]+)\s*(kB|MB|GB|TB|B)`)
+	matches := re.FindStringSubmatch(s)
+	if len(matches) < 3 {
+		return 0
+	}
+	val, _ := strconv.ParseFloat(matches[1], 64)
+	switch matches[2] {
+	case "B":
+		return int64(val)
+	case "kB":
+		return int64(val * 1024)
+	case "MB":
+		return int64(val * 1024 * 1024)
+	case "GB":
+		return int64(val * 1024 * 1024 * 1024)
+	case "TB":
+		return int64(val * 1024 * 1024 * 1024 * 1024)
+	}
+	return 0
 }
