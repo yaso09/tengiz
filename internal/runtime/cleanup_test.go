@@ -18,3 +18,11 @@ func TestStubKeepLastNImages(t *testing.T) {
 		t.Fatalf("KeepLastNImages() error = %v", err)
 	}
 }
+
+func TestPruneReport_DryRun(t *testing.T) {
+	r := &dockerRuntime{}
+	_, err := r.PruneContainers(context.Background(), "production", true)
+	if err != nil {
+		t.Fatalf("PruneContainers dry run failed: %v", err)
+	}
+}
