@@ -789,22 +789,22 @@ func parseReclaimedSpace(output string) int64 {
 }
 
 func parseSize(s string) int64 {
-	re := regexp.MustCompile(`([\d.]+)\s*(kB|MB|GB|TB|B)`)
+	re := regexp.MustCompile(`(?i)([\d.]+)\s*(kb|mb|gb|tb|b)`)
 	matches := re.FindStringSubmatch(s)
 	if len(matches) < 3 {
 		return 0
 	}
 	val, _ := strconv.ParseFloat(matches[1], 64)
-	switch matches[2] {
-	case "B":
+	switch strings.ToLower(matches[2]) {
+	case "b":
 		return int64(val)
-	case "kB":
+	case "kb":
 		return int64(val * 1024)
-	case "MB":
+	case "mb":
 		return int64(val * 1024 * 1024)
-	case "GB":
+	case "gb":
 		return int64(val * 1024 * 1024 * 1024)
-	case "TB":
+	case "tb":
 		return int64(val * 1024 * 1024 * 1024 * 1024)
 	}
 	return 0
