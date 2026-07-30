@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -75,6 +76,30 @@ func TestStubPruneReturnsEmptyReport(t *testing.T) {
 	}
 	if report == nil {
 		t.Fatal("expected non-nil report")
+	}
+}
+
+func TestParseSize(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected int64
+	}{
+		{"Total reclaimed space: 1.23GB", 1320702443},
+		{"Total: 500.0MB", 524288000},
+		{"Total: 1024KB", 1048576},
+		{"Total reclaimed space: 0B", 0},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%d", tt.expected), func(t *testing.T) {
+			result := parseSize(tt.input)
+			diff := result - tt.expected
+			if diff < 0 {
+				diff = -diff
+			}
+			if diff > 10 {
+				t.Errorf("parseSize(%q) = %d, want %d", tt.input, result, tt.expected)
+			}
+		})
 	}
 }
 

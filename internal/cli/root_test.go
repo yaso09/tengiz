@@ -358,6 +358,28 @@ func TestLogsCmdFlagParsing(t *testing.T) {
 	}
 }
 
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		input    int64
+		expected string
+	}{
+		{0, "0 B"},
+		{500, "500 B"},
+		{1536, "1.50 KB"},
+		{1048576, "1.00 MB"},
+		{1073741824, "1.00 GB"},
+		{3221225472, "3.00 GB"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			result := formatBytes(tt.input)
+			if result != tt.expected {
+				t.Errorf("formatBytes(%d) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	configCmd, _, err := rootCmd.Find([]string{"config"})
 	if err != nil {
