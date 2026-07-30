@@ -215,6 +215,9 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		if err := p.rt.KeepLastNImages(ctx, appName, 5); err != nil {
 			log.Printf("[tengiz] warning: image cleanup: %v", err)
 		}
+		if err := p.rt.KeepLastNContainers(ctx, appName, 5); err != nil {
+			log.Printf("[tengiz] warning: container cleanup: %v", err)
+		}
 
 		log.Printf("[tengiz] deployed: %s via git push", appName)
 
@@ -312,11 +315,14 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		GitProvider:      provider,
 	})
 
-	if err := p.rt.KeepLastNImages(ctx, appName, 5); err != nil {
-		log.Printf("[tengiz] warning: image cleanup: %v", err)
-	}
+		if err := p.rt.KeepLastNImages(ctx, appName, 5); err != nil {
+			log.Printf("[tengiz] warning: image cleanup: %v", err)
+		}
+		if err := p.rt.KeepLastNContainers(ctx, appName, 5); err != nil {
+			log.Printf("[tengiz] warning: container cleanup: %v", err)
+		}
 
-	log.Printf("[tengiz] deployed (zero-downtime) via git push: %s", appName)
+		log.Printf("[tengiz] deployed (zero-downtime) via git push: %s", appName)
 
 	notifyMgr.SendAsync(ctx, types.NotificationEvent{
 		Type:    types.EventDeploySuccess,

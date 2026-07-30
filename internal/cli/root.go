@@ -354,6 +354,9 @@ var deployCmd = &cobra.Command{
 			if err := rt.KeepLastNImages(context.Background(), cfg.Name, 5); err != nil {
 				log.Printf("[tengiz] warning: image cleanup: %v", err)
 			}
+			if err := rt.KeepLastNContainers(context.Background(), cfg.Name, 5); err != nil {
+				log.Printf("[tengiz] warning: container cleanup: %v", err)
+			}
 
 			if err := proxy.RegisterRouteWithProxy(cfg.Name, port); err != nil {
 				log.Printf("[tengiz] proxy not available (route will be registered on proxy start): %v", err)
@@ -473,6 +476,9 @@ var deployCmd = &cobra.Command{
 
 		if err := rt.KeepLastNImages(context.Background(), cfg.Name, 5); err != nil {
 			log.Printf("[tengiz] warning: image cleanup: %v", err)
+		}
+		if err := rt.KeepLastNContainers(context.Background(), cfg.Name, 5); err != nil {
+			log.Printf("[tengiz] warning: container cleanup: %v", err)
 		}
 
 		fmt.Printf("[tengiz] deployed (zero-downtime): %s at http://%s.tengiz.local:%d\n",
@@ -1017,6 +1023,13 @@ var rollbackCmd = &cobra.Command{
 			Config:           app.Config,
 			DeploymentSuffix: prevDep.ID,
 		})
+
+		if err := rt.KeepLastNContainers(context.Background(), appName, 5); err != nil {
+			log.Printf("[tengiz] warning: container cleanup: %v", err)
+		}
+		if err := rt.KeepLastNImages(context.Background(), appName, 5); err != nil {
+			log.Printf("[tengiz] warning: image cleanup: %v", err)
+		}
 
 		fmt.Printf("[tengiz] rolled back %s to deployment %s (port %d)\n", appName, prevDep.ID, newPort)
 		return nil
