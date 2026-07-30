@@ -764,6 +764,10 @@ var rmCmd = &cobra.Command{
 			}
 		}
 
+		if err := rt.PruneImages(cmd.Context(), appName, 0); err != nil {
+			log.Printf("[tengiz] warning: image cleanup for %s: %v", appName, err)
+		}
+
 		fmt.Printf("[tengiz] removed: %s\n", appName)
 		return nil
 	},
