@@ -65,6 +65,7 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
@@ -86,6 +87,8 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without removing anything")
+	cleanupCmd.Flags().Bool("all", false, "also remove all unused images (keeps tengiz-apps/* images for rollback)")
 }
 
 var rootCmd = &cobra.Command{
@@ -1159,6 +1162,67 @@ Examples:
 
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Clean up unused Docker resources",
+	Long: `Remove unused Docker containers, images, networks, volumes, and build cache
+to reclaim disk space.
+
+Tengiz-managed resources are always protected:
+  - Containers with the tengiz-app label are never removed, even when stopped
+    by scale-to-zero or running as preview deployments.
+  - Images tagged tengiz-apps/* are kept for rollback.
+
+Use --dry-run to preview what would be removed.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		allImages, _ := cmd.Flags().GetBool("all")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		report, err := rt.Prune(cmd.Context(), runtime.PruneOptions{DryRun: dryRun, AllImages: allImages})
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+		fmt.Print(pruneReportString(report))
+		return nil
+	},
+}
+
+func pruneReportString(report runtime.PruneReport) string {
+	var b strings.Builder
+	if report.DryRun {
+		b.WriteString("[tengiz] docker cleanup (dry-run)\n")
+		b.WriteString(fmt.Sprintf("  containers: %d would be removed\n", report.Containers))
+		b.WriteString(fmt.Sprintf("  images: %d would be removed\n", report.Images))
+		b.WriteString(fmt.Sprintf("  networks: %d would be removed\n", report.Networks))
+		b.WriteString(fmt.Sprintf("  volumes: %d would be removed\n", report.Volumes))
+		b.WriteString(fmt.Sprintf("  build cache: %s present\n", report.BuildCache))
+		return b.String()
+	}
+
+	b.WriteString("[tengiz] docker cleanup complete\n")
+	b.WriteString(fmt.Sprintf("  containers removed: %d\n", report.Containers))
+	b.WriteString(fmt.Sprintf("  images removed: %d\n", report.Images))
+	b.WriteString(fmt.Sprintf("  networks removed: %d\n", report.Networks))
+	b.WriteString(fmt.Sprintf("  volumes removed: %d\n", report.Volumes))
+	b.WriteString(fmt.Sprintf("  build cache: %s reclaimed\n", report.BuildCache))
+
+	var reclaimed []string
+	for _, cat := range []string{"containers", "images", "networks", "volumes", "build-cache"} {
+		if v := report.Reclaimed[cat]; v != "" && v != "0B" {
+			reclaimed = append(reclaimed, fmt.Sprintf("%s (%s)", v, cat))
+		}
+	}
+	if len(reclaimed) > 0 {
+		b.WriteString(fmt.Sprintf("  total reclaimed space: %s\n", strings.Join(reclaimed, ", ")))
+	}
+	return b.String()
 }
 
 var gitCmd = &cobra.Command{

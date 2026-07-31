@@ -52,9 +52,7 @@ func TestContainerPruneArgs(t *testing.T) {
 	})
 	assertArgs(t, containerPruneArgs(true), []string{
 		"container", "ls", "-a",
-		"--filter", "label!=tengiz-app",
-		"--filter", "label!=tengiz-env",
-		"--format", "{{.ID}}\t{{.Status}}",
+		"--format", "{{.ID}}\t{{.Status}}\t{{.Labels}}",
 	})
 }
 
@@ -117,9 +115,34 @@ func TestCountLines(t *testing.T) {
 }
 
 func TestCountPrunableContainers(t *testing.T) {
-	out := "9f4c1a2b3c4d\tUp 3 hours\n7a1b2c3d4e5f\tExited (0) 2 hours ago\n6b5a4c3d2e1f\tCreated 5 minutes ago\n5a1b2c3d4e5f\tRestarting (1) 1 second ago\n"
+	out := "9f4c1a2b3c4d\tUp 3 hours\t\n7a1b2c3d4e5f\tExited (0) 2 hours ago\t\n6b5a4c3d2e1f\tCreated 5 minutes ago\t\n5a1b2c3d4e5f\tRestarting (1) 1 second ago\t\n"
 	if got := countPrunableContainers(out); got != 2 {
 		t.Errorf("countPrunableContainers() = %d, want 2", got)
+	}
+}
+
+func TestCountPrunableContainersSkipsTengizLabeled(t *testing.T) {
+	out := "7a1b2c3d4e5f\tExited (0) 2 hours ago\t\n" +
+		"6b5a4c3d2e1f\tExited (0) 1 hour ago\ttengiz-app=myapp,tengiz-env=production\n" +
+		"5a1b2c3d4e5f\tExited (0) 30 minutes ago\ttengiz-env=staging\n" +
+		"4a1b2c3d4e5f\tCreated 5 minutes ago\tother-label=value\n"
+	if got := countPrunableContainers(out); got != 2 {
+		t.Errorf("countPrunableContainers() = %d, want 2 (labeled tengiz containers skipped)", got)
+	}
+}
+
+func TestHasLabel(t *testing.T) {
+	if !hasLabel("tengiz-app=myapp,tengiz-env=production", "tengiz-app") {
+		t.Error("hasLabel() did not find tengiz-app")
+	}
+	if !hasLabel("tengiz-env=staging", "tengiz-env") {
+		t.Error("hasLabel() did not find tengiz-env")
+	}
+	if hasLabel("", "tengiz-app") {
+		t.Error("hasLabel() matched empty labels")
+	}
+	if hasLabel("other=value", "tengiz-app") {
+		t.Error("hasLabel() matched unrelated label")
 	}
 }
 
@@ -208,7 +231,7 @@ func TestRunPruneReal(t *testing.T) {
 
 func TestRunPruneDryRun(t *testing.T) {
 	outputs := map[string]string{
-		"container ls -a --filter label!=tengiz-app --filter label!=tengiz-env --format {{.ID}}\t{{.Status}}": "9f4c1a2b3c4d\tUp 3 hours\n7a1b2c3d4e5f\tExited (0) 2 hours ago\n",
+		"container ls -a --format {{.ID}}\t{{.Status}}\t{{.Labels}}": "9f4c1a2b3c4d\tUp 3 hours\t\n7a1b2c3d4e5f\tExited (0) 2 hours ago\t\na1b2c3d4e5f6\tExited (0) 1 hour ago\ttengiz-app=myapp,tengiz-env=production\n",
 		"image ls --filter dangling=true -q": "abc123def456\n",
 		"network ls -q":                     "xyz789\nabc123\n",
 		"volume ls -q":                      "",
@@ -228,7 +251,7 @@ func TestRunPruneDryRun(t *testing.T) {
 		t.Error("report.DryRun = false, want true")
 	}
 	if report.Containers != 1 {
-		t.Errorf("Containers = %d, want 1 (only the Exited container)", report.Containers)
+		t.Errorf("Containers = %d, want 1 (only the Exited unlabeled container)", report.Containers)
 	}
 	if report.Images != 1 {
 		t.Errorf("Images = %d, want 1", report.Images)
@@ -242,7 +265,7 @@ func TestRunPruneDryRun(t *testing.T) {
 	if report.BuildCache != "1.2GB" {
 		t.Errorf("BuildCache = %q, want 1.2GB", report.BuildCache)
 	}
-	assertArgs(t, calls[0], []string{"container", "ls", "-a", "--filter", "label!=tengiz-app", "--filter", "label!=tengiz-env", "--format", "{{.ID}}\t{{.Status}}"})
+	assertArgs(t, calls[0], []string{"container", "ls", "-a", "--format", "{{.ID}}\t{{.Status}}\t{{.Labels}}"})
 	assertArgs(t, calls[4], []string{"system", "df", "--format", "{{.Type}}|{{.Size}}"})
 }
 

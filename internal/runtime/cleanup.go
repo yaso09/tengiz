@@ -155,12 +155,12 @@ func pruneSteps() []pruneStep {
 
 // containerPruneArgs prunes stopped containers (or lists them in dry-run mode).
 // Containers carrying the tengiz-app or tengiz-env label are always excluded.
+// docker container ls does not support label!= filters, so dry-run mode lists
+// the labels and countPrunableContainers filters them out.
 func containerPruneArgs(dryRun bool) []string {
 	if dryRun {
 		return []string{"container", "ls", "-a",
-			"--filter", fmt.Sprintf("label!=%s", labelKey),
-			"--filter", fmt.Sprintf("label!=%s", envLabelKey),
-			"--format", "{{.ID}}\t{{.Status}}"}
+			"--format", "{{.ID}}\t{{.Status}}\t{{.Labels}}"}
 	}
 	return []string{"container", "prune", "-f",
 		"--filter", fmt.Sprintf("label!=%s", labelKey),
@@ -234,8 +234,9 @@ func countLines(output string) int {
 	return count
 }
 
-// countPrunableContainers counts lines in a "{{.ID}}\t{{.Status}}" listing whose
-// status is not running. Only used for dry-run previews.
+// countPrunableContainers counts lines in a "{{.ID}}\t{{.Status}}[\t{{.Labels}}]"
+// listing whose status is not running and which do not carry the tengiz-app or
+// tengiz-env label. Only used for dry-run previews.
 func countPrunableContainers(output string) int {
 	count := 0
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
@@ -243,17 +244,32 @@ func countPrunableContainers(output string) int {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) != 2 {
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) < 2 {
 			continue
 		}
 		status := parts[1]
 		if strings.HasPrefix(status, "Up ") || strings.HasPrefix(status, "Restarting ") {
 			continue
 		}
+		if len(parts) == 3 && (hasLabel(parts[2], labelKey) || hasLabel(parts[2], envLabelKey)) {
+			continue
+		}
 		count++
 	}
 	return count
+}
+
+// hasLabel reports whether a docker "{{.Labels}}" value (comma-separated
+// key=value pairs) contains the given label key.
+func hasLabel(labels, key string) bool {
+	for _, part := range strings.Split(labels, ",") {
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) == 2 && kv[0] == key {
+			return true
+		}
+	}
+	return false
 }
 
 // filterUnprotectedImages parses "{{.Repository}}:{{.Tag}}|{{.ID}}" output and
