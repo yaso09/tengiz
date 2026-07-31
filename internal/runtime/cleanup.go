@@ -19,8 +19,116 @@ func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error 
 	return nil
 }
 
+// dockerRunner abstracts `docker <args...>` for testability.
+type dockerRunner func(ctx context.Context, args ...string) (string, error)
+
+func execDocker(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneReport, error) {
-	return PruneReport{DryRun: opts.DryRun}, nil
+	return runPrune(ctx, opts, execDocker)
+}
+
+func runPrune(ctx context.Context, opts PruneOptions, run dockerRunner) (PruneReport, error) {
+	report := PruneReport{DryRun: opts.DryRun}
+	report.Reclaimed = make(map[string]string)
+
+	for _, step := range pruneSteps() {
+		if opts.AllImages && step.name == "images" {
+			continue
+		}
+		args := step.pruneArgs
+		if opts.DryRun {
+			args = step.dryRunArgs
+		}
+		out, err := run(ctx, args...)
+		if err != nil {
+			if step.name == "build-cache" {
+				log.Printf("[runtime] cleanup: build cache prune failed: %v", err)
+				report.BuildCache = "0B"
+				continue
+			}
+			return report, fmt.Errorf("%s prune: %w\n%s", step.name, err, out)
+		}
+		switch step.name {
+		case "containers":
+			if opts.DryRun {
+				report.Containers = countPrunableContainers(out)
+			} else {
+				report.Containers = countPruned(out)
+				report.Reclaimed["containers"] = reclaimedSpace(out)
+			}
+		case "images":
+			if opts.DryRun {
+				report.Images = countLines(out)
+			} else {
+				report.Images = countPruned(out)
+				report.Reclaimed["images"] = reclaimedSpace(out)
+			}
+		case "networks":
+			if opts.DryRun {
+				report.Networks = countLines(out)
+			} else {
+				report.Networks = countPruned(out)
+				report.Reclaimed["networks"] = reclaimedSpace(out)
+			}
+		case "volumes":
+			if opts.DryRun {
+				report.Volumes = countLines(out)
+			} else {
+				report.Volumes = countPruned(out)
+				report.Reclaimed["volumes"] = reclaimedSpace(out)
+			}
+		case "build-cache":
+			if opts.DryRun {
+				report.BuildCache = buildCacheSize(out)
+			} else {
+				report.BuildCache = reclaimedSpace(out)
+				if report.BuildCache == "" {
+					report.BuildCache = "0B"
+				}
+				report.Reclaimed["build-cache"] = report.BuildCache
+			}
+		}
+	}
+
+	if opts.AllImages {
+		if err := pruneAllImages(ctx, opts.DryRun, run, &report); err != nil {
+			return report, err
+		}
+	}
+	return report, nil
+}
+
+// pruneAllImages removes every image except those tagged tengiz-apps/* (kept for
+// rollback) and intermediate <none> images. Requires docker to have already
+// pruned dangling images.
+func pruneAllImages(ctx context.Context, dryRun bool, run dockerRunner, report *PruneReport) error {
+	lsArgs := []string{"image", "ls", "--format", "{{.Repository}}:{{.Tag}}|{{.ID}}"}
+	out, err := run(ctx, lsArgs...)
+	if err != nil {
+		return fmt.Errorf("image list: %w\n%s", err, out)
+	}
+	ids := filterUnprotectedImages(out)
+	if dryRun {
+		report.Images += len(ids)
+		return nil
+	}
+	for _, id := range ids {
+		rmOut, rmErr := run(ctx, "image", "rm", "-f", id)
+		if rmErr != nil {
+			log.Printf("[runtime] cleanup: failed to remove image %s: %v", id, rmErr)
+			continue
+		}
+		if r := reclaimedSpace(rmOut); r != "" {
+			report.Reclaimed["images"] = r
+		}
+		report.Images++
+	}
+	return nil
 }
 
 const appImagePrefix = "tengiz-apps/"
