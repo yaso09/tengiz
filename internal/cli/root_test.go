@@ -97,6 +97,7 @@ func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *ty
 func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) Cleanup(ctx context.Context, opts runtime.CleanupOptions) (runtime.CleanupResult, error) { return runtime.CleanupResult{}, nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
@@ -374,5 +375,46 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
 		}
+	}
+}
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not registered: %v", err)
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCmdFlags(t *testing.T) {
+	flags := cleanupCmd.Flags()
+	for _, name := range []string{"containers", "images", "networks", "volumes", "build-cache"} {
+		if flags.Lookup(name) == nil {
+			t.Errorf("cleanupCmd missing --%s flag", name)
+		}
+	}
+	if v, _ := flags.GetBool("containers"); !v {
+		t.Error("containers should default to true")
+	}
+	if v, _ := flags.GetBool("volumes"); v {
+		t.Error("volumes should default to false")
+	}
+}
+
+func TestCleanupNothingToDo(t *testing.T) {
+	rootCmd.SetArgs([]string{
+		"cleanup",
+		"--containers=false", "--images=false", "--networks=false",
+		"--volumes=false", "--build-cache=false",
+	})
+	output := captureOutput(func() {
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+	})
+	if !strings.Contains(output, "nothing to clean") {
+		t.Errorf("expected 'nothing to clean' in output, got: %s", output)
 	}
 }

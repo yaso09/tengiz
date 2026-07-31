@@ -235,6 +235,23 @@ Rollback to the previous deployment. The previous active container is started on
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup`
+
+Remove unused Docker resources to free disk space on single-server deployments.
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--containers` | Prune stopped containers not managed by Tengiz | `true` |
+| `--images` | Prune dangling images | `true` |
+| `--networks` | Prune unused networks not managed by Tengiz | `true` |
+| `--volumes` | Prune unused volumes (CAUTION: may remove app data) | `false` |
+| `--build-cache` | Prune BuildKit build cache | `false` |
+
+Resources labeled `tengiz-app=*` are always protected and never pruned. Tagged
+rollback images (`tengiz-apps/*`) are already trimmed to the last 5 on every
+deploy. Run `tengiz cleanup` periodically (e.g. via cron) to prevent disk
+exhaustion.
+
 ### `tengiz domain`
 
 Manage custom domains for applications.
