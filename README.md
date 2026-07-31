@@ -118,7 +118,11 @@ Create a `.tengiz.yaml` configuration file in the current directory.
 |----------|-------------|
 | `name` | Application name (optional, defaults to directory name) |
 
-Creates a minimal `.tengiz.yaml` with serverless enabled. Errors if one already exists.
+| Flag | Description |
+|------|-------------|
+| `--env <env>` | Create an environment-specific config file `.tengiz.<env>.yaml` (e.g. `staging`, `development`) |
+
+Creates a minimal `.tengiz.yaml` with serverless enabled. Errors if one already exists. With `--env`, creates `.tengiz.<env>.yaml` instead so it can be merged over the base `.tengiz.yaml` during environment-scoped deploys.
 
 ### `tengiz deploy [directory]`
 
@@ -453,6 +457,18 @@ resources:
 Resource limits are passed to Docker as `--cpus` and `--memory` flags. When omitted, containers have no resource constraints. Values follow Docker CLI conventions (e.g., `"0.5"` for half a CPU core, `"512m"` for 512 MB memory).
 
 Without a config file, Tengiz uses defaults: app name = directory name, port auto-detected, serverless enabled, 5m timeout.
+
+### Environment-specific overrides
+
+Deploy with `--env <env>` (default `production`) to scope the deployment. When the environment is not `production`, a `.tengiz.<env>.yaml` file is merged on top of the base `.tengiz.yaml` — for example `.tengiz.staging.yaml`:
+
+```yaml
+port: 4000
+env:
+  DATABASE_URL: postgres://staging.example.com/mydb
+```
+
+Env vars are merged additively (staging values override base for the same key; base-only keys are preserved), and scalar fields such as `port`, `build`, `serverless`, `resources`, and `domains` are overridden. Each environment keeps its own state files (`~/.tengiz/apps-{env}.json`, `ports-{env}.json`), container names (`tengiz-<app>-<env>`), and image tags, so `staging` and `production` run fully independently. Create an env config with `tengiz init --env staging`.
 
 ## Framework Support
 
