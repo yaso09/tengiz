@@ -18,6 +18,7 @@
 - **Multi-environment** — Isolate dev/staging/production with `--env` flag, env-scoped config overrides, and separate state files.
 - **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
+- **Docker housekeeping** — `tengiz cleanup` prunes stopped containers, dangling images, unused networks, and build cache while protecting tengiz-managed resources via labels.
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
@@ -202,6 +203,18 @@ tengiz run myapp -- python manage.py migrate
 tengiz run myapp -- rails console
 tengiz run -i myapp -- bash
 ```
+
+### `tengiz cleanup [--dry-run] [--all] [--volumes]`
+
+Prune unused Docker resources while protecting tengiz-managed containers and images (labeled `tengiz-app`) so rollback images are never removed.
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Show what would be removed without removing anything |
+| `--all` | Also remove all unused images, not just dangling ones |
+| `--volumes` | Also remove unused volumes (off by default — data safe) |
+
+Without flags, removes stopped non-tengiz containers, unused networks, dangling images, and build cache. Dry-run image counts are an upper-bound estimate — a real `-a` prune only removes images no longer referenced by any container.
 
 ### `tengiz start <app>`
 
