@@ -118,6 +118,23 @@ func TestLoadNoFile(t *testing.T) {
 	}
 }
 
+func TestAppQualifiedName(t *testing.T) {
+	tests := []struct {
+		name, env, expected string
+	}{
+		{"myapp", "", "myapp"},
+		{"myapp", "production", "myapp"},
+		{"myapp", "staging", "myapp-staging"},
+		{"myapp", "development", "myapp-development"},
+	}
+	for _, tc := range tests {
+		got := AppQualifiedName(tc.name, tc.env)
+		if got != tc.expected {
+			t.Errorf("AppQualifiedName(%q, %q) = %q, want %q", tc.name, tc.env, got, tc.expected)
+		}
+	}
+}
+
 func TestLoadWithEnv(t *testing.T) {
 	dir := t.TempDir()
 
