@@ -54,6 +54,33 @@ func (b *Builder) ensureDockerfile(dir string, detection *Detection) error {
 	return os.WriteFile(dfPath, []byte(content), 0644)
 }
 
+func buildArgs(buildSecretArgs []string, tag string, dir string, appName string, env string) []string {
+	args := []string{"build"}
+	args = append(args, buildSecretArgs...)
+	args = append(args, "--label", fmt.Sprintf("tengiz-app=%s", appName))
+	args = append(args, "--label", fmt.Sprintf("tengiz-env=%s", env))
+	args = append(args, "-t", tag, dir)
+	return args
+}
+
+func nixpacksArgs(appName, env string, cfg *types.NixpacksConfig) []string {
+	args := []string{}
+	if cfg != nil {
+		if len(cfg.Packages) > 0 {
+			args = append(args, "--pkgs", strings.Join(cfg.Packages, ","))
+		}
+		if len(cfg.AptPackages) > 0 {
+			args = append(args, "--apt-pkgs", strings.Join(cfg.AptPackages, ","))
+		}
+		if cfg.Cmd != "" {
+			args = append(args, "--cmd", cfg.Cmd)
+		}
+	}
+	args = append(args, "--label", fmt.Sprintf("tengiz-app=%s", appName))
+	args = append(args, "--label", fmt.Sprintf("tengiz-env=%s", env))
+	return args
+}
+
 func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName string, env string, deploymentID string) (string, string, error) {
 	if env == "" {
 		env = "production"
@@ -66,10 +93,7 @@ func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName s
 	}
 	defer cleanup()
 
-	args := []string{"build"}
-	args = append(args, b.buildSecretArgs()...)
-	args = append(args, "-t", tag, dir)
-
+	args := buildArgs(b.buildSecretArgs(), tag, dir, appName, env)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 
 	var logBuf bytes.Buffer
@@ -137,18 +161,7 @@ func (b *Builder) buildWithNixpacks(ctx context.Context, dir, appName, env, depl
 	tag := fmt.Sprintf("tengiz-apps/%s:%s-%s", appName, env, deploymentID)
 
 	args := []string{"build", dir, "--name", tag}
-	if b.nixpacksCfg != nil {
-		if len(b.nixpacksCfg.Packages) > 0 {
-			args = append(args, "--pkgs", strings.Join(b.nixpacksCfg.Packages, ","))
-		}
-		if len(b.nixpacksCfg.AptPackages) > 0 {
-			args = append(args, "--apt-pkgs", strings.Join(b.nixpacksCfg.AptPackages, ","))
-		}
-		if b.nixpacksCfg.Cmd != "" {
-			args = append(args, "--cmd", b.nixpacksCfg.Cmd)
-		}
-	}
-
+	args = append(args, nixpacksArgs(appName, env, b.nixpacksCfg)...)
 	cmd := exec.CommandContext(ctx, "nixpacks", args...)
 
 	var logBuf bytes.Buffer

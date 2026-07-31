@@ -10,6 +10,26 @@ import (
 	"github.com/yaso09/tengiz/internal/types"
 )
 
+func TestBuildArgsIncludeLabels(t *testing.T) {
+	args := buildArgs([]string{"--secret", "id=x,src=/tmp/x"}, "tengiz-apps/myapp:production-v1", ".", "myapp", "production")
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"--label", "tengiz-app=myapp", "--label", "tengiz-env=production"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("buildArgs() missing %q in %q", want, joined)
+		}
+	}
+}
+
+func TestNixpacksArgsIncludeLabels(t *testing.T) {
+	args := nixpacksArgs("myapp", "staging", nil)
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"--label", "tengiz-app=myapp", "--label", "tengiz-env=staging"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("nixpacksArgs() missing %q in %q", want, joined)
+		}
+	}
+}
+
 func TestDetectNextJS(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "next.config.js"), []byte(""), 0644)
