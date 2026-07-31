@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os/exec"
@@ -56,4 +57,56 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 		}
 	}
 	return nil
+}
+
+type CleanupOptions struct {
+	DryRun     bool
+	Containers bool
+	Images     bool
+	Volumes    bool
+	Networks   bool
+}
+
+type CleanupSummary struct {
+	ContainersRemoved []string
+	ImagesRemoved     []string
+	VolumesRemoved    []string
+	NetworksRemoved   []string
+}
+
+// hasLabel reports whether the comma-separated Docker label string contains key.
+func hasLabel(labels, key string) bool {
+	for _, part := range strings.Split(labels, ",") {
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) == 2 && kv[0] == key {
+			return true
+		}
+	}
+	return false
+}
+
+// selectCleanupContainers parses `docker ps -a --format '{{json .}}'` output and
+// returns the IDs of stopped containers that are NOT managed by Tengiz.
+// Tengiz containers (label tengiz-app) are preserved because scale-to-zero
+// deliberately leaves them stopped.
+func selectCleanupContainers(psOutput string) []string {
+	var ids []string
+	for _, line := range strings.Split(strings.TrimSpace(psOutput), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var entry dockerPS
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if entry.State == "running" {
+			continue
+		}
+		if hasLabel(entry.Labels, labelKey) {
+			continue
+		}
+		ids = append(ids, entry.ID)
+	}
+	return ids
 }
