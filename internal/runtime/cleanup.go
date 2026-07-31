@@ -59,8 +59,107 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	return nil
 }
 
+func (r *dockerRuntime) execPrune(ctx context.Context, args []string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker %s: %w\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return string(out), nil
+}
+
 func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
-	return CleanupResult{DryRun: opts.DryRun}, nil
+	result := CleanupResult{DryRun: opts.DryRun}
+
+	if opts.Containers {
+		if opts.DryRun {
+			args := []string{"ps", "-a", "--format", "{{.Names}}|{{.Status}}"}
+			if opts.ProtectTengizContainers {
+				args = append(args, "--filter", "label!=tengiz-app")
+			}
+			out, err := r.execPrune(ctx, args)
+			if err != nil {
+				return result, err
+			}
+			result.ContainersRemoved = len(stoppedContainerNames(out))
+		} else {
+			out, err := r.execPrune(ctx, containerPruneCmd(opts.ProtectTengizContainers))
+			if err != nil {
+				return result, err
+			}
+			result.ContainersRemoved, result.ContainersSpace = parsePruneOutput(out)
+		}
+	}
+
+	if opts.Images {
+		if opts.DryRun {
+			imgs, err := r.execPrune(ctx, []string{"images", "--no-trunc", "--format", "{{.ID}}|{{.Repository}}:{{.Tag}}"})
+			if err != nil {
+				return result, err
+			}
+			ps, err := r.execPrune(ctx, []string{"ps", "-a", "--no-trunc", "--format", "{{.Image}}"})
+			if err != nil {
+				return result, err
+			}
+			result.ImagesRemoved = len(unusedImageRefs(imgs, ps))
+		} else {
+			out, err := r.execPrune(ctx, imagePruneCmd())
+			if err != nil {
+				return result, err
+			}
+			result.ImagesRemoved, result.ImagesSpace = parsePruneOutput(out)
+		}
+	}
+
+	if opts.Volumes {
+		if opts.DryRun {
+			out, err := r.execPrune(ctx, []string{"volume", "ls", "--filter", "dangling=true", "--format", "{{.Name}}"})
+			if err != nil {
+				return result, err
+			}
+			result.VolumesRemoved = len(nonEmptyLines(out))
+		} else {
+			out, err := r.execPrune(ctx, volumePruneCmd())
+			if err != nil {
+				return result, err
+			}
+			result.VolumesRemoved, result.VolumesSpace = parsePruneOutput(out)
+		}
+	}
+
+	if opts.Networks {
+		if opts.DryRun {
+			out, err := r.execPrune(ctx, []string{"network", "ls", "--filter", "dangling=true", "--format", "{{.Name}}"})
+			if err != nil {
+				return result, err
+			}
+			result.NetworksRemoved = len(nonEmptyLines(out))
+		} else {
+			out, err := r.execPrune(ctx, networkPruneCmd())
+			if err != nil {
+				return result, err
+			}
+			result.NetworksRemoved, _ = parsePruneOutput(out)
+		}
+	}
+
+	if opts.BuildCache {
+		if opts.DryRun {
+			out, err := r.execPrune(ctx, []string{"builder", "du", "--format", "{{json .}}"})
+			if err != nil {
+				return result, err
+			}
+			result.BuildCacheBytes = reclaimableBuildCacheSize(out)
+		} else {
+			out, err := r.execPrune(ctx, buildCachePruneCmd())
+			if err != nil {
+				return result, err
+			}
+			_, result.BuildCacheSpace = parsePruneOutput(out)
+		}
+	}
+
+	return result, nil
 }
 
 func containerPruneCmd(protectTengiz bool) []string {

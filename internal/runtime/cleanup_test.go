@@ -2,7 +2,10 @@ package runtime
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -137,5 +140,180 @@ func TestReclaimableBuildCacheSize(t *testing.T) {
 func TestNonEmptyLines(t *testing.T) {
 	if got, want := nonEmptyLines("  a \nb\n\n"), []string{"a", "b"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("nonEmptyLines() = %v, want %v", got, want)
+	}
+}
+
+const fakeDockerScript = `#!/bin/sh
+echo "$*" >> "$TENGIZ_FAKE_DOCKER_LOG"
+case "$1 $2" in
+"container prune")
+	echo "Deleted Containers:"
+	echo "abc123"
+	echo ""
+	echo "Total reclaimed space: 4.096kB"
+	;;
+"image prune")
+	echo "Untagged: nginx:latest"
+	echo "Deleted Images:"
+	echo "deleted: sha256:xyz"
+	echo ""
+	echo "Total reclaimed space: 25.5MB"
+	;;
+"volume prune")
+	echo "Deleted Volumes:"
+	echo "vol1"
+	echo ""
+	echo "Total reclaimed space: 0B"
+	;;
+"network prune")
+	echo "Deleted Networks:"
+	echo "net1"
+	;;
+"builder prune")
+	echo "Deleted build cache objects:"
+	echo "obj1"
+	echo ""
+	echo "Total reclaimed space: 42.3MB"
+	;;
+"ps -a")
+	case "$*" in
+	*--no-trunc*)
+		echo "nginx:latest"
+		echo "tengiz-apps/myapp:v1"
+		;;
+	*"label!=tengiz-app"*)
+		echo "worker123|Exited (1) 2 hours ago"
+		;;
+	*)
+		echo "tengiz-myapp|Exited (0) 5 minutes ago"
+		echo "worker123|Exited (1) 2 hours ago"
+		;;
+	esac
+	;;
+"images --no-trunc")
+	echo "sha256:img1|nginx:latest"
+	echo "sha256:img2|<none>"
+	;;
+"volume ls")
+	echo "vol1"
+	;;
+"network ls")
+	echo "net1"
+	;;
+"builder du")
+	echo '{"ID":"obj1","Reclaimable":true,"Size":44323328}'
+	;;
+esac
+`
+
+func newFakeDocker(t *testing.T, script string) (Manager, string) {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "docker")
+	logPath := filepath.Join(dir, "docker.log")
+	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("TENGIZ_FAKE_DOCKER_LOG", logPath)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	rt, err := NewDocker()
+	if err != nil {
+		t.Fatalf("NewDocker() with fake docker: %v", err)
+	}
+	return rt, logPath
+}
+
+func TestDockerRuntimeCleanupPrunesResources(t *testing.T) {
+	rt, logPath := newFakeDocker(t, fakeDockerScript)
+	result, err := rt.Cleanup(context.Background(), CleanupOptions{
+		Containers:              true,
+		Images:                  true,
+		Volumes:                 true,
+		Networks:                true,
+		BuildCache:              true,
+		ProtectTengizContainers: true,
+	})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if result.DryRun {
+		t.Error("DryRun = true, want false")
+	}
+	if result.ContainersRemoved != 1 {
+		t.Errorf("ContainersRemoved = %d, want 1", result.ContainersRemoved)
+	}
+	if result.ContainersSpace != "4.096kB" {
+		t.Errorf("ContainersSpace = %q, want 4.096kB", result.ContainersSpace)
+	}
+	if result.ImagesRemoved != 1 {
+		t.Errorf("ImagesRemoved = %d, want 1", result.ImagesRemoved)
+	}
+	if result.ImagesSpace != "25.5MB" {
+		t.Errorf("ImagesSpace = %q, want 25.5MB", result.ImagesSpace)
+	}
+	if result.VolumesRemoved != 1 {
+		t.Errorf("VolumesRemoved = %d, want 1", result.VolumesRemoved)
+	}
+	if result.VolumesSpace != "0B" {
+		t.Errorf("VolumesSpace = %q, want 0B", result.VolumesSpace)
+	}
+	if result.NetworksRemoved != 1 {
+		t.Errorf("NetworksRemoved = %d, want 1", result.NetworksRemoved)
+	}
+	if result.BuildCacheSpace != "42.3MB" {
+		t.Errorf("BuildCacheSpace = %q, want 42.3MB", result.BuildCacheSpace)
+	}
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read docker log: %v", err)
+	}
+	logStr := string(logData)
+	for _, want := range []string{
+		"container prune -f --filter label!=tengiz-app",
+		"image prune -a -f",
+		"volume prune -f",
+		"network prune -f",
+		"builder prune -f",
+	} {
+		if !strings.Contains(logStr, want) {
+			t.Errorf("docker log missing %q; got:\n%s", want, logStr)
+		}
+	}
+}
+
+func TestDockerRuntimeCleanupDryRun(t *testing.T) {
+	rt, _ := newFakeDocker(t, fakeDockerScript)
+	result, err := rt.Cleanup(context.Background(), CleanupOptions{
+		Containers:              true,
+		Images:                  true,
+		Volumes:                 true,
+		Networks:                true,
+		BuildCache:              true,
+		ProtectTengizContainers: true,
+		DryRun:                  true,
+	})
+	if err != nil {
+		t.Fatalf("Cleanup() dry-run error = %v", err)
+	}
+	if !result.DryRun {
+		t.Error("DryRun = false, want true")
+	}
+	if result.ContainersRemoved != 1 {
+		t.Errorf("ContainersRemoved = %d, want 1 (tengiz-managed containers excluded)", result.ContainersRemoved)
+	}
+	if result.ImagesRemoved != 1 {
+		t.Errorf("ImagesRemoved = %d, want 1 (nginx:latest used, <none> dangling)", result.ImagesRemoved)
+	}
+	if result.VolumesRemoved != 1 {
+		t.Errorf("VolumesRemoved = %d, want 1", result.VolumesRemoved)
+	}
+	if result.NetworksRemoved != 1 {
+		t.Errorf("NetworksRemoved = %d, want 1", result.NetworksRemoved)
+	}
+	if result.BuildCacheBytes != 44323328 {
+		t.Errorf("BuildCacheBytes = %d, want 44323328", result.BuildCacheBytes)
+	}
+	if result.ContainersSpace != "" || result.ImagesSpace != "" {
+		t.Error("dry-run must not report reclaimed space (nothing was removed)")
 	}
 }
