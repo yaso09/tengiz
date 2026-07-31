@@ -63,6 +63,8 @@ func init() {
 	volumeCmd.AddCommand(volumeListCmd)
 	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(rollbackCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	addCleanupFlags(cleanupCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
@@ -1015,6 +1017,29 @@ var rollbackCmd = &cobra.Command{
 	},
 }
 
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources",
+	Long:  "Prunes stopped containers, unused images, volumes, networks, and build cache. Tengiz-managed containers (label tengiz-app) are protected by default so cold starts and rollbacks keep working.",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts, err := cleanupOptionsFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+		result, err := rt.Cleanup(cmd.Context(), opts)
+		if err != nil {
+			return err
+		}
+		printCleanupResult(result)
+		return nil
+	},
+}
+
 var buildLogsCmd = &cobra.Command{
 	Use:   "build-logs <app> [deployment-id]",
 	Short: "Show build logs for an application",
@@ -1780,6 +1805,79 @@ func addSecretProviderFlags(cmd *cobra.Command) {
 	cmd.Flags().String("doppler-token", "", "Doppler service token")
 	cmd.Flags().String("doppler-project", "", "Doppler project")
 	cmd.Flags().String("doppler-config", "", "Doppler config")
+}
+
+func addCleanupFlags(cmd *cobra.Command) {
+	cmd.Flags().Bool("dry-run", false, "show what would be removed without removing anything")
+	cmd.Flags().Bool("prune-stopped-tengiz", false, "also remove stopped Tengiz-managed containers")
+	cmd.Flags().Bool("all", false, "enable all cleanup categories (volumes, networks, build cache)")
+	cmd.Flags().Bool("containers", true, "prune stopped containers")
+	cmd.Flags().Bool("images", true, "prune unused images")
+	cmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cmd.Flags().Bool("networks", false, "prune unused networks")
+	cmd.Flags().Bool("build-cache", false, "prune BuildKit build cache")
+}
+
+func cleanupOptionsFromFlags(cmd *cobra.Command) (runtime.CleanupOptions, error) {
+	var opts runtime.CleanupOptions
+	var err error
+	if opts.DryRun, err = cmd.Flags().GetBool("dry-run"); err != nil {
+		return opts, err
+	}
+	if opts.Containers, err = cmd.Flags().GetBool("containers"); err != nil {
+		return opts, err
+	}
+	if opts.Images, err = cmd.Flags().GetBool("images"); err != nil {
+		return opts, err
+	}
+	if opts.Volumes, err = cmd.Flags().GetBool("volumes"); err != nil {
+		return opts, err
+	}
+	if opts.Networks, err = cmd.Flags().GetBool("networks"); err != nil {
+		return opts, err
+	}
+	if opts.BuildCache, err = cmd.Flags().GetBool("build-cache"); err != nil {
+		return opts, err
+	}
+	pruneStopped, err := cmd.Flags().GetBool("prune-stopped-tengiz")
+	if err != nil {
+		return opts, err
+	}
+	opts.ProtectTengizContainers = !pruneStopped
+	all, err := cmd.Flags().GetBool("all")
+	if err != nil {
+		return opts, err
+	}
+	if all {
+		opts.Volumes = true
+		opts.Networks = true
+		opts.BuildCache = true
+	}
+	return opts, nil
+}
+
+func printCleanupResult(result runtime.CleanupResult) {
+	if result.DryRun {
+		fmt.Println("[tengiz] Dry run — nothing was removed. Run without --dry-run to prune.")
+	} else {
+		fmt.Println("[tengiz] Cleanup complete.")
+	}
+	fmt.Printf("  containers removed: %d%s\n", result.ContainersRemoved, spaceSuffix(result.ContainersSpace))
+	fmt.Printf("  images removed: %d%s\n", result.ImagesRemoved, spaceSuffix(result.ImagesSpace))
+	fmt.Printf("  volumes removed: %d%s\n", result.VolumesRemoved, spaceSuffix(result.VolumesSpace))
+	fmt.Printf("  networks removed: %d\n", result.NetworksRemoved)
+	if result.BuildCacheSpace != "" {
+		fmt.Printf("  build cache: %s reclaimed\n", result.BuildCacheSpace)
+	} else if result.BuildCacheBytes > 0 {
+		fmt.Printf("  build cache: %d bytes reclaimable\n", result.BuildCacheBytes)
+	}
+}
+
+func spaceSuffix(space string) string {
+	if space == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (%s reclaimed)", space)
 }
 
 func Execute() {

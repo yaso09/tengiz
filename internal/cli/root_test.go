@@ -109,6 +109,135 @@ func TestMockRTForDeployImplementsManager(t *testing.T) {
 	}
 }
 
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCmdFlagsAndDefaults(t *testing.T) {
+	flags := cleanupCmd.Flags()
+	for _, name := range []string{"dry-run", "prune-stopped-tengiz", "all", "containers", "images", "volumes", "networks", "build-cache"} {
+		if flags.Lookup(name) == nil {
+			t.Errorf("cleanupCmd missing flag --%s", name)
+		}
+	}
+	if c, _ := flags.GetBool("containers"); !c {
+		t.Error("--containers should default to true")
+	}
+	if i, _ := flags.GetBool("images"); !i {
+		t.Error("--images should default to true")
+	}
+	if v, _ := flags.GetBool("volumes"); v {
+		t.Error("--volumes should default to false")
+	}
+	if n, _ := flags.GetBool("networks"); n {
+		t.Error("--networks should default to false")
+	}
+	if b, _ := flags.GetBool("build-cache"); b {
+		t.Error("--build-cache should default to false")
+	}
+}
+
+func TestCleanupOptionsFromFlags(t *testing.T) {
+	cmd := &cobra.Command{}
+	addCleanupFlags(cmd)
+	if err := cmd.ParseFlags([]string{"--all", "--dry-run", "--prune-stopped-tengiz"}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	opts, err := cleanupOptionsFromFlags(cmd)
+	if err != nil {
+		t.Fatalf("cleanupOptionsFromFlags: %v", err)
+	}
+	if !opts.DryRun {
+		t.Error("DryRun = false, want true")
+	}
+	if !opts.Volumes || !opts.Networks || !opts.BuildCache {
+		t.Error("--all should enable volumes, networks, and build cache")
+	}
+	if opts.ProtectTengizContainers {
+		t.Error("ProtectTengizContainers = true, want false with --prune-stopped-tengiz")
+	}
+}
+
+func TestCleanupOptionsFromFlagsDefaults(t *testing.T) {
+	cmd := &cobra.Command{}
+	addCleanupFlags(cmd)
+	if err := cmd.ParseFlags(nil); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	opts, err := cleanupOptionsFromFlags(cmd)
+	if err != nil {
+		t.Fatalf("cleanupOptionsFromFlags: %v", err)
+	}
+	if !opts.Containers || !opts.Images {
+		t.Error("containers/images should default to true")
+	}
+	if opts.Volumes || opts.Networks || opts.BuildCache {
+		t.Error("volumes/networks/build-cache should default to false")
+	}
+	if !opts.ProtectTengizContainers {
+		t.Error("ProtectTengizContainers should default to true")
+	}
+	if opts.DryRun {
+		t.Error("DryRun should default to false")
+	}
+}
+
+func TestCleanupCmdInvokesOptions(t *testing.T) {
+	originalRunE := cleanupCmd.RunE
+	defer func() { cleanupCmd.RunE = originalRunE }()
+	var captured runtime.CleanupOptions
+	cleanupCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		opts, err := cleanupOptionsFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		captured = opts
+		return nil
+	}
+	rootCmd.SetArgs([]string{"cleanup", "--all", "--dry-run"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !captured.DryRun || !captured.Volumes || !captured.Networks || !captured.BuildCache {
+		t.Errorf("captured options = %+v, want dry-run + all categories", captured)
+	}
+}
+
+func TestCleanupPrintDryRun(t *testing.T) {
+	out := captureOutput(func() {
+		printCleanupResult(runtime.CleanupResult{DryRun: true, ContainersRemoved: 3, ImagesRemoved: 2})
+	})
+	if !strings.Contains(out, "Dry run") {
+		t.Errorf("dry-run output missing 'Dry run', got: %s", out)
+	}
+	if !strings.Contains(out, "containers removed: 3") {
+		t.Errorf("output missing containers count, got: %s", out)
+	}
+}
+
+func TestCleanupPrintResult(t *testing.T) {
+	out := captureOutput(func() {
+		printCleanupResult(runtime.CleanupResult{
+			ContainersRemoved: 1, ContainersSpace: "4.096kB",
+			ImagesRemoved: 2, ImagesSpace: "25.5MB",
+			VolumesRemoved: 1, VolumesSpace: "0B",
+			NetworksRemoved: 1,
+			BuildCacheSpace: "42.3MB",
+		})
+	})
+	for _, want := range []string{"Cleanup complete", "containers removed: 1 (4.096kB reclaimed)", "images removed: 2 (25.5MB reclaimed)", "volumes removed: 1 (0B reclaimed)", "networks removed: 1", "build cache: 42.3MB reclaimed"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q, got: %s", want, out)
+		}
+	}
+}
+
 func TestDeployZeroDowntimeCreatesVersionedContainer(t *testing.T) {
 	var m interface{} = &mockRTForDeploy{}
 	if m == nil {
