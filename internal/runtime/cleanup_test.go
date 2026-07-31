@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"os/exec"
 	"testing"
 )
 
@@ -55,4 +56,52 @@ func TestSelectCleanupContainers(t *testing.T) {
 			t.Errorf("selectCleanupContainers()[%d] = %q, want %q", i, got[i], want[i])
 		}
 	}
+}
+
+func TestSplitLines(t *testing.T) {
+	tests := []struct {
+		input string
+		want  []string
+	}{
+		{"", nil},
+		{"abc\n", []string{"abc"}},
+		{"abc\ndef\n", []string{"abc", "def"}},
+		{"  abc  \n\n def \n", []string{"abc", "def"}},
+	}
+	for _, tt := range tests {
+		got := splitLines(tt.input)
+		if len(got) != len(tt.want) {
+			t.Fatalf("splitLines(%q) = %v (len=%d), want %v (len=%d)", tt.input, got, len(got), tt.want, len(tt.want))
+		}
+		for i := range tt.want {
+			if got[i] != tt.want[i] {
+				t.Errorf("splitLines(%q)[%d] = %q, want %q", tt.input, i, got[i], tt.want[i])
+			}
+		}
+	}
+}
+
+func dockerAvailable() bool {
+	if _, err := exec.LookPath("docker"); err != nil {
+		return false
+	}
+	return exec.Command("docker", "version", "--format", "{{.Server.Version}}").Run() == nil
+}
+
+func TestDockerCleanupSmoke(t *testing.T) {
+	if !dockerAvailable() {
+		t.Skip("docker daemon not available")
+	}
+	r := &dockerRuntime{}
+	summary, err := r.Cleanup(context.Background(), CleanupOptions{
+		DryRun:     true,
+		Containers: true,
+		Images:     true,
+		Volumes:    true,
+		Networks:   true,
+	})
+	if err != nil {
+		t.Fatalf("Cleanup(dry-run) error = %v", err)
+	}
+	_ = summary
 }
