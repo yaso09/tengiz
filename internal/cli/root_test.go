@@ -377,3 +377,44 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not registered: %v", err)
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCmdFlags(t *testing.T) {
+	flags := cleanupCmd.Flags()
+	for _, name := range []string{"containers", "images", "networks", "volumes", "build-cache"} {
+		if flags.Lookup(name) == nil {
+			t.Errorf("cleanupCmd missing --%s flag", name)
+		}
+	}
+	if v, _ := flags.GetBool("containers"); !v {
+		t.Error("containers should default to true")
+	}
+	if v, _ := flags.GetBool("volumes"); v {
+		t.Error("volumes should default to false")
+	}
+}
+
+func TestCleanupNothingToDo(t *testing.T) {
+	rootCmd.SetArgs([]string{
+		"cleanup",
+		"--containers=false", "--images=false", "--networks=false",
+		"--volumes=false", "--build-cache=false",
+	})
+	output := captureOutput(func() {
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+	})
+	if !strings.Contains(output, "nothing to clean") {
+		t.Errorf("expected 'nothing to clean' in output, got: %s", output)
+	}
+}

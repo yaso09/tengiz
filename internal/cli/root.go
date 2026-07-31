@@ -63,6 +63,7 @@ func init() {
 	volumeCmd.AddCommand(volumeListCmd)
 	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(rollbackCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
@@ -76,6 +77,11 @@ func init() {
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
+	cleanupCmd.Flags().Bool("containers", true, "prune stopped containers not managed by tengiz")
+	cleanupCmd.Flags().Bool("images", true, "prune dangling images")
+	cleanupCmd.Flags().Bool("networks", true, "prune unused networks not managed by tengiz")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes (CAUTION: may remove app data)")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune BuildKit build cache")
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
@@ -657,6 +663,55 @@ var rmCmd = &cobra.Command{
 		}
 
 		fmt.Printf("[tengiz] removed: %s\n", appName)
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources to free disk space",
+	Long: `Prunes stopped containers, dangling images, and unused networks that are
+NOT managed by Tengiz. Resources labeled tengiz-app=* are always protected.
+
+Use --volumes and --build-cache to enable those (potentially destructive)
+categories.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		networks, _ := cmd.Flags().GetBool("networks")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		buildCache, _ := cmd.Flags().GetBool("build-cache")
+
+		if !containers && !images && !networks && !volumes && !buildCache {
+			fmt.Println("[tengiz] nothing to clean (no categories enabled)")
+			return nil
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return err
+		}
+
+		res, err := rt.Cleanup(context.Background(), runtime.CleanupOptions{
+			Containers: containers,
+			Images:     images,
+			Networks:   networks,
+			Volumes:    volumes,
+			BuildCache: buildCache,
+		})
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+
+		fmt.Println("[tengiz] cleanup complete")
+		fmt.Printf("  containers:  %d deleted\n", res.ContainersDeleted)
+		fmt.Printf("  images:      %d deleted\n", res.ImagesDeleted)
+		fmt.Printf("  networks:    %d deleted\n", res.NetworksDeleted)
+		fmt.Printf("  volumes:     %d deleted\n", res.VolumesDeleted)
+		fmt.Printf("  build cache: %d deleted\n", res.BuildCacheDeleted)
+		if res.ReclaimedSpace != "" {
+			fmt.Printf("  reclaimed:   %s\n", res.ReclaimedSpace)
+		}
 		return nil
 	},
 }
