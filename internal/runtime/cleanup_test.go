@@ -18,3 +18,18 @@ func TestStubKeepLastNImages(t *testing.T) {
 		t.Fatalf("KeepLastNImages() error = %v", err)
 	}
 }
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	res, err := m.Cleanup(context.Background(), CleanupOptions{
+		Containers: true,
+		Images:     true,
+		Networks:   true,
+	})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if res.ContainersDeleted != 0 || res.ImagesDeleted != 0 || res.NetworksDeleted != 0 {
+		t.Errorf("expected zero counts, got %+v", res)
+	}
+}
