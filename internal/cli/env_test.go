@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -53,6 +54,38 @@ func TestSubCommandsHaveEnvFlag(t *testing.T) {
 				t.Errorf("%s missing --env flag", cmd.Use)
 			}
 		})
+	}
+}
+
+func TestInitHasEnvFlag(t *testing.T) {
+	flag := initCmd.Flags().Lookup("env")
+	if flag == nil {
+		t.Error("initCmd missing --env flag")
+	}
+}
+
+func TestInitWithEnvCreatesEnvFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(origWd) }()
+
+	rootCmd.SetArgs([]string{"init", "--env", "staging"})
+	err = rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("init --env staging: %v", err)
+	}
+
+	if _, err := os.Stat(".tengiz.staging.yaml"); err != nil {
+		t.Errorf("expected .tengiz.staging.yaml to be created, got error: %v", err)
+	}
+	if _, err := os.Stat(".tengiz.yaml"); err == nil {
+		t.Error("did not expect .tengiz.yaml to be created for env-specific init")
 	}
 }
 

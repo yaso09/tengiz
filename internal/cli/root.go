@@ -93,6 +93,7 @@ func init() {
 	volumeListCmd.Flags().String("env", "production", "deployment environment")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
+	initCmd.Flags().String("env", "", "create environment-specific config (e.g. staging, development)")
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
@@ -130,17 +131,21 @@ var initCmd = &cobra.Command{
 			name = args[0]
 		}
 
+		env, _ := cmd.Flags().GetString("env")
+
 		path := ".tengiz.yaml"
-		if _, err := os.Stat(path); err == nil {
-			return fmt.Errorf(".tengiz.yaml already exists")
+		if env != "" {
+			path = fmt.Sprintf(".tengiz.%s.yaml", env)
 		}
 
-		env := getEnv(cmd)
+		if _, err := os.Stat(path); err == nil {
+			return fmt.Errorf("%s already exists", path)
+		}
+
 		gitRepo, _ := cmd.Flags().GetString("git-repo")
 		gitBranch, _ := cmd.Flags().GetString("git-branch")
 
 		content := fmt.Sprintf(`name: %s
-environment: %s
 # port: 3000            # container internal port (auto-detected if omitted)
 serverless:
   enabled: true
@@ -165,17 +170,21 @@ serverless:
 # resources:
 #   cpu: "1.0"           # CPU cores (e.g., "0.5", "2")
 #   memory: "256m"       # memory limit (e.g., "128m", "1g")
-`, name, env)
+`, name)
+
+		if env != "" {
+			content = fmt.Sprintf("environment: %s\n", env) + content
+		}
 
 		if gitRepo != "" {
 			content += fmt.Sprintf("git:\n  repo: %s\n  branch: %s\n", gitRepo, gitBranch)
 		}
 
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-			return fmt.Errorf("write .tengiz.yaml: %w", err)
+			return fmt.Errorf("write %s: %w", path, err)
 		}
 
-		fmt.Printf("[tengiz] created .tengiz.yaml for %s\n", name)
+		fmt.Printf("[tengiz] created %s for %s\n", path, name)
 		return nil
 	},
 }
