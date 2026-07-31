@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os/exec"
@@ -60,4 +61,130 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 
 func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
 	return CleanupResult{DryRun: opts.DryRun}, nil
+}
+
+func containerPruneCmd(protectTengiz bool) []string {
+	args := []string{"container", "prune", "-f"}
+	if protectTengiz {
+		args = append(args, "--filter", "label!=tengiz-app")
+	}
+	return args
+}
+
+func imagePruneCmd() []string {
+	return []string{"image", "prune", "-a", "-f"}
+}
+
+func volumePruneCmd() []string {
+	return []string{"volume", "prune", "-f"}
+}
+
+func networkPruneCmd() []string {
+	return []string{"network", "prune", "-f"}
+}
+
+func buildCachePruneCmd() []string {
+	return []string{"builder", "prune", "-f"}
+}
+
+func nonEmptyLines(out string) []string {
+	var lines []string
+	for _, ln := range strings.Split(out, "\n") {
+		if line := strings.TrimSpace(ln); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func parsePruneOutput(out string) (int, string) {
+	count := 0
+	space := ""
+	for _, ln := range strings.Split(out, "\n") {
+		line := strings.TrimSpace(ln)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "Total reclaimed space:") {
+			space = strings.TrimSpace(strings.TrimPrefix(line, "Total reclaimed space:"))
+			continue
+		}
+		if strings.HasSuffix(line, ":") || strings.HasPrefix(line, "Untagged") {
+			continue
+		}
+		count++
+	}
+	return count, space
+}
+
+func stoppedContainerNames(psOut string) []string {
+	var names []string
+	for _, ln := range strings.Split(psOut, "\n") {
+		if ln == "" {
+			continue
+		}
+		parts := strings.SplitN(ln, "|", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		status := parts[1]
+		if strings.HasPrefix(status, "Exited") || strings.HasPrefix(status, "Created") {
+			names = append(names, parts[0])
+		}
+	}
+	return names
+}
+
+func unusedImageRefs(imagesOut, containersOut string) []string {
+	used := make(map[string]bool)
+	for _, ln := range strings.Split(containersOut, "\n") {
+		ref := strings.TrimSpace(ln)
+		if ref == "" {
+			continue
+		}
+		used[strings.TrimPrefix(ref, "sha256:")] = true
+	}
+	var unused []string
+	for _, ln := range strings.Split(imagesOut, "\n") {
+		line := strings.TrimSpace(ln)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		id := parts[0]
+		tag := parts[1]
+		if tag == "<none>" {
+			unused = append(unused, id)
+			continue
+		}
+		if used[id] || used[tag] {
+			continue
+		}
+		unused = append(unused, tag)
+	}
+	return unused
+}
+
+func reclaimableBuildCacheSize(duOut string) int64 {
+	var total int64
+	for _, ln := range strings.Split(duOut, "\n") {
+		line := strings.TrimSpace(ln)
+		if line == "" {
+			continue
+		}
+		var rec struct {
+			Reclaimable bool  `json:"Reclaimable"`
+			Size        int64 `json:"Size"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			continue
+		}
+		if rec.Reclaimable {
+			total += rec.Size
+		}
+	}
+	return total
 }
