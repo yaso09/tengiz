@@ -118,6 +118,23 @@ func TestLoadNoFile(t *testing.T) {
 	}
 }
 
+func TestAppQualifiedName(t *testing.T) {
+	tests := []struct {
+		name, env, expected string
+	}{
+		{"myapp", "", "myapp"},
+		{"myapp", "production", "myapp"},
+		{"myapp", "staging", "myapp-staging"},
+		{"myapp", "development", "myapp-development"},
+	}
+	for _, tc := range tests {
+		got := AppQualifiedName(tc.name, tc.env)
+		if got != tc.expected {
+			t.Errorf("AppQualifiedName(%q, %q) = %q, want %q", tc.name, tc.env, got, tc.expected)
+		}
+	}
+}
+
 func TestLoadWithEnv(t *testing.T) {
 	dir := t.TempDir()
 
@@ -171,6 +188,66 @@ func TestLoadWithEnvNoOverride(t *testing.T) {
 	}
 	if cfg.Environment != "production" {
 		t.Errorf("expected environment 'production', got %q", cfg.Environment)
+	}
+}
+
+func TestLoadWithEnvPortOverride(t *testing.T) {
+	dir := t.TempDir()
+	base := []byte("name: myapp\nport: 3000\n")
+	if err := os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), base, 0644); err != nil {
+		t.Fatal(err)
+	}
+	staging := []byte("port: 4000\n")
+	if err := os.WriteFile(filepath.Join(dir, ".tengiz.staging.yaml"), staging, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadWithEnv(dir, "staging")
+	if err != nil {
+		t.Fatalf("LoadWithEnv failed: %v", err)
+	}
+	if cfg.Port != 4000 {
+		t.Errorf("expected port 4000, got %d", cfg.Port)
+	}
+	if cfg.Name != "myapp" {
+		t.Errorf("expected name 'myapp', got %q", cfg.Name)
+	}
+}
+
+func TestLoadWithEnvMergePreservesBase(t *testing.T) {
+	dir := t.TempDir()
+	base := `name: app
+port: 3000
+env:
+  SHARED: shared_val
+  PROD_ONLY: prod_val
+`
+	if err := os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), []byte(base), 0644); err != nil {
+		t.Fatal(err)
+	}
+	staging := `port: 4000
+env:
+  STAGING_ONLY: staging_val
+`
+	if err := os.WriteFile(filepath.Join(dir, ".tengiz.staging.yaml"), []byte(staging), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadWithEnv(dir, "staging")
+	if err != nil {
+		t.Fatalf("LoadWithEnv: %v", err)
+	}
+	if cfg.Port != 4000 {
+		t.Errorf("Port = %d, want 4000", cfg.Port)
+	}
+	if cfg.Env["shared"] != "shared_val" {
+		t.Errorf("SHARED env lost: got %q, want %q", cfg.Env["shared"], "shared_val")
+	}
+	if cfg.Env["staging_only"] != "staging_val" {
+		t.Errorf("STAGING_ONLY env missing: got %q, want %q", cfg.Env["staging_only"], "staging_val")
+	}
+	if cfg.Env["prod_only"] != "prod_val" {
+		t.Errorf("PROD_ONLY env lost: got %q, want %q", cfg.Env["prod_only"], "prod_val")
 	}
 }
 

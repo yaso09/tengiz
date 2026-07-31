@@ -37,6 +37,7 @@ func init() {
 	rootCmd.PersistentFlags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(deployCmd)
+	proxyCmd.Flags().String("env", "production", "environment for proxy routing")
 	rootCmd.AddCommand(proxyCmd)
 	rootCmd.AddCommand(psCmd)
 	rootCmd.AddCommand(stopCmd)
@@ -74,8 +75,26 @@ func init() {
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	stopCmd.Flags().String("env", "production", "deployment environment")
+	startCmd.Flags().String("env", "production", "deployment environment")
+	rmCmd.Flags().String("env", "production", "deployment environment")
+	logsCmd.Flags().String("env", "production", "deployment environment")
+	healthCmd.Flags().String("env", "production", "deployment environment")
+	rollbackCmd.Flags().String("env", "production", "deployment environment")
+	buildLogsCmd.Flags().String("env", "production", "deployment environment")
+	configSetCmd.Flags().String("env", "production", "deployment environment")
+	configGetCmd.Flags().String("env", "production", "deployment environment")
+	configUnsetCmd.Flags().String("env", "production", "deployment environment")
+	configShowCmd.Flags().String("env", "production", "deployment environment")
+	domainAddCmd.Flags().String("env", "production", "deployment environment")
+	domainRemoveCmd.Flags().String("env", "production", "deployment environment")
+	domainListCmd.Flags().String("env", "production", "deployment environment")
+	volumeAddCmd.Flags().String("env", "production", "deployment environment")
+	volumeRemoveCmd.Flags().String("env", "production", "deployment environment")
+	volumeListCmd.Flags().String("env", "production", "deployment environment")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
+	initCmd.Flags().String("env", "", "create environment-specific config (e.g. staging, development)")
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
@@ -113,17 +132,21 @@ var initCmd = &cobra.Command{
 			name = args[0]
 		}
 
+		env, _ := cmd.Flags().GetString("env")
+
 		path := ".tengiz.yaml"
-		if _, err := os.Stat(path); err == nil {
-			return fmt.Errorf(".tengiz.yaml already exists")
+		if env != "" {
+			path = fmt.Sprintf(".tengiz.%s.yaml", env)
 		}
 
-		env := getEnv(cmd)
+		if _, err := os.Stat(path); err == nil {
+			return fmt.Errorf("%s already exists", path)
+		}
+
 		gitRepo, _ := cmd.Flags().GetString("git-repo")
 		gitBranch, _ := cmd.Flags().GetString("git-branch")
 
 		content := fmt.Sprintf(`name: %s
-environment: %s
 # port: 3000            # container internal port (auto-detected if omitted)
 serverless:
   enabled: true
@@ -148,17 +171,21 @@ serverless:
 # resources:
 #   cpu: "1.0"           # CPU cores (e.g., "0.5", "2")
 #   memory: "256m"       # memory limit (e.g., "128m", "1g")
-`, name, env)
+`, name)
+
+		if env != "" {
+			content = fmt.Sprintf("environment: %s\n", env) + content
+		}
 
 		if gitRepo != "" {
 			content += fmt.Sprintf("git:\n  repo: %s\n  branch: %s\n", gitRepo, gitBranch)
 		}
 
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-			return fmt.Errorf("write .tengiz.yaml: %w", err)
+			return fmt.Errorf("write %s: %w", path, err)
 		}
 
-		fmt.Printf("[tengiz] created .tengiz.yaml for %s\n", name)
+		fmt.Printf("[tengiz] created %s for %s\n", path, name)
 		return nil
 	},
 }
@@ -1785,7 +1812,6 @@ func addSecretProviderFlags(cmd *cobra.Command) {
 func Execute() {
 	proxyCmd.Flags().StringP("app", "a", "", "route all requests to this app (bypasses hostname routing)")
 	proxyCmd.Flags().IntP("port", "p", 8080, "proxy listen port")
-	proxyCmd.Flags().String("env", "production", "environment for proxy routing")
 	buildLogsCmd.Flags().Int("tail", 0, "show only last N lines of the latest build log")
 	configSetCmd.Flags().Bool("secret", false, "Store as encrypted secret instead of plaintext env var")
 	notificationConfigCmd.Flags().Bool("all", false, "enable notifications for all event types")
