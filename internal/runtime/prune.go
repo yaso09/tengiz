@@ -72,6 +72,69 @@ func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (*PruneRep
 	return &report, nil
 }
 
+func nonTengizStopped(all, tengiz, running []string) []string {
+	inTengiz := make(map[string]bool, len(tengiz))
+	for _, id := range tengiz {
+		inTengiz[id] = true
+	}
+	inRunning := make(map[string]bool, len(running))
+	for _, id := range running {
+		inRunning[id] = true
+	}
+	var out []string
+	for _, id := range all {
+		if !inTengiz[id] && !inRunning[id] {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 func (r *dockerRuntime) pruneDryRun(ctx context.Context, opts PruneOptions) (*PruneReport, error) {
-	return &PruneReport{DryRun: true}, nil
+	report := &PruneReport{DryRun: true}
+
+	// Containers: stopped non-tengiz candidates.
+	allOut, err := exec.CommandContext(ctx, "docker", "ps", "-aq").CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps -aq: %w\n%s", err, string(allOut))
+	}
+	tengizOut, err := exec.CommandContext(ctx, "docker", "ps", "-aq", "--filter", "label=tengiz-app").CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps (tengiz): %w\n%s", err, string(tengizOut))
+	}
+	runningOut, err := exec.CommandContext(ctx, "docker", "ps", "-q").CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps -q: %w\n%s", err, string(runningOut))
+	}
+
+	report.Containers = len(nonTengizStopped(
+		strings.Fields(string(allOut)),
+		strings.Fields(string(tengizOut)),
+		strings.Fields(string(runningOut)),
+	))
+
+	// Images: non-tengiz dangling (default) or all non-tengiz (--all).
+	imgArgs := []string{"images", "-aq", "--filter", "dangling=true"}
+	if opts.All {
+		imgArgs = []string{"images", "-aq"}
+	}
+	imgOut, err := exec.CommandContext(ctx, "docker", imgArgs...).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker images: %w\n%s", err, string(imgOut))
+	}
+	tengizImgOut, err := exec.CommandContext(ctx, "docker", "images", "-aq", "--filter", "label=tengiz-app").CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker images (tengiz): %w\n%s", err, string(tengizImgOut))
+	}
+	tengizImgs := make(map[string]bool)
+	for _, id := range strings.Fields(string(tengizImgOut)) {
+		tengizImgs[id] = true
+	}
+	for _, id := range strings.Fields(string(imgOut)) {
+		if !tengizImgs[id] {
+			report.Images++
+		}
+	}
+
+	return report, nil
 }

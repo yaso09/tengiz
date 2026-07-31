@@ -88,3 +88,25 @@ func TestParsePruneOutputEmpty(t *testing.T) {
 		t.Errorf("ReclaimedSpace = %q, want %q", r.ReclaimedSpace, "0B")
 	}
 }
+
+func TestDryRunCandidates(t *testing.T) {
+	all := []string{"a1", "a2", "a3", "a4"}
+	tengiz := []string{"a2"}
+	running := []string{"a3"}
+
+	got := nonTengizStopped(all, tengiz, running)
+	// a1 -> candidate (stopped, not tengiz)
+	// a2 -> excluded (tengiz)
+	// a3 -> excluded (running)
+	// a4 -> candidate (stopped, not tengiz)
+	if len(got) != 2 || got[0] != "a1" || got[1] != "a4" {
+		t.Errorf("nonTengizStopped() = %v, want [a1 a4]", got)
+	}
+}
+
+func TestDryRunCandidatesAllRunning(t *testing.T) {
+	got := nonTengizStopped([]string{"c1", "c2"}, nil, []string{"c1", "c2"})
+	if len(got) != 0 {
+		t.Errorf("nonTengizStopped() = %v, want []", got)
+	}
+}
