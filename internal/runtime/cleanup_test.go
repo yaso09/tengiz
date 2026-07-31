@@ -105,3 +105,21 @@ func TestDockerCleanupSmoke(t *testing.T) {
 	}
 	_ = summary
 }
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	summary, err := m.Cleanup(context.Background(), CleanupOptions{
+		DryRun:     true,
+		Containers: true,
+		Images:     true,
+		Volumes:    true,
+		Networks:   true,
+	})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if len(summary.ContainersRemoved) != 0 || len(summary.ImagesRemoved) != 0 ||
+		len(summary.VolumesRemoved) != 0 || len(summary.NetworksRemoved) != 0 {
+		t.Errorf("stub Cleanup should remove nothing, got %+v", summary)
+	}
+}
