@@ -160,6 +160,16 @@ func TestExtractAppPreviewSubdomain(t *testing.T) {
 	}
 }
 
+func TestExtractAppEnvSubdomain(t *testing.T) {
+	p := New(nil, 8080)
+	p.Register("myapp-staging", 9001)
+
+	app := p.extractApp("myapp-staging.tengiz.local:8080")
+	if app != "myapp-staging" {
+		t.Errorf("extractApp(%q) = %q, want %q", "myapp-staging.tengiz.local:8080", app, "myapp-staging")
+	}
+}
+
 func TestExtractAppRegularSubdomain(t *testing.T) {
 	p := New(nil, 8080)
 	p.Register("myapp", 9001)

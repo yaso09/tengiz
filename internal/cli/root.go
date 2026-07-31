@@ -37,6 +37,7 @@ func init() {
 	rootCmd.PersistentFlags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(deployCmd)
+	proxyCmd.Flags().String("env", "production", "environment for proxy routing")
 	rootCmd.AddCommand(proxyCmd)
 	rootCmd.AddCommand(psCmd)
 	rootCmd.AddCommand(stopCmd)
@@ -1811,7 +1812,6 @@ func addSecretProviderFlags(cmd *cobra.Command) {
 func Execute() {
 	proxyCmd.Flags().StringP("app", "a", "", "route all requests to this app (bypasses hostname routing)")
 	proxyCmd.Flags().IntP("port", "p", 8080, "proxy listen port")
-	proxyCmd.Flags().String("env", "production", "environment for proxy routing")
 	buildLogsCmd.Flags().Int("tail", 0, "show only last N lines of the latest build log")
 	configSetCmd.Flags().Bool("secret", false, "Store as encrypted secret instead of plaintext env var")
 	notificationConfigCmd.Flags().Bool("all", false, "enable notifications for all event types")

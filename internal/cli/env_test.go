@@ -89,6 +89,13 @@ func TestInitWithEnvCreatesEnvFile(t *testing.T) {
 	}
 }
 
+func TestProxyHasEnvFlag(t *testing.T) {
+	flag := proxyCmd.Flags().Lookup("env")
+	if flag == nil {
+		t.Error("proxyCmd missing --env flag")
+	}
+}
+
 func TestEnvQualifiedName(t *testing.T) {
 	tests := []struct {
 		name, env, expected string
