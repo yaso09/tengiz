@@ -98,6 +98,9 @@ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppCon
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRTForDeploy) Prune(ctx context.Context, opts runtime.PruneOptions) (runtime.PruneResult, error) {
+	return runtime.PruneResult{DryRun: opts.DryRun, Commands: [][]string{runtime.SystemPruneArgs(opts)}}, nil
+}
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}
@@ -373,6 +376,24 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	for name, found := range expected {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
+		}
+	}
+}
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCommandFlags(t *testing.T) {
+	for _, flag := range []string{"dry-run", "all", "volumes"} {
+		if cleanupCmd.Flags().Lookup(flag) == nil {
+			t.Errorf("cleanupCmd missing --%s flag", flag)
 		}
 	}
 }
