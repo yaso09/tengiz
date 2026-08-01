@@ -57,3 +57,83 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	}
 	return nil
 }
+
+type CleanupOptions struct {
+	All     bool // prune all unused images, not just dangling ones
+	Volumes bool // also prune unused volumes
+	DryRun  bool // report what would be removed without removing anything
+}
+
+type CleanupResult struct {
+	ContainersRemoved int
+	ImagesRemoved     int
+	NetworksRemoved   int
+	VolumesRemoved    int
+	BuildCacheRemoved int
+	SpaceReclaimed    string
+}
+
+func buildPruneArgs(opts CleanupOptions) []string {
+	args := []string{"system", "prune", "-f"}
+	if opts.All {
+		args = append(args, "-a")
+	}
+	if opts.Volumes {
+		args = append(args, "--volumes")
+	}
+	args = append(args, "--filter", "label!=tengiz-app")
+	return args
+}
+
+func parsePruneOutput(out string) *CleanupResult {
+	res := &CleanupResult{}
+	section := ""
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		switch line {
+		case "Deleted Containers:":
+			section = "containers"
+			continue
+		case "Deleted Images:":
+			section = "images"
+			continue
+		case "Deleted Networks:":
+			section = "networks"
+			continue
+		case "Deleted Volumes:":
+			section = "volumes"
+			continue
+		case "Deleted Build Cache Objects:":
+			section = "buildcache"
+			continue
+		}
+		if strings.HasPrefix(line, "Total reclaimed space:") {
+			res.SpaceReclaimed = strings.TrimSpace(strings.TrimPrefix(line, "Total reclaimed space:"))
+			continue
+		}
+		switch section {
+		case "containers":
+			res.ContainersRemoved++
+		case "images":
+			res.ImagesRemoved++
+		case "networks":
+			res.NetworksRemoved++
+		case "volumes":
+			res.VolumesRemoved++
+		case "buildcache":
+			res.BuildCacheRemoved++
+		}
+	}
+	return res
+}
+
+func countLines(out string) int {
+	trimmed := strings.TrimSpace(out)
+	if trimmed == "" {
+		return 0
+	}
+	return len(strings.Split(trimmed, "\n"))
+}
