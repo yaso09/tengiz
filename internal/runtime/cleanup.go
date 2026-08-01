@@ -57,3 +57,43 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	}
 	return nil
 }
+
+const tengizLabelFilter = "label!=tengiz-app"
+
+func SystemPruneArgs(opts PruneOptions) []string {
+	args := []string{"system", "prune", "-f", "--filter", tengizLabelFilter}
+	if opts.All {
+		args = append(args, "-a")
+	}
+	if opts.Volumes {
+		args = append(args, "--volumes")
+	}
+	return args
+}
+
+func parseReclaimedSpace(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Total reclaimed space:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "Total reclaimed space:"))
+		}
+	}
+	return ""
+}
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
+	args := SystemPruneArgs(opts)
+	if opts.DryRun {
+		return PruneResult{DryRun: true, Commands: [][]string{args}}, nil
+	}
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return PruneResult{}, fmt.Errorf("docker system prune: %w\n%s", err, string(out))
+	}
+	return PruneResult{
+		Output:         string(out),
+		ReclaimedSpace: parseReclaimedSpace(string(out)),
+		Commands:       [][]string{args},
+	}, nil
+}
