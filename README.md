@@ -21,6 +21,7 @@
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
+- **Docker housekeeping** — `tengiz cleanup` prunes stopped non-Tengiz containers, dangling images, unused volumes/networks, and the build cache. Tengiz-managed containers are always protected via labels.
 
 ## Prerequisites
 
@@ -234,6 +235,31 @@ Rollback to the previous deployment. The previous active container is started on
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name (required) |
+
+### `tengiz cleanup`
+
+Prune unused Docker resources to reclaim disk space. Tengiz-managed containers (labeled `tengiz-app`) are **always protected** — only stopped non-Tengiz containers, dangling images, unused volumes/networks, and the build cache are removed.
+
+| Flag | Description |
+|------|-------------|
+| `--all` | Prune all categories (default when no category flag is set) |
+| `--containers` | Prune stopped non-Tengiz containers |
+| `--images` | Prune dangling Docker images |
+| `--all-images` | Also remove all unused (not just dangling) images |
+| `--volumes` | Prune unused volumes |
+| `--networks` | Prune unused networks |
+| `--cache` | Prune the Docker build cache |
+| `--dry-run` | Show what would be removed without deleting anything |
+| `--force` | Skip the confirmation prompt (for CI/scripts) |
+| `--stats` | Show `docker system df` before and after cleanup |
+
+Examples:
+```
+tengiz cleanup                  # prune all categories (prompts for confirmation)
+tengiz cleanup --dry-run        # preview without deleting
+tengiz cleanup --force          # non-interactive, prune everything
+tengiz cleanup --images --cache --stats   # prune images + build cache, show disk usage
+```
 
 ### `tengiz domain`
 
