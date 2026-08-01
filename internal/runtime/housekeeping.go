@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"fmt"
+	"os/exec"
 	"strings"
 )
 
@@ -44,6 +46,16 @@ type Housekeeper interface {
 	DryRun(ctx context.Context, opts PruneOptions) (DryRunResult, error)
 	DiskUsage(ctx context.Context) (string, error)
 }
+
+// NewDockerHousekeeper returns a Housekeeper backed by the docker CLI.
+func NewDockerHousekeeper() (Housekeeper, error) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		return nil, fmt.Errorf("docker not found in PATH: %w", err)
+	}
+	return &dockerHousekeeper{}, nil
+}
+
+type dockerHousekeeper struct{}
 
 // NewStubHousekeeper returns a no-op Housekeeper for tests.
 func NewStubHousekeeper() Housekeeper {
@@ -172,4 +184,69 @@ func dryRunCommands(opts PruneOptions) []pruneCommand {
 		cmds = append(cmds, pruneCommand{"cache", buildCacheUsageArgs()})
 	}
 	return cmds
+}
+
+// runDockerCommand executes a docker CLI command and returns its combined output.
+func runDockerCommand(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker %s: %w\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return string(out), nil
+}
+
+func (h *dockerHousekeeper) Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
+	var res PruneResult
+	for _, pc := range pruneCommands(opts) {
+		out, err := runDockerCommand(ctx, pc.args...)
+		if err != nil {
+			return res, err
+		}
+		switch pc.kind {
+		case "containers":
+			res.ContainerOutput = out
+		case "images":
+			res.ImageOutput = out
+		case "volumes":
+			res.VolumeOutput = out
+		case "networks":
+			res.NetworkOutput = out
+		case "cache":
+			res.CacheOutput = out
+		}
+	}
+	return res, nil
+}
+
+func (h *dockerHousekeeper) DryRun(ctx context.Context, opts PruneOptions) (DryRunResult, error) {
+	var res DryRunResult
+	for _, pc := range dryRunCommands(opts) {
+		out, err := runDockerCommand(ctx, pc.args...)
+		if err != nil {
+			return res, err
+		}
+		n := countLines(out)
+		switch pc.kind {
+		case "containers":
+			res.Containers = n
+		case "images":
+			res.Images = n
+		case "volumes":
+			res.Volumes = n
+		case "networks":
+			res.Networks = n
+		case "cache":
+			res.Cache = n
+		}
+	}
+	return res, nil
+}
+
+func (h *dockerHousekeeper) DiskUsage(ctx context.Context) (string, error) {
+	out, err := runDockerCommand(ctx, buildSystemDFArgs()...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
 }

@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"context"
+	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -245,5 +247,28 @@ func TestDryRunCommandsSelective(t *testing.T) {
 func TestDryRunCommandsEmpty(t *testing.T) {
 	if got := dryRunCommands(PruneOptions{}); len(got) != 0 {
 		t.Errorf("dryRunCommands() = %+v, want empty", got)
+	}
+}
+
+func TestRunDockerCommandWhenDockerMissing(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err == nil {
+		t.Skip("docker binary present; skipping missing-binary test")
+	}
+	_, err := runDockerCommand(context.Background(), "version")
+	if err == nil {
+		t.Fatal("runDockerCommand() with no docker binary returned nil error")
+	}
+}
+
+func TestRunDockerCommandWhenDockerPresent(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker binary not present; skipping integration smoke test")
+	}
+	out, err := runDockerCommand(context.Background(), "version", "--format", "{{.Client.Version}}")
+	if err != nil {
+		t.Fatalf("runDockerCommand() error = %v", err)
+	}
+	if strings.TrimSpace(out) == "" {
+		t.Error("runDockerCommand() returned empty docker client version")
 	}
 }
