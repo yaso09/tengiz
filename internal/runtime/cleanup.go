@@ -6,6 +6,7 @@ import (
 	"log"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -56,4 +57,12 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 		}
 	}
 	return nil
+}
+
+func (r *dockerRuntime) SystemDf(ctx context.Context) ([]DfEntry, error) {
+	return nil, nil
+}
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
+	return PruneResult{}, nil
 }

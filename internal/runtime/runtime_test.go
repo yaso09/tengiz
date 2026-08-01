@@ -247,6 +247,28 @@ func TestStubRun(t *testing.T) {
 	}
 }
 
+func TestStubSystemDf(t *testing.T) {
+	m := NewStub()
+	entries, err := m.SystemDf(context.Background())
+	if err != nil {
+		t.Fatalf("SystemDf() error = %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("SystemDf() = %v, want empty", entries)
+	}
+}
+
+func TestStubPrune(t *testing.T) {
+	m := NewStub()
+	res, err := m.Prune(context.Background(), PruneOptions{})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if len(res.Categories) != 0 {
+		t.Errorf("Prune() = %+v, want empty result", res)
+	}
+}
+
 func TestStubRunInteractive(t *testing.T) {
 	m := NewStub()
 	cfg := &types.AppConfig{Name: "testapp", Env: map[string]string{"FOO": "bar"}}
