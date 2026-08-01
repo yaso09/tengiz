@@ -138,6 +138,20 @@ func countLines(out string) int {
 	return len(strings.Split(trimmed, "\n"))
 }
 
+func countNonTengizLines(out string) int {
+	trimmed := strings.TrimSpace(out)
+	if trimmed == "" {
+		return 0
+	}
+	count := 0
+	for _, line := range strings.Split(trimmed, "\n") {
+		if !strings.Contains(line, "tengiz-app=") {
+			count++
+		}
+	}
+	return count
+}
+
 func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (*CleanupResult, error) {
 	if opts.DryRun {
 		return r.dryRunCleanup(ctx, opts)
@@ -157,13 +171,12 @@ func (r *dockerRuntime) dryRunCleanup(ctx context.Context, opts CleanupOptions) 
 	cmd := exec.CommandContext(ctx, "docker", "ps", "-a",
 		"--filter", "status=exited",
 		"--filter", "status=created",
-		"--filter", "label!=tengiz-app",
-		"--format", "{{.Names}}")
+		"--format", "{{.Names}}\t{{.Labels}}")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("docker ps: %w", err)
 	}
-	res.ContainersRemoved = countLines(string(out))
+	res.ContainersRemoved = countNonTengizLines(string(out))
 
 	cmd = exec.CommandContext(ctx, "docker", "images",
 		"--filter", "dangling=true",

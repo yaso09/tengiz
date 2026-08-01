@@ -123,6 +123,16 @@ func TestCountLines(t *testing.T) {
 	}
 }
 
+func TestCountNonTengizLines(t *testing.T) {
+	if n := countNonTengizLines(""); n != 0 {
+		t.Errorf("countNonTengizLines(\"\") = %d, want 0", n)
+	}
+	out := "foo\nbar\ttengiz-app=myapp,com.example.label=v1\nbaz\nqux\ttengiz-app=other\n"
+	if n := countNonTengizLines(out); n != 2 {
+		t.Errorf("countNonTengizLines() = %d, want 2", n)
+	}
+}
+
 func TestStubCleanup(t *testing.T) {
 	m := NewStub()
 	res, err := m.Cleanup(context.Background(), CleanupOptions{All: true})
