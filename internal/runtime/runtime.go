@@ -28,12 +28,46 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type PruneCategory string
+
+const (
+	PruneContainers PruneCategory = "containers"
+	PruneImages     PruneCategory = "images"
+	PruneVolumes    PruneCategory = "volumes"
+	PruneNetworks   PruneCategory = "networks"
+	PruneBuildCache PruneCategory = "build-cache"
+)
+
+type PruneOptions struct {
+	Categories []PruneCategory
+	All        bool
+}
+
+type CategoryResult struct {
+	Category       PruneCategory
+	ReclaimedSpace string
+}
+
+type PruneResult struct {
+	Categories []CategoryResult
+}
+
+type DfEntry struct {
+	Kind        string
+	TotalCount  int
+	Active      int
+	Size        string
+	Reclaimable string
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
 	RemoveImage(ctx context.Context, imageTag string) error
 	KeepLastNImages(ctx context.Context, appName string, n int) error
+	SystemDf(ctx context.Context) ([]DfEntry, error)
+	Prune(ctx context.Context, opts PruneOptions) (PruneResult, error)
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
@@ -116,6 +150,14 @@ func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
 
 func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
 	return nil
+}
+
+func (m *stubManager) SystemDf(ctx context.Context) ([]DfEntry, error) {
+	return nil, nil
+}
+
+func (m *stubManager) Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
+	return PruneResult{}, nil
 }
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
