@@ -32,6 +32,9 @@ func (m *mockRuntime) WaitForHealth(ctx context.Context, name string, hc *types.
 func (m *mockRuntime) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRuntime) Prune(ctx context.Context, opts runtime.PruneOptions) (runtime.PruneResult, error) {
+	return runtime.PruneResult{DryRun: opts.DryRun, Commands: [][]string{runtime.SystemPruneArgs(opts)}}, nil
+}
 
 func TestResetExtendsTimer(t *testing.T) {
 	mock := &mockRuntime{}
