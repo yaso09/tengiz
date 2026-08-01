@@ -137,3 +137,62 @@ func countLines(out string) int {
 	}
 	return len(strings.Split(trimmed, "\n"))
 }
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (*CleanupResult, error) {
+	if opts.DryRun {
+		return r.dryRunCleanup(ctx, opts)
+	}
+	args := buildPruneArgs(opts)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker system prune: %w\n%s", err, string(out))
+	}
+	return parsePruneOutput(string(out)), nil
+}
+
+func (r *dockerRuntime) dryRunCleanup(ctx context.Context, opts CleanupOptions) (*CleanupResult, error) {
+	res := &CleanupResult{}
+
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-a",
+		"--filter", "status=exited",
+		"--filter", "status=created",
+		"--filter", "label!=tengiz-app",
+		"--format", "{{.Names}}")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps: %w", err)
+	}
+	res.ContainersRemoved = countLines(string(out))
+
+	cmd = exec.CommandContext(ctx, "docker", "images",
+		"--filter", "dangling=true",
+		"--format", "{{.ID}}")
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker images: %w", err)
+	}
+	res.ImagesRemoved = countLines(string(out))
+
+	cmd = exec.CommandContext(ctx, "docker", "network", "ls",
+		"--filter", "dangling=true",
+		"--format", "{{.Name}}")
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker network ls: %w", err)
+	}
+	res.NetworksRemoved = countLines(string(out))
+
+	if opts.Volumes {
+		cmd = exec.CommandContext(ctx, "docker", "volume", "ls",
+			"--filter", "dangling=true",
+			"--format", "{{.Name}}")
+		out, err = cmd.CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("docker volume ls: %w", err)
+		}
+		res.VolumesRemoved = countLines(string(out))
+	}
+
+	return res, nil
+}

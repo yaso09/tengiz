@@ -122,3 +122,17 @@ func TestCountLines(t *testing.T) {
 		t.Errorf("countLines(a/b/c) = %d, want 3", n)
 	}
 }
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	res, err := m.Cleanup(context.Background(), CleanupOptions{All: true})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if res == nil {
+		t.Fatal("Cleanup() returned nil result")
+	}
+	if res.ContainersRemoved != 0 {
+		t.Errorf("ContainersRemoved = %d, want 0", res.ContainersRemoved)
+	}
+}
