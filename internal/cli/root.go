@@ -39,6 +39,7 @@ func init() {
 	rootCmd.AddCommand(deployCmd)
 	rootCmd.AddCommand(proxyCmd)
 	rootCmd.AddCommand(psCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(rmCmd)
@@ -83,6 +84,9 @@ func init() {
 	logsCmd.Flags().String("since", "", "show logs since timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
 	logsCmd.Flags().String("until", "", "show logs before timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
 	logsCmd.Flags().String("grep", "", "filter logs with a case-sensitive pattern (client-side)")
+	cleanupCmd.Flags().Bool("all", false, "remove all unused images, not just dangling ones")
+	cleanupCmd.Flags().Bool("volumes", false, "also remove unused volumes")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without removing anything")
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
@@ -595,6 +599,53 @@ var psCmd = &cobra.Command{
 				env = "-"
 			}
 			fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", a.Name, a.State, portStr, env, health)
+		}
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources (containers, images, networks, volumes)",
+	Long: `Removes Docker resources not managed by Tengiz.
+
+Containers managed by Tengiz (labeled tengiz-app=*) are always protected.
+By default removes stopped containers, unused networks and dangling images.
+Use --all to also remove unused images, --volumes to also remove unused
+volumes, and --dry-run to preview what would be removed.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		all, _ := cmd.Flags().GetBool("all")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		opts := runtime.CleanupOptions{All: all, Volumes: volumes, DryRun: dryRun}
+
+		if dryRun {
+			res, err := rt.Cleanup(context.Background(), opts)
+			if err != nil {
+				return fmt.Errorf("cleanup dry run: %w", err)
+			}
+			fmt.Printf("[tengiz] dry run: %d containers, %d images, %d networks, %d volumes would be removed\n",
+				res.ContainersRemoved, res.ImagesRemoved, res.NetworksRemoved, res.VolumesRemoved)
+			return nil
+		}
+
+		fmt.Println("[tengiz] pruning unused Docker resources (Tengiz-managed containers protected)...")
+		res, err := rt.Cleanup(context.Background(), opts)
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+		fmt.Printf("[tengiz] removed %d containers, %d images, %d networks, %d volumes\n",
+			res.ContainersRemoved, res.ImagesRemoved, res.NetworksRemoved, res.VolumesRemoved)
+		if res.SpaceReclaimed != "" {
+			fmt.Printf("[tengiz] total reclaimed space: %s\n", res.SpaceReclaimed)
+		} else {
+			fmt.Println("[tengiz] nothing to reclaim")
 		}
 		return nil
 	},
