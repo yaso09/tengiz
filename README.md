@@ -19,6 +19,7 @@
 - **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
+- **Docker housekeeping** — `tengiz cleanup` prunes stopped containers, unused images, and networks while always protecting Tengiz-managed containers.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
 
@@ -573,6 +574,23 @@ When `webhook.secret` is set, the server verifies the payload signature on every
 | `tengiz git disconnect` | Remove the SSH deploy key |
 | `tengiz webhook [-p <port>] [--config <path>]` | Start the webhook server with optional config |
 | `tengiz init --git-repo URL` | Create config with git repo |
+
+### `tengiz cleanup`
+
+Remove unused Docker resources (stopped containers, dangling/unused images, unused networks, and optionally volumes). Containers managed by Tengiz (labeled `tengiz-app=*`) are always protected.
+
+| Flag | Description |
+|------|-------------|
+| `--all` | Also remove all unused images, not just dangling ones |
+| `--volumes` | Also remove unused volumes |
+| `--dry-run` | Show what would be removed without removing anything |
+
+```bash
+tengiz cleanup              # prune stopped containers + dangling images + unused networks
+tengiz cleanup --all        # also remove unused images
+tengiz cleanup --volumes    # also remove unused volumes
+tengiz cleanup --dry-run    # preview first
+```
 
 ## Architecture
 
