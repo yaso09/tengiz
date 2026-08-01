@@ -28,6 +28,22 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type CleanupOptions struct {
+	Containers bool
+	Images     bool
+	BuildCache bool
+	Volumes    bool
+	DryRun     bool
+}
+
+type CleanupReport struct {
+	ContainersRemoved int
+	ImagesRemoved     int
+	BuildCachePruned  bool
+	VolumesPruned     bool
+	DryRun            bool
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
@@ -46,6 +62,7 @@ type Manager interface {
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
+	Cleanup(ctx context.Context, opts CleanupOptions) (CleanupReport, error)
 }
 
 type stubManager struct{}
@@ -120,4 +137,8 @@ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
 	return nil
+}
+
+func (m *stubManager) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupReport, error) {
+	return CleanupReport{}, nil
 }
