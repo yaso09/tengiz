@@ -1724,3 +1724,69 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Every domain independently selects its TLS source via a `certificateType` enum: `none` (no TLS), `letsencrypt` (built-in ACME resolver), or `custom` (an arbitrary user-defined certResolver name, e.g. for internal CAs or enterprise certs). Each domain can also bind to an arbitrary proxy entrypoint via `customEntrypoint` instead of the default web/websecure — setting it suppresses auto-creation of the companion HTTPS router (user manages routing themselves). mTLS/TLS-options are supported via `tls.options`. A per-domain `uniqueConfigKey` makes router/service naming idempotent across create/update/remove.
 - **Why add to Tengiz:** Today Tengiz has a single global routing model with no per-domain TLS source or entrypoint choice. This gives operators: internal-only apps with no TLS, domains using enterprise/self-managed CAs, and binding apps to non-standard proxy entrypoints (e.g., a separate ports listener). `.tengiz.yaml`'da `domains: [{host: api.corp, cert: custom, entrypoint: internal}]`. Implementation: per-domain fields in the proxy routing table + a `certResolver` map in the TLS config. Complements Manual SSL Management (#188). Low effort, unlocks enterprise/internal-use cases.
 - **Detected:** 2026-08-01
+
+## Scheme-Based Port Map Management (grpc/http/https/grpcs)
+- **Source:** Dokku
+- **Description:** `ports:add/set/remove/clear <app> <scheme>:<host-port>:<container-port>` manages proxy port mappings with a scheme prefix. The nginx proxy template handles `http`, `https`, `grpc`, and `grpcs` schemes — `grpc`/`grpcs` generate a `grpc_pass` upstream (`grpc://{{APP}}-{{port}}`) with TLS handling for `grpcs`, enabling gRPC proxying alongside HTTP. Port maps are persisted per-app and drive both proxy listeners and the `PORT` env var. Dockerfile `EXPOSE` directives are auto-detected into `map-detected`.
+- **Why add to Tengiz:** Tengiz's proxy is HTTP-only (`httputil.ReverseProxy`) and allocates ports 9000-9999 without a scheme concept. Production apps increasingly use gRPC (microservices, Connect, Google Cloud APIs); a `scheme:host-port:container-port` port-map model gives per-app gRPC support (`proxy.ports: [{scheme: grpc, host: 50051, container: 50051}]`) and mirrors the existing Port Mapping Protocol Selection (#111) which covers TCP/UDP. The proxy needs a gRPC path that upgrades to HTTP/2 prior to forwarding. Medium effort, high value for microservice deployments.
+- **Detected:** 2026-08-01
+
+## Cross-App Service Discovery via Network Aliases (APP.PROC_TYPE.tld)
+- **Source:** Dokku
+- **Description:** When an app is attached to a non-bridge Docker network, Dokku's `network` plugin adds network aliases (`--alias`) of the pattern `APP.PROC_TYPE`, e.g. `node-js-app.web`, plus `HOSTNAME.APP.PROC_TYPE`. A configurable `tld` network property appends a suffix (e.g. `node-js-app.web.svc.cluster.local`). Other containers on the same network resolve these names via Docker's embedded DNS, enabling load-balanced cross-app communication with zero external DNS. Supported via `network:set <app> tld svc.cluster.local`, `attach-post-create`, `attach-post-deploy`, `initial-network`.
+- **Why add to Tengiz:** Tengiz multi-app deployments currently have no internal addressing — apps must know each other's host IPs/ports. Network aliases give Tengiz its own service-discovery: `tengiz network:set myapp tld svc.cluster.local` then `myapp.web.svc.cluster.local` is resolvable by sibling apps on the same custom network (Custom Docker Network, #30). Implementation: pass `--network-alias` flags in `runtime.Create()` when attaching to a custom network. Low effort, enables decoupled microservice architectures without a service mesh.
+- **Detected:** 2026-08-01
+
+## Phased Network Attachment (attach-post-create / attach-post-deploy / initial-network)
+- **Source:** Dokku
+- **Description:** Network properties control *when* a container joins a network: `attach-post-create` (after create, before start — for the container to reach resources on boot), `attach-post-deploy` (after deploy, before proxy update — for other containers to reach this one), and `initial-network` (at creation — typically blocks external routing). Multiple networks supported for attach phases. `bind-all-interfaces` binds containers to `0.0.0.0` on a random host port instead of the internal-only interface. `network:rebuild` / `network:rebuildall` re-apply config when Docker reassigns IPs.
+- **Why add to Tengiz:** Tengiz's scale-to-zero lifecycle needs a clear attach-point model so a cold-started container re-joins the right networks in the right order. `.tengiz.yaml`'da `network: { attach_post_create: [tengiz-net], attach_post_deploy: [metrics-net], bind_all_interfaces: true }`. Also gives operators the "expose on all interfaces for direct host access" escape hatch. `network:rebuildall` is a quick recovery tool after a Docker daemon upgrade. Low-medium effort, builds on Custom Docker Network (#30).
+- **Detected:** 2026-08-01
+
+## Static Web Listener (Route to an Existing IP:Port)
+- **Source:** Dokku
+- **Description:** `network:set <app> static-web-listener <ip:port>` routes an app's web traffic to an existing `$IP:$PORT` combination instead of a container. Documented use case: proxying internal admin tools or services *not* managed by Dokku through Dokku's domain/proxy layer. When set, the network plugin skips container IP discovery for the `web` process and uses the static listener directly.
+- **Why add to Tengiz:** Lets Tengiz expose non-Tengiz services (a legacy app on another host, a database UI, a separate VM's service) under a `tengiz.local` hostname with all proxy benefits (domains, auth, cold-start) without migrating the workload into a container. `tengiz config set myapp static_web_listener 10.0.0.5:8080`. Low effort — proxy's route table maps to a fixed target instead of `127.0.0.1:port`. Distinct from Explicit Image Deploy (#13) which still uses containers.
+- **Detected:** 2026-08-01
+
+## Sanitized Container Inspect (ps:inspect)
+- **Source:** Dokku
+- **Description:** `dokku ps:inspect <app>` wraps `docker inspect` across all running containers of an app and sanitizes the output — redacting sensitive values (env vars, labels, secret mounts) so the JSON can be safely copy-pasted into tickets or shared for debugging. Prevents accidentally leaking DB passwords or API keys when pasting a full inspect blob.
+- **Why add to Tengiz:** `tengiz inspect <app>` is a natural companion to the implemented `tengiz run` and container entering (#140) — operators frequently need container config for debugging but shouldn't paste raw env secrets. Implementation: run `docker inspect` and strip `Config.Env`/`Config.Labels` values via a redact function before printing. Very low effort, meaningful security-hygiene win for a platform that now stores encrypted secrets (#54).
+- **Detected:** 2026-08-01
+
+## Build-Phase Resource Limits (resource:limit --process-type build)
+- **Source:** Dokku
+- **Description:** The `resource` plugin applies CPU/memory limits to the *build* container by targeting the special `build` process type: `resource:limit --memory 4g --process-type build node-js-app`. Build-time limits do NOT inherit from default runtime limits (builds often need more memory) and are scoped per builder via the `docker-args-process-build` trigger. The `build` proctype name is reserved and cannot be used in a Procfile.
+- **Why add to Tengiz:** Tengiz's existing Resource Limits (#6) and Per-Process-Type Resource Limits (#93) govern the *running* container only — a `go build` or `next build` on a small server can OOM the host before the app ever starts. `.tengiz.yaml`'da `resources.build.memory: 4g`, `resources.build.cpu: 2` constrain `docker build` (via `--memory/--cpus` on the build step). Low effort, prevents the most common single-server deploy failure (host OOM during compile).
+- **Detected:** 2026-08-01
+
+## Named Storage Entries (storage:create/destroy/set + storage:exec)
+- **Source:** Dokku
+- **Description:** `storage:create <name> [path]`, `storage:destroy`, `storage:mount <app> <name> --container-dir <path>`, `storage:unmount`, `storage:set`, and `storage:list-entries` manage *named, reusable* storage entries (the source of truth for the underlying volume) that can be mounted into multiple apps with per-app container paths, subpaths, readonly, and process-type scope. Named entries support host dirs, Docker volumes, and (on k3s) PersistentVolumeClaims. `storage:exec <name> [-- cmd]` runs a command in a temporary container that mounts the entry.
+- **Why add to Tengiz:** Tengiz's Persistent Storage (#7) is per-app colon-form mounts only. Named entries enable: one volume shared by web+worker apps, first-class volume creation/removal, and the killer `tengiz storage exec <name> pg_dump` pattern for DB maintenance on a shared data volume. `--chown herokuish|root|paketo` presets fix the classic UID-permission mismatch when buildpacks write to mounted dirs. Medium effort, natural evolution of the existing storage layer.
+- **Detected:** 2026-08-01
+
+## Server-Side Git Host Trust & Auth (git:allow-host / git:auth / git:generate-deploy-key)
+- **Source:** Dokku
+- **Description:** `git:allow-host <host>` adds a host to the Dokku server's `known_hosts`, `git:auth <host> [user pass]` configures a `.netrc` entry (password via stdin, `git:auth-status` verifies state), and `git:generate-deploy-key` / `git:public-key` create/export an SSH deploy key. These configure the *server side* so pull-based deploys (`git:sync` of private repos) and remote CI can authenticate without per-user keys.
+- **Why add to Tengiz:** Tengiz's Git-Sync Deployment (#142) and GitOps (#33) pull from private repos, but today there's no way to configure the host's trust/auth. `tengiz git allow-host github.com` + `tengiz git auth github.com bot TOKEN` (stdin, stored in `~/.tengiz/.netrc`) + `tengiz git generate-deploy-key` gives secure pull-based deploys. Complements SSH Key Management (#99) which targets remote-server access — this targets git-provider auth from the Tengiz host. Low effort, unblocks private-repo pull workflows.
+- **Detected:** 2026-08-01
+
+## Heroku Release Phase (Procfile `release` command + app.json scripts)
+- **Source:** Dokku
+- **Description:** A `release` stanza in the `Procfile` (`release: curl .../state=built`) plus `scripts.dokku.predeploy`, `scripts.dokku.postdeploy`, and `scripts.postdeploy` in `app.json` run *between* image build and container scheduling, in the built image's context. Predeploy changes are committed to the image; release/postdeploy changes are not. Any failure fails the deploy without touching running containers. `appjson-path` property relocates `app.json` (e.g. `.dokku/app.json` for monorepos).
+- **Why add to Tengiz:** This is Heroku's release phase — the place for migrations, cache priming, and CDN asset pushes, distinct from pre-deploy hooks (#9, host-side) because it runs *in the built image* before traffic switch. `tengiz deploy` would run `release:` after `docker build` and before container start; failure aborts. Complements Procfile Support (#90) and the implemented build-logs pipeline. Medium effort, closes the "run migrations safely" gap for zero-downtime deploys.
+- **Detected:** 2026-08-01
+
+## Stable High-Port Access When Domains Are Disabled (proxy-port / proxy-ssl-port)
+- **Source:** Dokku
+- **Description:** When an app's domains are disabled (`domains:disable`), Dokku still exposes it on a *stable high port* (configurable via `proxy:set <app> proxy-port 5000` and `proxy-ssl-port 5443`) so internal services reach it consistently across deploys — unlike default nginx, which uses an internal IP. Proxy ports are per-app or global.
+- **Why add to Tengiz:** Useful for internal-only services behind Tengiz's Per-App Proxy Toggle (#189): instead of random 9000-9999 allocations or no exposure at all, an operator can pin `myapp` to a fixed internal port (e.g. 5432-style) that never changes across redeploys, cold starts, or reboots — important for `docker exec` scripts, monitoring, and inter-container tooling that caches addresses. `.tengiz.yaml`'da `proxy.port: 5000`, `proxy.ssl_port: 5443`. Low effort.
+- **Detected:** 2026-08-01
+
+## Post-Deploy Container Retirement Grace (wait-to-retire)
+- **Source:** Dokku
+- **Description:** After a successful zero-downtime deploy, Dokku immediately SIGTERMs old containers so they begin graceful shutdown, then leaves them running for a `wait-to-retire` grace period (default 60s, `checks:set <app> wait-to-retire 30`) before stopping them — giving long-running HTTP/WebSocket connections time to finish after proxy traffic has switched to the new container.
+- **Why add to Tengiz:** Tengiz's implemented Zero-Downtime Deployment (#1) switches traffic atomically, but there's no post-switch drain window — long-lived requests (file uploads, SSE, WebSockets) on the old container get cut off mid-flight. `checks.wait_to_retire: 30` in `.tengiz.yaml` configures how long the old container lingers (SIGTERM → grace → stop) after proxy swap. Complements Readiness Delay (#27) and Graceful Shutdown (#212, pre-stop drain) with the *post-switch* half of the lifecycle. Low effort, high correctness value.
+- **Detected:** 2026-08-01
