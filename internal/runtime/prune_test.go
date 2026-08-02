@@ -54,3 +54,61 @@ func TestFormatBytes(t *testing.T) {
 		}
 	}
 }
+
+func containsArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBuildPruneCommandsDefault(t *testing.T) {
+	opts := PruneOptions{Containers: true, Images: true, Volumes: true, Networks: true, BuildCache: true}
+	cmds := buildPruneCommands(opts)
+	if len(cmds) != 5 {
+		t.Fatalf("expected 5 commands, got %d: %+v", len(cmds), cmds)
+	}
+	if cmds[0].name != "containers" {
+		t.Errorf("expected first command to be containers, got %q", cmds[0].name)
+	}
+	if !containsArg(cmds[0].args, "label!=tengiz-app") {
+		t.Errorf("containers prune missing Tengiz protection filter: %v", cmds[0].args)
+	}
+	if containsArg(cmds[1].args, "-a") {
+		t.Errorf("default images prune must NOT use -a (keeps tagged images): %v", cmds[1].args)
+	}
+}
+
+func TestBuildPruneCommandsAll(t *testing.T) {
+	opts := PruneOptions{All: true, Containers: true, Images: true, Volumes: true, Networks: true, BuildCache: true}
+	cmds := buildPruneCommands(opts)
+	if len(cmds) != 5 {
+		t.Fatalf("expected 5 commands, got %d", len(cmds))
+	}
+	if containsArg(cmds[0].args, "label!=tengiz-app") {
+		t.Errorf("--all must NOT protect Tengiz containers: %v", cmds[0].args)
+	}
+	if !containsArg(cmds[1].args, "-a") {
+		t.Errorf("--all images prune should include -a: %v", cmds[1].args)
+	}
+}
+
+func TestBuildPruneCommandsCategory(t *testing.T) {
+	opts := PruneOptions{Volumes: true}
+	cmds := buildPruneCommands(opts)
+	if len(cmds) != 1 || cmds[0].name != "volumes" {
+		t.Fatalf("expected only volumes command, got %+v", cmds)
+	}
+	if !containsArg(cmds[0].args, "volume") || !containsArg(cmds[0].args, "prune") {
+		t.Errorf("unexpected volumes args: %v", cmds[0].args)
+	}
+}
+
+func TestBuildPruneCommandsEmpty(t *testing.T) {
+	cmds := buildPruneCommands(PruneOptions{})
+	if len(cmds) != 0 {
+		t.Fatalf("expected no commands for empty options, got %+v", cmds)
+	}
+}

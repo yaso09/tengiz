@@ -56,3 +56,60 @@ func FormatBytes(n int64) string {
 	}
 	return strconv.FormatInt(n, 10) + "B"
 }
+
+type PruneOptions struct {
+	Containers bool
+	Images     bool
+	Volumes    bool
+	Networks   bool
+	BuildCache bool
+	All        bool
+	DryRun     bool
+}
+
+type PruneReport struct {
+	ContainersPruned bool
+	ImagesPruned     bool
+	VolumesPruned    bool
+	NetworksPruned   bool
+	BuildCachePruned bool
+	ReclaimedBytes   int64
+	DryRun           bool
+	Summary          string
+}
+
+type pruneCommand struct {
+	name string
+	args []string
+}
+
+func buildPruneCommands(opts PruneOptions) []pruneCommand {
+	var cmds []pruneCommand
+
+	containerArgs := []string{"container", "prune", "-f"}
+	if !opts.All {
+		containerArgs = append(containerArgs, "--filter", "label!=tengiz-app")
+	}
+	if opts.Containers {
+		cmds = append(cmds, pruneCommand{name: "containers", args: containerArgs})
+	}
+
+	imageArgs := []string{"image", "prune", "-f"}
+	if opts.All {
+		imageArgs = []string{"image", "prune", "-a", "-f"}
+	}
+	if opts.Images {
+		cmds = append(cmds, pruneCommand{name: "images", args: imageArgs})
+	}
+
+	if opts.Volumes {
+		cmds = append(cmds, pruneCommand{name: "volumes", args: []string{"volume", "prune", "-f"}})
+	}
+	if opts.Networks {
+		cmds = append(cmds, pruneCommand{name: "networks", args: []string{"network", "prune", "-f"}})
+	}
+	if opts.BuildCache {
+		cmds = append(cmds, pruneCommand{name: "build-cache", args: []string{"builder", "prune", "-f"}})
+	}
+	return cmds
+}
