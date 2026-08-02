@@ -1752,3 +1752,65 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** `validateDomain()` does an A-record DNS resolution and checks the resolved IP against hardcoded IP/CIDR ranges for Cloudflare, Fastly, Bunny CDN, and Arvancloud. If behind a CDN it marks the domain valid but returns a warning ("actual IP is masked"); otherwise it compares against the expected server IP and reports a mismatch with the resolved IP. This prevents the classic "certificate fails because the domain points at Cloudflare" confusion.
 - **Why add to Tengiz:** "CDN Provider Detection (#135)" trusts CDN IPs for `X-Forwarded-For`; this is the complementary domain-add-time check: `tengiz domain add` verifies DNS, distinguishes "domain points at a CDN (fine — use HTTP-01/ACME)" from "wrong IP" with an actionable message, and skips the misleading failure when a CDN proxies the domain. Reuses the same CDN IP-range tables. Reduces the #1 "why doesn't TLS work" support issue.
 - **Detected:** 2026-08-02
+
+---
+
+## Global Default Domains with Auto-Subdomain Derivation
+- **Source:** Dokku
+- **Description:** Server-level VHOST management: `domains:add-global example.com`, `domains:set-global`, `domains:remove-global`, `domains:clear-global` maintain a global domain list (`$DOKKU_ROOT/VHOST`). On app creation, `domains_setup`/`get_default_vhosts` (`plugins/domains/functions`) auto-generate `<app>.<globaldomain>` hostnames for any app that declares no domains of its own. `domains:reset` clears an app's overrides and re-seeds from the global list; `domains:urls` derives `http(s)://` URLs from port maps and cert existence. `NO_VHOST=1` env var disables routing for an app while keeping it running.
+- **Why add to Tengiz:** This is the "wildcard/base domain" behavior every PaaS user expects: set `tengiz domain add-global example.com` once and every new app is instantly reachable at `myapp.example.com` — plus `domains:reset` reverts an app to the base domain. Tengiz's proxy `extractApp()` already strips `.tengiz.local`/`.localhost` suffixes, so seeding the domain table at app-create time is a natural fit. Distinct from the recorded per-app "Custom Domain Management" (which is app-scoped) because this is a cascade default applied to all present and future apps.
+- **Detected:** 2026-08-02
+
+## Static Web Listener Override & bind-all-interfaces
+- **Source:** Dokku
+- **Description:** `network:set <app> static-web-listener=HOST:PORT` (`plugins/network/network.go`) hard-codes the app's web listener; `GetListeners(app, "web")` returns it verbatim and the proxy forwards traffic to it directly — even when the listener belongs to a process not managed by Dokku (a bare-metal daemon, or a process in another scheduler). `network:set <app> bind-all-interfaces=true|false` controls whether containers bind `0.0.0.0` vs loopback; proxy-enabled apps default to bind-all so the proxy can reach them.
+- **Why add to Tengiz:** A proxy-first PaaS needs an escape hatch: point `tengiz network set <app> static-web-listener=127.0.0.1:5432` at an unmanaged process and the existing proxy cold-start/routing logic treats it as a live app listener (no container, no scale-to-zero). In Go this is one field in the app's JSON state consulted by the proxy's upstream dialer before looking up container IPs. Small, surgical, and unlocks "hybrid" deployments the roadmap's pluggable-proxy/scheduler items don't cover.
+- **Detected:** 2026-08-02
+
+## Volume-Scoped One-off Exec (storage:exec)
+- **Source:** Dokku
+- **Description:** `storage:exec <name> [-- <cmd>...]` (`plugins/storage/commands_entries.go` CommandExec) runs a command (default shell) in a temporary `alpine:3` container that mounts the named volume, propagating stdin/tty detection and the underlying exit code. It is a volume-scoped, not app-scoped, exec — the operator targets the *volume* and can debug, migrate, or fix data even when no app currently uses it.
+- **Why add to Tengiz:** The recorded "One-off Process Execution" (`tengiz run`) executes in an app's image. Volume exec is the missing debugging primitive: "why is my data volume corrupt" or "copy this file into the shared volume" without starting the app. Go implementation reuses the runtime manager's `CreateFromImage` + `Exec` with the volume attached — ~100 lines. High value, low cost, and pairs with the recorded Persistent Storage/volume features.
+- **Detected:** 2026-08-02
+
+## Sanitized Container Inspect with Secret Redaction
+- **Source:** Dokku
+- **Description:** `ps:inspect <app>` (`plugins/ps/`) runs `docker container inspect` over all of an app's `CONTAINER.*` state files and pipes it through a filter that walks `Config.Env`, keeping only whitelisted prefixes (`CACHE_PATH=`, `DOCKER_`, `DOKKU_`, `DYNO=`, `PATH=`, `PORT=`, `USER=`) and replacing every other value with `KEY=XXXXXX` before pretty-printing.
+- **Why add to Tengiz:** Debugging container config today means raw `docker inspect` (full secrets exposure) or nothing. A `tengiz inspect <app>` that marshals `docker inspect` JSON through a redaction pass — reusing the existing `secrets` masking — gives a safe, first-class troubleshooting tool. Implementation: `runtime.Inspect(app)` returning filtered env keys rendered as sorted JSON. Distinct from Trace/Debug mode (which only toggles verbosity); this is a dedicated, secret-safe inspection command.
+- **Detected:** 2026-08-02
+
+## TTL-Managed Detached Run Container Lifecycle
+- **Source:** Dokku
+- **Description:** Beyond basic `run`, the `run` plugin has a full run-container lifecycle: `run:detached [--ttl-seconds N]` (default 86400) starts a non-interactive container labeled `com.dokku.active-deadline-seconds`; `run:list [--format json]` lists run containers per app; `run:logs [-t -n -q]` tails run-container output; `run:retire [<app>]` sweeps containers whose start time exceeds the TTL deadline; `run:stop [<app>|--container]` stops one or all. Cron integration adds `--cron-id` with `allow|forbid|replace` concurrency policies enforced via Docker labels.
+- **Why add to Tengiz:** The implemented `tengiz run` creates a temp container that is auto-removed — fine for migrations, but there is no way to run a long-lived background job and later inspect/stop it. Adding `run:detached`, `run:list`, `run:logs`, `run:stop`, `run:retire` with a TTL label (`com.tengiz.deadline-seconds`) and an idle-style sweeper reuses existing runtime exec plumbing. The `forbid`/`replace` label-lock pattern is also directly reusable for scheduled jobs.
+- **Detected:** 2026-08-02
+
+## Deploy from Archive URL or Stdin (tar/tar.gz/zip)
+- **Source:** Dokku
+- **Description:** `git:from-archive <app> <URL|--> [--archive-type tar|tar.gz|zip]` (`plugins/git/`) downloads an archive (or reads it from stdin when URL is `-`), detects and strips a common top-level prefix, flattens the tree, then feeds it through the normal git→build→deploy pipeline. `archive-max-files`/`archive-max-size` properties guard resource use.
+- **Why add to Tengiz:** A `tengiz deploy --archive <url|->` gives a git-free push path (GitHub release assets, uploaded zips) — distinct from Git-Sync (which requires a real git remote) and Image deploy (which skips build). Implementation: stream/tar-extract into a temp build dir using Go's `archive/tar` + `archive/zip`, then call the existing build/detect pipeline with that dir as source. The git-commit bookkeeping is optional for Tengiz; the value is archive ingestion + prefix stripping.
+- **Detected:** 2026-08-02
+
+## Per-Process Health Check Operational Controls
+- **Source:** Dokku
+- **Description:** The `checks` plugin exposes operational toggles beyond pass/fail: `checks:disable <app> [proc...]`, `checks:skip <app> [proctypes]` (one-shot), `checks:enable`, `checks:run <app> [proctypes]` (manual re-run against existing containers), and `checks:set <app> wait-to-retire <secs>`. The underlying `check-deploy` trigger supports configurable WAIT (5s), TIMEOUT (30s), ATTEMPTS (5) via a CHECKS file or app.json healthchecks, expected-content matching, a `--warn-only` listening check for web, Host header from configured domains, and `X-Forwarded-Proto: https` when TLS certs exist. Failed checks stop the new container and roll back to the old one.
+- **Why add to Tengiz:** Tengiz's `health` package does periodic HTTP GET checks but has no user-facing control surface and no expected-content/retry semantics. A `tengiz checks disable|skip|enable|run <app> [proctypes]` set plus reading wait/timeout/attempts and expected-body/status from `.tengiz.yaml` (`checks:` section) makes the recorded Zero-Downtime Deploy Health Checks much more robust — especially the "stop new container if checks fail" gate during deploy.
+- **Detected:** 2026-08-02
+
+## Init (PID-1) Process Injection for Zombie Reaping
+- **Source:** Dokku
+- **Description:** `scheduler-docker-local:set <app|--global> init-process <true|false>` (default true) injects a TINI/init-style PID-1 into app containers so orphaned child processes get reaped — with a special case that skips injection for `linuxserver.io` images that already ship s6-overlay (vendor label check). `parallel-schedule-count` (default 1) controls how many container creates for one process type run concurrently during deploy.
+- **Why add to Tengiz:** Long-running containers without an init process accumulate zombie processes (common with Node/Go child processes), eventually exhausting PID limits. A per-app `init-process` toggle that adds `--init` (or `--init-path`) to the `docker run` args in `runtime` is a one-line flag plus property plumbing, and directly benefits Tengiz's scale-to-zero model where containers start/stop frequently. Distinct from Process Scaling — this is about process hygiene inside a single container.
+- **Detected:** 2026-08-02
+
+## Proxy Access & Error Logs with Tail (Per-App HTTP Logs)
+- **Source:** Dokku
+- **Description:** `dokku nginx:access-logs <app> [-t] [-n <num>]` and `nginx:error-logs <app> [-t]` tail per-app HTTP access/error logs at the proxy layer. `nginx:set <app> access-log-path/access-log-format/error-log-path/error-log-level` customizes where and how they are written (defaults to the app dir; `/dev/null` disables). Formats include status codes, response times, client IPs, and request lines.
+- **Why add to Tengiz:** Tengiz logs are *container* logs; HTTP access logs at the proxy layer (status codes, response times, client IPs) are a distinct and essential ops view for debugging routing, cold-start latency, and 5xx errors. Go sketch: the `proxy` package writes per-app access/error logs to `~/.tengiz/logs/{app}-{env}.log`, and `tengiz access-logs <app>` / `tengiz error-logs <app>` tail them with the same `--tail`/`--num` flags as `tengiz logs`. Complements (not duplicates) Log Drains, which ship *container* logs externally.
+- **Detected:** 2026-08-02
+
+## Automated ACME DNS-01 Wildcard TLS (No Inbound Port Required)
+- **Source:** Dokku
+- **Description:** The Traefik/Caddy vhost backends render ACME config from properties: `traefik:set letsencrypt-email <email>`, `dns-provider <provider>` (route53, cloudflare, digitalocean, ...), `dns-provider-*` credential env vars, `challenge-mode dns` — enabling DNS-01 challenge, wildcard certificates (`*.example.com`), and renewal without inbound ports 80/443. Caddy equivalent: `caddy:set letsencrypt-email`, `letsencrypt-server`, `polling-interval`.
+- **Why add to Tengiz:** The recorded "Otomatik SSL/TLS (Let's Encrypt)" and "Alternative ACME Providers" cover HTTP-01 and provider selection; DNS-01 is genuinely distinct: it issues wildcard certs, works on servers with no open inbound ports (behind NAT/firewalls), and requires DNS provider credentials the platform must manage. Go implementation: `golang.org/x/crypto/acme/autocert` handles HTTP-01; DNS-01 uses `lego` with provider credentials from the existing `secrets.Manager`. Store per-app `letsencrypt-email`/`dns-provider` in `.tengiz.yaml`.
+- **Detected:** 2026-08-02
