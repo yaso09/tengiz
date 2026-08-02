@@ -11,11 +11,59 @@ import (
 )
 
 func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (*CleanupResult, error) {
-	return &CleanupResult{}, nil
+	result := &CleanupResult{}
+	var reclaimed []string
+
+	categories := []struct {
+		name    string
+		enabled bool
+		target  *[]string
+	}{
+		{"container", opts.Containers, &result.Containers},
+		{"image", opts.Images, &result.Images},
+		{"network", opts.Networks, &result.Networks},
+		{"volume", opts.Volumes, &result.Volumes},
+		{"builder", opts.BuildCache, &result.BuildCache},
+	}
+
+	for _, cat := range categories {
+		if !cat.enabled {
+			continue
+		}
+		if opts.DryRun {
+			cmd := exec.CommandContext(ctx, "docker", listArgs(cat.name)...)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				return nil, fmt.Errorf("list %s: %w\n%s", cat.name, err, string(out))
+			}
+			candidates := parseListOutput(string(out))
+			if cat.name == "network" {
+				candidates = filterNetworks(candidates)
+			}
+			*cat.target = candidates
+			continue
+		}
+		cmd := exec.CommandContext(ctx, "docker", pruneArgs(cat.name)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("prune %s: %w\n%s", cat.name, err, string(out))
+		}
+		if line := extractReclaimedSpace(string(out)); line != "" {
+			reclaimed = append(reclaimed, line)
+		}
+	}
+
+	result.Reclaimed = sumReclaimed(reclaimed)
+	return result, nil
 }
 
 func (r *dockerRuntime) SystemDF(ctx context.Context) (string, error) {
-	return "", nil
+	cmd := exec.CommandContext(ctx, "docker", "system", "df")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker system df: %w\n%s", err, string(out))
+	}
+	return string(out), nil
 }
 
 func pruneArgs(category string) []string {

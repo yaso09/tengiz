@@ -187,3 +187,17 @@ func TestExtractReclaimedSpace(t *testing.T) {
 		t.Fatalf("extractReclaimedSpace() = %q", got)
 	}
 }
+
+func TestCleanupNoCategories(t *testing.T) {
+	r := &dockerRuntime{}
+	res, err := r.Cleanup(context.Background(), CleanupOptions{})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if res == nil {
+		t.Fatal("Cleanup() returned nil result")
+	}
+	if res.Reclaimed != "" {
+		t.Errorf("Reclaimed = %q, want empty", res.Reclaimed)
+	}
+}
