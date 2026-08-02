@@ -377,3 +377,27 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupCmdRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not registered: %v", err)
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+	flag := cmd.Flags().Lookup("all")
+	if flag == nil {
+		t.Error("cleanup command missing --all flag")
+	}
+}
+
+func TestCleanupCmdDryRunFlagAbsent(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not registered: %v", err)
+	}
+	if flag := cmd.Flags().Lookup("dry-run"); flag != nil {
+		t.Error("cleanup should not have a --dry-run flag (docker system prune has no dry-run mode)")
+	}
+}
