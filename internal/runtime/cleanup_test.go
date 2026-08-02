@@ -2,19 +2,53 @@ package runtime
 
 import (
 	"context"
+	"reflect"
 	"testing"
 )
 
-func TestStubRemoveImage(t *testing.T) {
-	m := NewStub()
-	if err := m.RemoveImage(context.Background(), "tengiz-apps/testapp:v1"); err != nil {
-		t.Fatalf("RemoveImage() error = %v", err)
+func TestBuildPruneArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		opts PruneOptions
+		want []string
+	}{
+		{
+			name: "default keeps tengiz containers",
+			opts: PruneOptions{All: false},
+			want: []string{
+				"system", "prune", "-f",
+				"--filter", "label!=tengiz-app",
+				"--filter", "label!=tengiz-env",
+			},
+		},
+		{
+			name: "all appends -a",
+			opts: PruneOptions{All: true},
+			want: []string{
+				"system", "prune", "-f",
+				"--filter", "label!=tengiz-app",
+				"--filter", "label!=tengiz-env",
+				"-a",
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildPruneArgs(tc.opts)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("buildPruneArgs(%+v) = %v, want %v", tc.opts, got, tc.want)
+			}
+		})
 	}
 }
 
-func TestStubKeepLastNImages(t *testing.T) {
+func TestStubPrune(t *testing.T) {
 	m := NewStub()
-	if err := m.KeepLastNImages(context.Background(), "testapp", 5); err != nil {
-		t.Fatalf("KeepLastNImages() error = %v", err)
+	out, err := m.Prune(context.Background(), PruneOptions{All: true})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if out != "" {
+		t.Errorf("stub Prune() = %q, want empty string", out)
 	}
 }
