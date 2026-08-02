@@ -72,6 +72,13 @@ func TestParseJSONLines(t *testing.T) {
 	}
 }
 
+func TestDockerRuntimeImplementsCleaner(t *testing.T) {
+	var c Cleaner = (*dockerRuntime)(nil)
+	if c == nil {
+		t.Fatal("dockerRuntime does not implement Cleaner")
+	}
+}
+
 func TestStubNotRequiredToImplementCleaner(t *testing.T) {
 	// The stub manager intentionally does NOT implement Cleaner.
 	// This guards the design decision that Cleaner is separate from Manager.
