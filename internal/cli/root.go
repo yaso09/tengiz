@@ -44,6 +44,14 @@ func init() {
 	rootCmd.AddCommand(rmCmd)
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(devCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("all", false, "prune ALL Docker resources, including Tengiz-managed containers and all unused images")
+	cleanupCmd.Flags().Bool("dry-run", false, "show disk usage summary without pruning anything")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers")
+	cleanupCmd.Flags().Bool("images", false, "prune unused images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune build cache")
 	configCmd.AddCommand(configSetCmd)
 	configCmd.AddCommand(configGetCmd)
 	configCmd.AddCommand(configUnsetCmd)
@@ -1087,6 +1095,85 @@ Use --tail N to show only the last N lines of the latest build log.`,
 		}
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Prune unused Docker resources to free disk space",
+	Long: `Prune unused Docker resources to free disk space.
+
+By default, prunes stopped non-Tengiz containers, dangling images, unused
+volumes, unused networks, and build cache. Tengiz-managed containers
+(labeled tengiz-app) are always protected unless --all is given.
+
+Use --dry-run to print the current disk usage summary (docker system df)
+without pruning anything. Combine category flags (--containers, --images,
+--volumes, --networks, --build-cache) to prune specific resource types.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts := cleanupOptions(cmd)
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return err
+		}
+		report, err := rt.Prune(cmd.Context(), opts)
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+		if report.DryRun {
+			fmt.Print(report.Summary)
+			return nil
+		}
+		fmt.Printf("[tengiz] cleanup complete — reclaimed %s\n", runtime.FormatBytes(report.ReclaimedBytes))
+		printPruned := func(label string, pruned bool) {
+			status := "nothing"
+			if pruned {
+				status = "pruned"
+			}
+			fmt.Printf("  %-14s %s\n", label+":", status)
+		}
+		printPruned("containers", report.ContainersPruned)
+		printPruned("images", report.ImagesPruned)
+		printPruned("volumes", report.VolumesPruned)
+		printPruned("networks", report.NetworksPruned)
+		printPruned("build-cache", report.BuildCachePruned)
+		return nil
+	},
+}
+
+func cleanupOptions(cmd *cobra.Command) runtime.PruneOptions {
+	all, _ := cmd.Flags().GetBool("all")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	containers, _ := cmd.Flags().GetBool("containers")
+	images, _ := cmd.Flags().GetBool("images")
+	volumes, _ := cmd.Flags().GetBool("volumes")
+	networks, _ := cmd.Flags().GetBool("networks")
+	buildCache, _ := cmd.Flags().GetBool("build-cache")
+
+	if all {
+		return runtime.PruneOptions{
+			All:        true,
+			DryRun:     dryRun,
+			Containers: true,
+			Images:     true,
+			Volumes:    true,
+			Networks:   true,
+			BuildCache: true,
+		}
+	}
+
+	if !containers && !images && !volumes && !networks && !buildCache {
+		containers, images, volumes, networks, buildCache = true, true, true, true, true
+	}
+
+	return runtime.PruneOptions{
+		DryRun:     dryRun,
+		Containers: containers,
+		Images:     images,
+		Volumes:    volumes,
+		Networks:   networks,
+		BuildCache: buildCache,
+	}
 }
 
 var runCmd = &cobra.Command{

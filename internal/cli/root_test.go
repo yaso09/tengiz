@@ -97,6 +97,9 @@ func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *ty
 func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) Prune(ctx context.Context, opts runtime.PruneOptions) (*runtime.PruneReport, error) {
+	return &runtime.PruneReport{DryRun: opts.DryRun}, nil
+}
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
@@ -374,5 +377,79 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
 		}
+	}
+}
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCommandFlags(t *testing.T) {
+	for _, f := range []string{"all", "dry-run", "containers", "images", "volumes", "networks", "build-cache"} {
+		if cleanupCmd.Flags().Lookup(f) == nil {
+			t.Errorf("cleanupCmd missing --%s flag", f)
+		}
+	}
+}
+
+func captureCleanupOptions(t *testing.T, args []string) runtime.PruneOptions {
+	t.Helper()
+	var got runtime.PruneOptions
+	originalRunE := cleanupCmd.RunE
+	defer func() { cleanupCmd.RunE = originalRunE }()
+	cleanupCmd.RunE = func(cmd *cobra.Command, a []string) error {
+		got = cleanupOptions(cmd)
+		return nil
+	}
+	rootCmd.SetArgs(append([]string{"cleanup"}, args...))
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	return got
+}
+
+func TestCleanupOptionsDefault(t *testing.T) {
+	got := captureCleanupOptions(t, nil)
+	if got.All || got.DryRun {
+		t.Fatalf("expected All=false DryRun=false, got %+v", got)
+	}
+	if !got.Containers || !got.Images || !got.Volumes || !got.Networks || !got.BuildCache {
+		t.Fatalf("expected all categories true by default, got %+v", got)
+	}
+}
+
+func TestCleanupOptionsCategory(t *testing.T) {
+	got := captureCleanupOptions(t, []string{"--containers"})
+	if !got.Containers {
+		t.Fatal("expected Containers=true")
+	}
+	if got.Images || got.Volumes || got.Networks || got.BuildCache {
+		t.Fatalf("expected only containers, got %+v", got)
+	}
+}
+
+func TestCleanupOptionsAll(t *testing.T) {
+	got := captureCleanupOptions(t, []string{"--all"})
+	if !got.All {
+		t.Fatal("expected All=true")
+	}
+	if !got.Containers || !got.Images || !got.Volumes || !got.Networks || !got.BuildCache {
+		t.Fatalf("expected all categories with --all, got %+v", got)
+	}
+}
+
+func TestCleanupOptionsDryRun(t *testing.T) {
+	got := captureCleanupOptions(t, []string{"--dry-run"})
+	if !got.DryRun {
+		t.Fatal("expected DryRun=true")
+	}
+	if !got.Containers {
+		t.Fatal("expected categories still defaulted to true with --dry-run")
 	}
 }
