@@ -57,3 +57,24 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	}
 	return nil
 }
+
+func buildPruneArgs(opts PruneOptions) []string {
+	args := []string{
+		"system", "prune", "-f",
+		"--filter", fmt.Sprintf("label!=%s", labelKey),
+		"--filter", fmt.Sprintf("label!=%s", envLabelKey),
+	}
+	if opts.All {
+		args = append(args, "-a")
+	}
+	return args
+}
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", buildPruneArgs(opts)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker system prune: %w\n%s", err, string(out))
+	}
+	return string(out), nil
+}
