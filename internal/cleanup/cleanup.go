@@ -150,3 +150,103 @@ func selectImagesForRemoval(images, used []string, protectRepo string) []string 
 	}
 	return result
 }
+
+func (r *Runner) pruneContainers(ctx context.Context) (int, string, error) {
+	out, err := r.run(ctx, containerPruneArgs()...)
+	if err != nil {
+		return 0, "", err
+	}
+	return countDeleted(out, "Deleted Containers:"), parseReclaimed(out), nil
+}
+
+func (r *Runner) pruneNetworks(ctx context.Context) (int, string, error) {
+	out, err := r.run(ctx, networkPruneArgs()...)
+	if err != nil {
+		return 0, "", err
+	}
+	return countDeleted(out, "Deleted Networks:"), parseReclaimed(out), nil
+}
+
+func (r *Runner) pruneVolumes(ctx context.Context) (int, string, error) {
+	out, err := r.run(ctx, volumePruneArgs()...)
+	if err != nil {
+		return 0, "", err
+	}
+	return countDeleted(out, "Deleted Volumes:"), parseReclaimed(out), nil
+}
+
+func (r *Runner) pruneBuildCache(ctx context.Context) (bool, string, error) {
+	out, err := r.run(ctx, buildCachePruneArgs()...)
+	if err != nil {
+		return false, "", err
+	}
+	return true, parseReclaimed(out), nil
+}
+
+func (r *Runner) pruneImages(ctx context.Context) (int, string, error) {
+	usedOut, err := r.run(ctx, usedImagesArgs()...)
+	if err != nil {
+		return 0, "", err
+	}
+	imgOut, err := r.run(ctx, imagesListArgs()...)
+	if err != nil {
+		return 0, "", err
+	}
+	removed := 0
+	for _, img := range selectImagesForRemoval(lines(imgOut), lines(usedOut), tengizImgRepo) {
+		if _, err := r.run(ctx, "rmi", "-f", img); err != nil {
+			continue
+		}
+		removed++
+	}
+	out, err := r.run(ctx, "image", "prune", "-f")
+	if err != nil {
+		return removed, "", err
+	}
+	return removed, parseReclaimed(out), nil
+}
+
+// Run prunes unused Docker resources. Tengiz-managed containers (labeled
+// tengiz-app) and tengiz-apps/* images are always protected. Volumes are
+// only pruned when opts.Volumes is set.
+func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
+	res := &Result{}
+
+	n, reclaimed, err := r.pruneContainers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res.ContainersRemoved = n
+	res.Reclaimed = append(res.Reclaimed, "containers: "+reclaimed)
+
+	n, reclaimed, err = r.pruneImages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res.ImagesRemoved = n
+	res.Reclaimed = append(res.Reclaimed, "images: "+reclaimed)
+
+	n, reclaimed, err = r.pruneNetworks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res.NetworksRemoved = n
+	res.Reclaimed = append(res.Reclaimed, "networks: "+reclaimed)
+
+	pruned, reclaimed, err := r.pruneBuildCache(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res.BuildCachePruned = pruned
+	res.Reclaimed = append(res.Reclaimed, "build cache: "+reclaimed)
+
+	if opts.Volumes {
+		n, reclaimed, err := r.pruneVolumes(ctx)
+		if err != nil {
+			return nil, err
+		}
+		res.VolumesRemoved = n
+		res.Reclaimed = append(res.Reclaimed, "volumes: "+reclaimed)
+	}
+	return res, nil
+}

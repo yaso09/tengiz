@@ -1,7 +1,9 @@
 package cleanup
 
 import (
+	"context"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -72,4 +74,111 @@ func TestCountDeleted(t *testing.T) {
 	if got := countDeleted("no section", "Deleted Containers:"); got != 0 {
 		t.Errorf("countDeleted() = %d, want 0", got)
 	}
+}
+
+func fakeRun(calls *[]string, out map[string]string) func(ctx context.Context, args ...string) (string, error) {
+	return func(ctx context.Context, args ...string) (string, error) {
+		key := strings.Join(args, " ")
+		*calls = append(*calls, key)
+		return out[key], nil
+	}
+}
+
+func TestRunExecutesPruneCommands(t *testing.T) {
+	var calls []string
+	r := &Runner{run: fakeRun(&calls, map[string]string{
+		"container prune -f --filter label!=tengiz-app": "Deleted Containers:\nc1\n\nTotal reclaimed space: 1.2MB\n",
+		"ps -a --format {{.Image}}":                     "",
+		"images --format {{.Repository}}:{{.Tag}}":      "",
+		"image prune -f":                                "Total reclaimed space: 500MB\n",
+		"network prune -f":                              "Total reclaimed space: 0B\n",
+		"builder prune -f":                              "Total reclaimed space: 2.1GB\n",
+	})}
+
+	res, err := r.Run(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if res.DryRun {
+		t.Error("DryRun = true, want false")
+	}
+	if res.ContainersRemoved != 1 {
+		t.Errorf("ContainersRemoved = %d, want 1", res.ContainersRemoved)
+	}
+	if !res.BuildCachePruned {
+		t.Error("BuildCachePruned = false, want true")
+	}
+	if res.VolumesRemoved != 0 {
+		t.Errorf("VolumesRemoved = %d, want 0 (volumes off by default)", res.VolumesRemoved)
+	}
+	for _, want := range []string{"container prune -f --filter label!=tengiz-app", "image prune -f", "network prune -f", "builder prune -f"} {
+		if !contains(calls, want) {
+			t.Errorf("Run() calls missing %q; got %v", want, calls)
+		}
+	}
+	if contains(calls, "volume prune -f") {
+		t.Errorf("Run() pruned volumes without --volumes; calls = %v", calls)
+	}
+}
+
+func TestRunWithVolumes(t *testing.T) {
+	var calls []string
+	r := &Runner{run: fakeRun(&calls, map[string]string{
+		"container prune -f --filter label!=tengiz-app": "Total reclaimed space: 0B\n",
+		"ps -a --format {{.Image}}":                     "",
+		"images --format {{.Repository}}:{{.Tag}}":      "",
+		"image prune -f":                                "Total reclaimed space: 0B\n",
+		"network prune -f":                              "Total reclaimed space: 0B\n",
+		"builder prune -f":                              "Total reclaimed space: 0B\n",
+		"volume prune -f":                               "Deleted Volumes:\nvol1\n\nTotal reclaimed space: 100MB\n",
+	})}
+
+	res, err := r.Run(context.Background(), Options{Volumes: true})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if res.VolumesRemoved != 1 {
+		t.Errorf("VolumesRemoved = %d, want 1", res.VolumesRemoved)
+	}
+	if !contains(calls, "volume prune -f") {
+		t.Errorf("Run() did not call volume prune; calls = %v", calls)
+	}
+}
+
+func TestRunPruneImagesRemovesForeignOnly(t *testing.T) {
+	var calls []string
+	r := &Runner{run: fakeRun(&calls, map[string]string{
+		"container prune -f --filter label!=tengiz-app": "Total reclaimed space: 0B\n",
+		"ps -a --format {{.Image}}":                     "tengiz-apps/myapp:prod-latest\npostgres:16\n",
+		"images --format {{.Repository}}:{{.Tag}}":      "tengiz-apps/myapp:prod-latest\ntengiz-apps/myapp:prod-1700000000\nnode:20-alpine\npostgres:16\n",
+		"rmi -f node:20-alpine":                         "Untagged: node:20-alpine\n",
+		"image prune -f":                                "Total reclaimed space: 0B\n",
+		"network prune -f":                              "Total reclaimed space: 0B\n",
+		"builder prune -f":                              "Total reclaimed space: 0B\n",
+	})}
+
+	res, err := r.Run(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if res.ImagesRemoved != 1 {
+		t.Errorf("ImagesRemoved = %d, want 1", res.ImagesRemoved)
+	}
+	if !contains(calls, "rmi -f node:20-alpine") {
+		t.Errorf("Run() did not remove foreign image; calls = %v", calls)
+	}
+	for _, forbidden := range []string{"rmi -f tengiz-apps/myapp:prod-1700000000", "rmi -f tengiz-apps/myapp:prod-latest", "rmi -f postgres:16"} {
+		if contains(calls, forbidden) {
+			t.Errorf("Run() removed protected image via %q; calls = %v", forbidden, calls)
+		}
+	}
+}
+
+func contains(list []string, s string) bool {
+	for _, item := range list {
+		if item == s {
+			return true
+		}
+	}
+	return false
 }
