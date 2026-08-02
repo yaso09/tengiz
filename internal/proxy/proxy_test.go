@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yaso09/tengiz/internal/runtime"
 	"github.com/yaso09/tengiz/internal/types"
@@ -106,6 +107,7 @@ func TestAdminRegisterEndpoint(t *testing.T) {
 	var err error
 	body := `{"app":"testapp","port":9001}`
 	for i := 0; i < 20; i++ {
+		time.Sleep(10 * time.Millisecond)
 		resp, err = http.Post("http://127.0.0.1:9099/register", "application/json", strings.NewReader(body))
 		if err == nil {
 			break
@@ -147,6 +149,15 @@ func TestExtractAppWithCustomDomain(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("extractApp(%q) = %q, want %q", tt.host, got, tt.want)
 		}
+	}
+}
+
+func TestExtractAppEnvSubdomain(t *testing.T) {
+	p := New(nil, 8080)
+	p.Register("myapp-staging", 9001)
+	app := p.extractApp("myapp-staging.tengiz.local:8080")
+	if app != "myapp-staging" {
+		t.Errorf("extractApp(%q) = %q, want %q", "myapp-staging.tengiz.local:8080", app, "myapp-staging")
 	}
 }
 
@@ -234,6 +245,7 @@ func TestAdminAddDomainEndpoint(t *testing.T) {
 	var err error
 	body := `{"domain":"example.com","app":"testapp"}`
 	for i := 0; i < 20; i++ {
+		time.Sleep(10 * time.Millisecond)
 		resp, err = http.Post("http://127.0.0.1:9099/add-domain", "application/json", strings.NewReader(body))
 		if err == nil {
 			break
@@ -277,6 +289,7 @@ func TestAdminRemoveDomainEndpoint(t *testing.T) {
 	var resp *http.Response
 	var err error
 	for i := 0; i < 20; i++ {
+		time.Sleep(10 * time.Millisecond)
 		body := `{"domain":"example.com"}`
 		req, _ := http.NewRequest("DELETE", "http://127.0.0.1:9099/remove-domain", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -319,6 +332,7 @@ func TestAdminUnregisterEndpoint(t *testing.T) {
 	var resp *http.Response
 	var err error
 	for i := 0; i < 20; i++ {
+		time.Sleep(10 * time.Millisecond)
 		body := `{"app":"testapp"}`
 		req, _ := http.NewRequest("DELETE", "http://127.0.0.1:9099/unregister", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")

@@ -242,7 +242,7 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 | — | **Build Logs** | Çok Yüksek | Çok Düşük | Mükemmel | ✅ Implemented (2026-07-16) |
 | — | **Log Filtering** | Çok Yüksek | Çok Düşük | Mükemmel | ✅ Implemented (2026-07-16) |
 | — | **One-off Process Execution** | Yüksek | Düşük | Mükemmel | ✅ Implemented (2026-07-16) |
-| — | **Multi-Environment Desteği** | Yüksek | Orta | Mükemmel | ✅ Implemented (2026-07-17) |
+| — | **Multi-Environment Desteği** | Yüksek | Orta | Mükemmel | ✅ Implemented (2026-08-02) |
 | — | **Container Health Check + Auto Restart** | Çok Yüksek | Düşük-Orta | Mükemmel | ✅ Implemented (2026-07-15) |
 | — | **Git Tabanlı Deployment** | Çok Yüksek | Yüksek | Mükemmel | ✅ Implemented (2026-07-15) |
 | — | **Zero-Downtime Deployment** | Çok Yüksek | Orta | Mükemmel | ✅ Implemented (2026-07-14) |
@@ -549,7 +549,7 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Source:** Kamal
 - **Description:** Kamal `-d staging` ile farklı ortamları destekler. `config/deploy.staging.yml` base config ile merge edilir. `require_destination` ile deploy için ortam zorunlu kılınabilir.
 - **Why add to Tengiz:** Development/staging/production ayrımı olmadan gerçek bir platform kurulamaz. `tengiz deploy -e staging` gibi bir flag ile farklı `.tengiz.staging.yaml` dosyası merge edilebilir.
-- **Status:** ✅ Implemented (2026-07-17)
+- **Status:** ✅ Implemented (2026-08-02)
 - **Detected:** 2026-07-14
 
 ## Gelişmiş Docker Build (Multi-Arch, Cache)
