@@ -1,6 +1,9 @@
 package runtime
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestParseSize(t *testing.T) {
 	tests := []struct {
@@ -111,4 +114,19 @@ func TestBuildPruneCommandsEmpty(t *testing.T) {
 	if len(cmds) != 0 {
 		t.Fatalf("expected no commands for empty options, got %+v", cmds)
 	}
+}
+
+func TestStubPrune(t *testing.T) {
+	m := NewStub()
+	report, err := m.Prune(context.Background(), PruneOptions{DryRun: true})
+	if err != nil {
+		t.Fatalf("stub Prune() error = %v", err)
+	}
+	if !report.DryRun {
+		t.Error("stub Prune() should return a dry-run report")
+	}
+}
+
+func TestDockerRuntimeImplementsManager(t *testing.T) {
+	var _ Manager = &dockerRuntime{}
 }

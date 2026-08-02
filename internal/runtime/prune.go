@@ -1,6 +1,9 @@
 package runtime
 
 import (
+	"context"
+	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -112,4 +115,46 @@ func buildPruneCommands(opts PruneOptions) []pruneCommand {
 		cmds = append(cmds, pruneCommand{name: "build-cache", args: []string{"builder", "prune", "-f"}})
 	}
 	return cmds
+}
+
+func runDockerPrune(ctx context.Context, args []string) (bool, int64, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, 0, fmt.Errorf("docker %s: %w\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return strings.Contains(string(out), "Deleted"), parseReclaimedSpace(string(out)), nil
+}
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (*PruneReport, error) {
+	if opts.DryRun {
+		cmd := exec.CommandContext(ctx, "docker", "system", "df")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("docker system df: %w\n%s", err, string(out))
+		}
+		return &PruneReport{DryRun: true, Summary: string(out)}, nil
+	}
+
+	report := &PruneReport{}
+	for _, pc := range buildPruneCommands(opts) {
+		removed, reclaimed, err := runDockerPrune(ctx, pc.args)
+		if err != nil {
+			return nil, fmt.Errorf("prune %s: %w", pc.name, err)
+		}
+		report.ReclaimedBytes += reclaimed
+		switch pc.name {
+		case "containers":
+			report.ContainersPruned = removed
+		case "images":
+			report.ImagesPruned = removed
+		case "volumes":
+			report.VolumesPruned = removed
+		case "networks":
+			report.NetworksPruned = removed
+		case "build-cache":
+			report.BuildCachePruned = removed
+		}
+	}
+	return report, nil
 }
