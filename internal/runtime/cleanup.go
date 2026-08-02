@@ -9,6 +9,14 @@ import (
 	"strings"
 )
 
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (*CleanupResult, error) {
+	return &CleanupResult{}, nil
+}
+
+func (r *dockerRuntime) SystemDF(ctx context.Context) (string, error) {
+	return "", nil
+}
+
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()
