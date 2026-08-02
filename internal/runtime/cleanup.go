@@ -6,8 +6,190 @@ import (
 	"log"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 )
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (*CleanupResult, error) {
+	result := &CleanupResult{}
+	var reclaimed []string
+
+	categories := []struct {
+		name    string
+		enabled bool
+		target  *[]string
+	}{
+		{"container", opts.Containers, &result.Containers},
+		{"image", opts.Images, &result.Images},
+		{"network", opts.Networks, &result.Networks},
+		{"volume", opts.Volumes, &result.Volumes},
+		{"builder", opts.BuildCache, &result.BuildCache},
+	}
+
+	for _, cat := range categories {
+		if !cat.enabled {
+			continue
+		}
+		if opts.DryRun {
+			cmd := exec.CommandContext(ctx, "docker", listArgs(cat.name)...)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				return nil, fmt.Errorf("list %s: %w\n%s", cat.name, err, string(out))
+			}
+			candidates := parseListOutput(string(out))
+			if cat.name == "network" {
+				candidates = filterNetworks(candidates)
+			}
+			*cat.target = candidates
+			continue
+		}
+		cmd := exec.CommandContext(ctx, "docker", pruneArgs(cat.name)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("prune %s: %w\n%s", cat.name, err, string(out))
+		}
+		if line := extractReclaimedSpace(string(out)); line != "" {
+			reclaimed = append(reclaimed, line)
+		}
+	}
+
+	result.Reclaimed = sumReclaimed(reclaimed)
+	return result, nil
+}
+
+func (r *dockerRuntime) SystemDF(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "system", "df")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker system df: %w\n%s", err, string(out))
+	}
+	return string(out), nil
+}
+
+func pruneArgs(category string) []string {
+	switch category {
+	case "container":
+		return []string{"container", "prune", "-f", "--filter", "label!=tengiz-app"}
+	case "image":
+		return []string{"image", "prune", "-f"}
+	case "network":
+		return []string{"network", "prune", "-f"}
+	case "volume":
+		return []string{"volume", "prune", "-f"}
+	case "builder":
+		return []string{"builder", "prune", "-f"}
+	}
+	return nil
+}
+
+func listArgs(category string) []string {
+	switch category {
+	case "container":
+		return []string{"container", "ls", "-a", "--filter", "status=exited", "--filter", "label!=tengiz-app", "--format", "{{.Names}}"}
+	case "image":
+		return []string{"images", "-a", "--filter", "dangling=true", "--format", "{{.Repository}}:{{.Tag}}"}
+	case "network":
+		return []string{"network", "ls", "--format", "{{.Name}}"}
+	case "volume":
+		return []string{"volume", "ls", "--format", "{{.Name}}"}
+	case "builder":
+		return []string{"builder", "du", "--format", "{{.ID}}"}
+	}
+	return nil
+}
+
+func parseListOutput(output string) []string {
+	var names []string
+	for _, line := range strings.Split(output, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" {
+			continue
+		}
+		names = append(names, t)
+	}
+	return names
+}
+
+func filterNetworks(names []string) []string {
+	var filtered []string
+	for _, n := range names {
+		switch n {
+		case "bridge", "host", "none":
+			continue
+		}
+		filtered = append(filtered, n)
+	}
+	return filtered
+}
+
+func parseReclaimedSpace(line string) (int64, error) {
+	idx := strings.Index(line, ":")
+	if idx < 0 {
+		return 0, fmt.Errorf("no ':' in %q", line)
+	}
+	rest := strings.TrimSpace(line[idx+1:])
+	for _, unit := range []struct {
+		suffix string
+		mult   int64
+	}{
+		{"TB", 1000000000000},
+		{"GB", 1000000000},
+		{"MB", 1000000},
+		{"kB", 1000},
+		{"B", 1},
+	} {
+		if strings.HasSuffix(rest, unit.suffix) {
+			numStr := strings.TrimSpace(strings.TrimSuffix(rest, unit.suffix))
+			f, err := strconv.ParseFloat(numStr, 64)
+			if err != nil {
+				return 0, fmt.Errorf("parse number %q: %w", numStr, err)
+			}
+			return int64(f * float64(unit.mult)), nil
+		}
+	}
+	return 0, fmt.Errorf("unknown unit in %q", rest)
+}
+
+func extractReclaimedSpace(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		t := strings.TrimSpace(line)
+		if strings.Contains(t, "Total reclaimed space:") {
+			return t
+		}
+	}
+	return ""
+}
+
+func humanBytes(b int64) string {
+	if b < 1000 {
+		return fmt.Sprintf("%dB", b)
+	}
+	units := []string{"B", "kB", "MB", "GB", "TB"}
+	f := float64(b)
+	i := 0
+	for f >= 1000 && i < len(units)-1 {
+		f /= 1000
+		i++
+	}
+	return fmt.Sprintf("%.1f%s", f, units[i])
+}
+
+func sumReclaimed(lines []string) string {
+	var total int64
+	for _, l := range lines {
+		if l == "" {
+			continue
+		}
+		b, err := parseReclaimedSpace(l)
+		if err == nil {
+			total += b
+		}
+	}
+	if total == 0 && len(lines) == 0 {
+		return ""
+	}
+	return humanBytes(total)
+}
 
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
