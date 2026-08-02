@@ -21,6 +21,7 @@
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
+- **Docker housekeeping** — `tengiz cleanup` prunes unused Docker containers, images, volumes, and networks while protecting all Tengiz-managed resources.
 
 ## Prerequisites
 
@@ -414,6 +415,18 @@ List all secrets for an application. Values are masked for security.
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name |
+
+### `tengiz cleanup [--dry-run] [--all] [--volumes]`
+
+Remove unused Docker resources (stopped containers, dangling images, unused networks, anonymous volumes).
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Show what would be removed without removing anything |
+| `-a`, `--all` | Also remove all unused images (not just dangling ones) |
+| `--volumes` | Also prune anonymous volumes |
+
+Runs label-based `docker system prune`. Resources labeled `tengiz-app` (all Tengiz containers and images) are never removed, so stopped/idle apps and rollback images are preserved. Safe to run anytime; reclaims disk space from orphaned build artifacts and foreign containers.
 
 ## Configuration
 
