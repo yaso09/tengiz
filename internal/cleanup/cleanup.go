@@ -206,10 +206,48 @@ func (r *Runner) pruneImages(ctx context.Context) (int, string, error) {
 	return removed, parseReclaimed(out), nil
 }
 
+func (r *Runner) dryRun(ctx context.Context, opts Options) (*Result, error) {
+	res := &Result{DryRun: true, BuildCachePruned: true}
+
+	out, err := r.run(ctx, containerCandidatesArgs()...)
+	if err != nil {
+		return nil, err
+	}
+	res.ContainerCandidates = lines(out)
+
+	usedOut, err := r.run(ctx, usedImagesArgs()...)
+	if err != nil {
+		return nil, err
+	}
+	imgOut, err := r.run(ctx, imagesListArgs()...)
+	if err != nil {
+		return nil, err
+	}
+	res.ImageCandidates = selectImagesForRemoval(lines(imgOut), lines(usedOut), tengizImgRepo)
+
+	out, err = r.run(ctx, networkCandidatesArgs()...)
+	if err != nil {
+		return nil, err
+	}
+	res.NetworkCandidates = lines(out)
+
+	if opts.Volumes {
+		out, err = r.run(ctx, volumeCandidatesArgs()...)
+		if err != nil {
+			return nil, err
+		}
+		res.VolumeCandidates = lines(out)
+	}
+	return res, nil
+}
+
 // Run prunes unused Docker resources. Tengiz-managed containers (labeled
 // tengiz-app) and tengiz-apps/* images are always protected. Volumes are
 // only pruned when opts.Volumes is set.
 func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
+	if opts.DryRun {
+		return r.dryRun(ctx, opts)
+	}
 	res := &Result{}
 
 	n, reclaimed, err := r.pruneContainers(ctx)

@@ -182,3 +182,63 @@ func contains(list []string, s string) bool {
 	}
 	return false
 }
+
+func TestRunDryRunListsCandidates(t *testing.T) {
+	var calls []string
+	r := &Runner{run: fakeRun(&calls, map[string]string{
+		"ps -a --filter status=exited --filter label!=tengiz-app --format {{.Names}}": "orphan1\norphan2\n",
+		"ps -a --format {{.Image}}":                "",
+		"images --format {{.Repository}}:{{.Tag}}": "tengiz-apps/myapp:prod-latest\nnode:20-alpine\n",
+		"network ls --filter dangling=true --format {{.Name}}": "bridge_x\n",
+		"volume ls --filter dangling=true --format {{.Name}}":  "vol1\n",
+	})}
+
+	res, err := r.Run(context.Background(), Options{DryRun: true, Volumes: true})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !res.DryRun {
+		t.Error("DryRun = false, want true")
+	}
+	if !res.BuildCachePruned {
+		t.Error("BuildCachePruned = false, want true (build cache would be cleared)")
+	}
+	if !reflect.DeepEqual(res.ContainerCandidates, []string{"orphan1", "orphan2"}) {
+		t.Errorf("ContainerCandidates = %v", res.ContainerCandidates)
+	}
+	if !reflect.DeepEqual(res.ImageCandidates, []string{"node:20-alpine"}) {
+		t.Errorf("ImageCandidates = %v", res.ImageCandidates)
+	}
+	if !reflect.DeepEqual(res.NetworkCandidates, []string{"bridge_x"}) {
+		t.Errorf("NetworkCandidates = %v", res.NetworkCandidates)
+	}
+	if !reflect.DeepEqual(res.VolumeCandidates, []string{"vol1"}) {
+		t.Errorf("VolumeCandidates = %v", res.VolumeCandidates)
+	}
+	for _, c := range calls {
+		if strings.Contains(c, " prune") {
+			t.Errorf("dry-run executed destructive prune command %q; calls = %v", c, calls)
+		}
+	}
+}
+
+func TestRunDryRunWithoutVolumesListsNoVolumes(t *testing.T) {
+	var calls []string
+	r := &Runner{run: fakeRun(&calls, map[string]string{
+		"ps -a --filter status=exited --filter label!=tengiz-app --format {{.Names}}": "",
+		"ps -a --format {{.Image}}":                "",
+		"images --format {{.Repository}}:{{.Tag}}": "",
+		"network ls --filter dangling=true --format {{.Name}}": "",
+	})}
+
+	res, err := r.Run(context.Background(), Options{DryRun: true})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if res.VolumeCandidates != nil {
+		t.Errorf("VolumeCandidates = %v, want nil", res.VolumeCandidates)
+	}
+	if contains(calls, "volume ls --filter dangling=true --format {{.Name}}") {
+		t.Errorf("dry-run listed volumes without --volumes; calls = %v", calls)
+	}
+}
