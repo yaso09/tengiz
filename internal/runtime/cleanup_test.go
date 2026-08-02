@@ -18,3 +18,14 @@ func TestStubKeepLastNImages(t *testing.T) {
 		t.Fatalf("KeepLastNImages() error = %v", err)
 	}
 }
+
+func TestStubPrune(t *testing.T) {
+	m := NewStub()
+	res, err := m.Prune(context.Background(), PruneOptions{All: true, Volumes: true})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if res.DryRun {
+		t.Error("Prune() result DryRun = true, want false")
+	}
+}

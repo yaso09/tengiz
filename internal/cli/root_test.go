@@ -67,10 +67,13 @@ func captureOutput(fn func()) string {
 }
 
 type mockRTForDeploy struct {
-	created atomic.Int32
-	removed atomic.Int32
-	started atomic.Int32
-	stopped atomic.Int32
+	created   atomic.Int32
+	removed   atomic.Int32
+	started   atomic.Int32
+	stopped   atomic.Int32
+	pruned    atomic.Int32
+	pruneOpts runtime.PruneOptions
+	pruneErr  error
 }
 
 func (m *mockRTForDeploy) Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error {
@@ -97,6 +100,14 @@ func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *ty
 func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) Prune(ctx context.Context, opts runtime.PruneOptions) (runtime.PruneResult, error) {
+	m.pruned.Add(1)
+	m.pruneOpts = opts
+	if m.pruneErr != nil {
+		return runtime.PruneResult{}, m.pruneErr
+	}
+	return runtime.PruneResult{DryRun: opts.DryRun, Output: "Deleted Containers: abc123\n\nTotal reclaimed space: 1.2GB"}, nil
+}
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
