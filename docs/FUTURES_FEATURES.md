@@ -1642,3 +1642,113 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Beyond a global "available at buildtime" toggle, each `EnvironmentVariable` has independent flags: `is_buildtime` (injected into `docker build --build-arg`), `is_runtime` (injected into the running container), `is_required` (surfaces missing required vars in UI ordering and deploy validation), `is_multiline`, `is_literal`, and `is_shown_once` (preview-only secrets). The deploy job filters build-time vs runtime vars separately, and `SharedEnvironmentVariable` extends the same flags to team/project/environment/server-scoped shared values.
 - **Why add to Tengiz:** Tengiz treats env vars as a single flat list passed at runtime. Real apps need the split: `NEXT_PUBLIC_*` must be build-time args, DB credentials only runtime, and required-variable validation prevents "deploy failed because X was never set" surprises. A per-var `build: true|false|runtime: true|false` in `.tengiz.yaml` plus an `env.required` list gives deploy-time validation. Complements Build Arguments from Env (#14) with per-var control.
 - **Detected:** 2026-08-02
+
+---
+
+## Compose Manifest Collision Rewriting (Multi-Tenant Isolation Transform)
+- **Source:** Dokploy
+- **Description:** A YAML-transform engine (`utils/docker/compose.ts`, `utils/docker/collision.ts`) that parses a raw `docker-compose.yml` and rewrites it so multiple stacks can run on a shared host without name collisions. It suffixes ALL identifiers with a random 8-hex hash or the app name: service names, `container_name`, volumes (root-level, per-service, nested object form, and subdirectory paths like `data/foo`), networks (array/map/`aliases` forms), configs, secrets, `depends_on` (string and object), `links`, `volumes_from`, and `extends`. Two modes: `randomize` (random suffix) and `isolatedDeployment` (app-name suffix + per-app network). The shared edge network is exempt so cross-stack services can still talk.
+- **Why add to Tengiz:** The existing "Docker Compose Import (#30)" converts a compose file once but has no isolation layer — two Tengiz apps both declaring a service named `db` or a volume named `data` will clobber each other on the same host. This collision-suffix transform is the missing multi-tenant safety layer: preview deployments (#18) and multi-env (#10) can run the same compose stack simultaneously. Go implementation needs a YAML AST transform (`gopkg.in/yaml.v3`) handling all the documented edge cases (string vs object volumes, array vs map networks, `deploy.labels` vs `labels`). High leverage for a single-binary multi-app platform. Also adopt Dokploy's `env -i PATH="$PATH"` compose invocation to stop host env vars leaking into `${VAR}` interpolation.
+- **Detected:** 2026-08-02
+
+## Docker Command Serialization (Busy-Queuing for Concurrent Exec)
+- **Source:** Dokploy
+- **Description:** `dockerSafeExec` wraps docker CLI commands in a bash loop that polls `ps aux | grep docker` and waits (10s intervals) until the Docker CLI is idle before executing. Used for all `docker system prune`/cleanup operations to prevent concurrent command contention. Volume cleanup is explicitly excluded from `cleanupAll` because auto-pruning volumes is dangerous (data loss when containers stop).
+- **Why add to Tengiz:** Tengiz shells out to the `docker` CLI via `os/exec` for everything with no inter-command coordination. Concurrent `tengiz deploy`/`scale`/`cleanup` invocations can race the Docker daemon and the CLI's own lock. A lightweight per-process mutex (Go `sync.Mutex`/channel semaphore wrapping the exec layer) serializes docker commands cheaply, and the "never auto-prune volumes" safety rule fits Tengiz's scale-to-zero model where stopped containers are the norm. Complements Concurrency Control (#101) with a Docker-specific queue.
+- **Detected:** 2026-08-02
+
+## App-Scoped Isolated Deployment Network
+- **Source:** Dokploy
+- **Description:** When `isolatedDeployment` is enabled, Dokploy injects an `external: true` network named after the app into the compose root, attaches every service to it, and during deploy runs `docker network create --driver overlay --attachable <app>` (bridge for non-swarm) then connects the central proxy container to it. Every app gets network isolation while remaining reachable by the edge proxy.
+- **Why add to Tengiz:** "Custom Docker Network (#30)" lets users join a named network but doesn't auto-provision an isolated per-app network. Auto-creating a `tengiz-<app>` network per app (bridge by default), connecting the proxy to it, and cleaning it up on `tengiz rm` gives each deployed app private networking by default — services within an app resolve each other by container name, cross-app traffic is blocked unless explicitly shared. Directly maps to `docker network create`/`docker network connect` via the existing exec pattern.
+- **Detected:** 2026-08-02
+
+## Preview Deployment Security Gating (PR Author Write-Access Check)
+- **Source:** Dokploy
+- **Description:** Before creating a preview deployment for a PR, Dokploy checks the PR author's GitHub repository permissions via the API (`checkUserRepositoryPermissions`, `providers/github.ts`). If the app has `previewRequireCollaboratorPermissions` (default on) and the author lacks write/admin/maintain access, the deployment is blocked and a "Preview Deployment Blocked — Security Protection" comment is posted to the PR (deduplicated via a marker string). Apps can also require a specific PR label before preview deploys and cap concurrent previews per app (`previewLimit`).
+- **Why add to Tengiz:** Tengiz already implements PR-based preview deployments, but any external PR author who can reach the webhook can currently trigger builds on the host — a real security hole (arbitrary code execution in the build phase). Gating preview deploys on the PR author's write access (verified against the git provider API) plus optional label gating and per-app preview limits closes it. Includes a git-provider comment to explain the block, and `tengiz preview list` gains a blocked/rejected status. Complements the existing `gitdeploy`/`preview` packages.
+- **Detected:** 2026-08-02
+
+## sslip.io Auto-Domains (Zero-DNS Public Preview URLs)
+- **Source:** Dokploy
+- **Description:** `generateWildcardDomain` builds domains from a base like `*.sslip.io` by embedding the server IP into the subdomain with dots converted to dashes (e.g. `app-1-2-3-4.sslip.io`). Because sslip.io resolves any subdomain to the embedded IP, `*.sslip.io` works with zero DNS configuration. Preview deployments get instant public URLs (`preview-<app>-<random6>.sslip.io`) without any DNS provider setup.
+- **Why add to Tengiz:** Tengiz's `.tengiz.local` hostnames are local-only; there's no way to expose an app publicly without configuring a real domain + DNS. sslip.io auto-domains give every preview deployment (and even production apps) a working public URL immediately — the killer demo/CI feature for a scale-to-zero platform. `tengiz domain add --wildcard` or automatic `preview-<app>-<ip>.sslip.io` URLs on preview creation. Go implementation: IP-to-dashes formatting + proxy host matching against the configured wildcard suffix. (Note: previously mentioned only as a byproduct of the Dokploy AI assistant, never as a standalone feature.)
+- **Detected:** 2026-08-02
+
+## Deployment Crash Recovery (Startup State Reconciliation)
+- **Source:** Dokploy
+- **Description:** On server startup (`utils/startup/cancel-deployments.ts`), Dokploy marks all deployments stuck in `running` status as `cancelled` and resets their parent app/compose status to `idle`, so no app is left permanently "deploying" after a crash or restart.
+- **Why add to Tengiz:** Tengiz persists deployment state in `~/.tengiz/*.json`; if the process dies mid-deploy (kill -9, host reboot, OOM), `tengiz ps` will show a phantom "deploying/running" state forever with no recovery. A startup reconciliation step — when `tengiz` starts (or a `tengiz server init --systemd` unit runs) — scans persisted deployment records and resets stale `running` states to `failed`/`cancelled`, unblocking subsequent deploys. Small, high-reliability win that also complements Server Reboot Recovery (#167).
+- **Detected:** 2026-08-02
+
+## Structured Command Error Type (CommandError)
+- **Source:** Dokploy
+- **Description:** `ExecError` carries `command`, `stdout`, `stderr`, `exitCode`, `originalError`, and `serverId`, with `getDetailedMessage()` formatting command/exit code/location/stdout/stderr and an `isRemote()` helper. Every `execAsync`/`spawnAsync` failure is wrapped so the failing command and its captured output are always known.
+- **Why add to Tengiz:** For an exec-driven tool like Tengiz, "which docker command failed, with what stdout/stderr/exit code" is the difference between a debuggable and an opaque failure. A Go `*CommandError{Command, Stdout, Stderr, ExitCode}` wrapping every `os/exec` call in `runtime`, `builder`, and `gitdeploy` makes `tengiz deploy` failures self-explanatory and feeds build-logs with the actual failing output. Complements Trace/Debug Mode (#112) with structured failure data.
+- **Detected:** 2026-08-02
+
+## File-Type Mounts (Config-as-Mount)
+- **Source:** Dokploy
+- **Description:** Mounts are unified records with a `type` discriminator: `volume` (named Docker volume), `bind` (host path), or `file` (content stored in the config store, materialized to a per-app files directory, then bind-mounted into the container). File content is written via a base64 pipeline (`echo "<b64>" | base64 -d > <path>`) that sidesteps all shell-escaping problems. Generation splits into `generateVolumeMounts`/`generateBindMounts`/`generateFileMounts`, each mapping to the correct Docker mount kind.
+- **Why add to Tengiz:** Tengiz's `volume add/remove/list` is name-based only. A `file` mount type — content stored in the app's state and materialized to disk before `docker run` — unlocks "config-as-mount" without baking files into images: nginx configs, env files, cron specs, SSL certs. `tengiz volume add <app> --file /etc/nginx/conf.d/default.conf --content "..."` and `.tengiz.yaml`'da `mounts.files: [{path: /etc/app.conf, content: "..."}]`. The base64-write pattern is exactly what a Go binary should use to avoid shell injection.
+- **Detected:** 2026-08-02
+
+## Shell Injection Hardening Layer (Whitelist Regex + Quoting)
+- **Source:** Dokploy
+- **Description:** Every interpolated path/name is passed through `quote()` (shell-quote); app names, volume names, and DB passwords are constrained by regexes (`APP_NAME_REGEX`, `VOLUME_NAME_REGEX`, `DATABASE_PASSWORD_REGEX`); container IDs and destination paths are validated against dedicated regexes and shell metacharacters are rejected outright; env vars destined for a shell are escaped. Git branch names are validated against `VALID_BRANCH_REGEX = /^[a-zA-Z0-9._\-/#]+$/` (git-check-ref-format) because they're interpolated into `git clone --branch "<branch>"`. Hostnames are validated with an RFC-1123 regex that explicitly rejects underscores (Let's Encrypt refuses to issue certs for underscore hostnames).
+- **Why add to Tengiz:** Tengiz constructs `docker`/`git`/`exec` shell commands from user-supplied app names, branches, domains, and env values throughout `deploy/run/volume/domain`. Adopting "whitelist regex for names/paths + shell-quote or reject everything else" across the CLI boundary is the single most valuable hardening pattern for an exec-based tool, and the documented rationale for hostname rules (underscores break cert issuance) is a ready-made `tengiz domain add` validation rule. Complements Webhook SSRF Protection (#191) and HMAC webhooks (#86).
+- **Detected:** 2026-08-02
+
+## Docker Socket Auto-Discovery (Rancher Desktop / Colima / Docker Desktop)
+- **Source:** Dokploy
+- **Description:** On boot the Docker client is built by probing candidates in order: `DOKPLOY_DOCKER_HOST[:PORT]` env (explicit remote TCP), then `DOCKER_HOST`, then Rancher Desktop (`~/.rd/docker.sock`), then Colima, then `/var/run/docker.sock` — the first socket that exists wins. API version is overridable via env.
+- **Why add to Tengiz:** Tengiz assumes `/var/run/docker.sock`. The same probe order lets the single binary "find Docker wherever it lives" — Rancher Desktop/Colima/Docker Desktop on macOS dev machines, remote TCP via `DOCKER_HOST`, without any config flag. Zero-cost (`os.Stat` probe list), high dev-experience value, and it enables `tengiz deploy` to work identically on laptop and server. Complements SSH Tabanlı Remote Deployment (#105) with a local transport-discovery layer.
+- **Detected:** 2026-08-02
+
+## Forward-Auth SSO Gate for Apps (OAuth2-Proxy Integration)
+- **Source:** Dokploy
+- **Description:** Per-app `forwardAuth` middleware pointing at `https://<auth-domain>/oauth2/auth` with `trustForwardHeader` and passthrough of `X-Auth-Request-User/Email/Preferred-Username` and `Authorization`. A companion `-errors` middleware rewrites 401-403 → 302 to `/oauth2/sign_in?rd={url}`. A central router (`Host(auth-domain) && PathPrefix(/oauth2/)` with high priority) proxies to an oauth2-proxy-style service. Auth middleware is registered before custom middlewares so it always runs first.
+- **Why add to Tengiz:** "OIDC/OAuth SSO (#128)" covers admin login; forward-auth extends the same identity to *deployed apps* — "log in with your org SSO to access this deployment" without any app code. For a Go proxy this is a standard auth-check middleware: forward a probe request to the auth endpoint, on 401 redirect to the SSO sign-in, then inject identity headers (`X-Auth-Request-User`, etc.) upstream. Valuable for internal tools, admin panels, and gated preview deployments; composes with HTTP Basic Auth (#27) and Proxy Security Middleware (#134).
+- **Detected:** 2026-08-02
+
+## Docker Network State Reconciliation (Import / Sync / Recreate)
+- **Source:** Dokploy
+- **Description:** `findNetworksToSync` diffs live Docker networks against stored rows: networks are *importable* (not in a reserved list — `bridge`, `host`, `none`, `ingress`, `docker_gwbridge` — with driver `bridge`|`overlay`) or *missing* (stored but gone from Docker). `importDockerNetworks` persists full metadata (driver, internal, attachable, IPv4/IPv6, IPAM subnet/gateway/IPRange); `recreateNetwork` re-creates a network from its row (self-healing after Docker restart); `removeNetwork` tolerates 404. `resolveServiceNetworks` assembles a service's network list from user networks + the default edge network.
+- **Why add to Tengiz:** "Docker Network & Volume CRUD (#77)" is create/list/rm only. State reconciliation makes network management idempotent and crash-safe: `tengiz network sync` imports pre-existing Docker networks into Tengiz's state, detects networks that disappeared (e.g. after Docker restart), and recreates them from stored config. Essential once per-app isolated networks (above) and multi-service apps exist, since a network missing after reboot breaks inter-app routing until manually recreated.
+- **Detected:** 2026-08-02
+
+## Global Flat App Namespace (Unique Name + Random Suffix)
+- **Source:** Dokploy
+- **Description:** `buildAppName` normalizes the app name (lowercase, spaces→hyphens) and appends a 6-char random suffix (`<name>-<xxxxxx>`). `validUniqueServerAppName` checks uniqueness across applications, compose projects, and all database services at once — the entire namespace is one flat Docker-name space, so no two services of any type can collide on container/network names.
+- **Why add to Tengiz:** Tengiz names containers `tengiz-<appname>` and already handles env-scoped naming, but with no cross-type uniqueness guarantee — a compose stack and an app could collide once compose support exists. Extending uniqueness to a flat global namespace (apps + compose + databases + previews) and appending a short random suffix on auto-created apps prevents hard-to-debug container/network name collisions. Complements Consistent Container Names (#190) by separating "stable user-facing name" from "globally-unique internal name."
+- **Detected:** 2026-08-02
+
+## Credential Redaction in Logs
+- **Source:** Dokploy
+- **Description:** `redactRcloneCredentials` regex-replaces `--s3-access-key-id="..."` / `--s3-secret-access-key="..."` with `[REDACTED]` in all logs and errors so shell commands containing secrets are never persisted or displayed verbatim.
+- **Why add to Tengiz:** Tengiz logs full `os/exec` command lines in several places (deploy logs, build-logs, `--debug` output). Any command embedding S3 keys, registry passwords, or `--build-arg NPM_TOKEN=...` leaks secrets into log files. A shared `redact()` applied at the logging boundary — regex over known sensitive flag/value patterns, applied before writing to build logs, `~/.tengiz/audit.json`, and terminal output — prevents secret leakage. Low effort, complements Build-Time Secrets (#82) and Secrets Management (#32).
+- **Detected:** 2026-08-02
+
+## Git Webhook Smart Triggers ([skip ci] Keywords / Tag Deploys / Image-Name Match)
+- **Source:** Dokploy
+- **Description:** Push webhooks filter on configured branch and `triggerType` (`push` vs `tag`); commit messages containing `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]` skip deployment. Tag pushes deploy apps configured with `triggerType: "tag"` and `autoDeploy: true`. Docker-sourced apps verify the pushed image name/tag matches the configured `dockerImage` before deploying. A single endpoint normalizes GitHub/GitLab/Gitea/Bitbucket/Soft Serve payloads by inspecting provider event headers.
+- **Why add to Tengiz:** Existing "Webhook Event Filtering (#50)" covers branch/path filters. Adding the `[skip ci]` keyword convention and tag-based deploy triggers closes the gap with standard CI behavior: developers can suppress redundant deploys from doc-only or dependency-bump commits, and tag pushes (e.g. `v1.2.0`) trigger release deploys. The image-name-match rule prevents unrelated repo image pushes from triggering deploys. Small additions to the existing webhook handler.
+- **Detected:** 2026-08-02
+
+## IDN → Punycode Domain Normalization
+- **Source:** Dokploy
+- **Description:** `toPunycode` converts internationalized domain names (e.g. `тест.рф` → `xn--e1aybc.xn--p1ai`) before building router rules, since Traefik requires ASCII for matching and cert issuance.
+- **Why add to Tengiz:** Tengiz's proxy does host-based routing and custom domains; non-ASCII domains (internationalized domain names) currently fail host matching and would break Let's Encrypt issuance. Normalizing IDNs to punycode with Go's `golang.org/x/net/idna` at `tengiz domain add` time — both for storage and for host matching — gives correct routing and TLS for international domains. Tiny, self-contained improvement to the existing domain feature.
+- **Detected:** 2026-08-02
+
+## Per-App FIFO Deployment Queue with Dynamic Concurrency
+- **Source:** Dokploy
+- **Description:** A purpose-built in-memory queue replaces BullMQ/Redis. Jobs are partitioned by serverId; each partition runs up to N jobs concurrently (N resolved dynamically from settings on every scheduling tick). Within a partition, jobs for the same application/compose are serialized (group FIFO) so two builds can't collide on the same code dir/container name. Active jobs can't be removed; waiting jobs can be purged per-app or globally.
+- **Why add to Tengiz:** Existing "Build Queue with Dedup (#124)" covers last-one-wins dedup but not serialization or concurrency control. An in-memory partition+group-FIFO queue gives Tengiz: (1) same-app deploys always serialize (no container-name collisions), (2) different apps build in parallel with a configurable concurrency ceiling, (3) zero Redis/queue dependency — a Go channel/semaphore design fits the single-binary model. Foundation for Deployment Cancellation (#192) and a `tengiz queue status` command. Complements Deploy Lock (#15) at the orchestration layer.
+- **Detected:** 2026-08-02
+
+## CDN-Aware Domain Validation (Mismatch vs Behind-CDN)
+- **Source:** Dokploy
+- **Description:** `validateDomain()` does an A-record DNS resolution and checks the resolved IP against hardcoded IP/CIDR ranges for Cloudflare, Fastly, Bunny CDN, and Arvancloud. If behind a CDN it marks the domain valid but returns a warning ("actual IP is masked"); otherwise it compares against the expected server IP and reports a mismatch with the resolved IP. This prevents the classic "certificate fails because the domain points at Cloudflare" confusion.
+- **Why add to Tengiz:** "CDN Provider Detection (#135)" trusts CDN IPs for `X-Forwarded-For`; this is the complementary domain-add-time check: `tengiz domain add` verifies DNS, distinguishes "domain points at a CDN (fine — use HTTP-01/ACME)" from "wrong IP" with an actionable message, and skips the misleading failure when a CDN proxies the domain. Reuses the same CDN IP-range tables. Reduces the #1 "why doesn't TLS work" support issue.
+- **Detected:** 2026-08-02
