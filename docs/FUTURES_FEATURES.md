@@ -1870,3 +1870,53 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** On boot, `CaptainManager.ensureAllAppsInited()` iterates every persisted app definition and re-creates/re-updates each app's service so the running container matches the persisted desired state — image, env vars, volumes, networks, ports, and instance count. Apps are processed with a ~5s settle delay in a bounded sequential pool, and the platform blocks API operations until reconciliation completes (`isInitialized` gate). Any drift from manual `docker` commands, version changes, or partial deploy failures is corrected automatically.
 - **Why add to Tengiz:** The recorded Server Reboot Recovery (#45) restarts apps after a host reboot but does not reconcile config drift. Desired-state reconciliation ensures each container always matches its persisted `AppEntry` — self-healing manual Docker interference, image/env drift, and interrupted deploys. A `tengiz reconcile` command plus an optional startup sweep (in the recorded `tengiz server init --systemd` unit) gives declarative container management. The existing `runtime.Manager` + `Store` already provide the pieces; the new part is the diff-and-reapply loop.
 - **Detected:** 2026-08-02
+
+---
+
+## Healthcheck Boot Barrier (Gatekeeper/Queuer Deployment Sequencing)
+- **Source:** Kamal
+- **Description:** During multi-role/host app boot, Kamal uses a single-assignment barrier (`Healthcheck::Barrier`): the primary role's container boots first and acts as the gatekeeper; every non-primary role queues behind the barrier. The barrier only opens once the primary container passes its healthcheck, letting secondary roles boot. If the primary fails, the barrier closes and boot aborts — secondary roles never start. A failed primary also dumps its health log for diagnosis.
+- **Why add to Tengiz:** Tengiz's roadmap includes role/process scaling (web + worker + jobs). Booting the web (primary) process first and gating workers/jobs behind its healthcheck prevents the classic failure where background workers spin up and hammer a database that isn't ready because the web app failed to start/migrate. It's a cheap reliability gate built on the existing `health` package (one `sync.Once`-style barrier + a poller), with no new dependencies.
+- **Detected:** 2026-08-02
+
+## Local Dirty-Build Command (`tengiz build dev`)
+- **Source:** Kamal
+- **Description:** `kamal build dev` builds the current working directory — including uncommitted/untracked changes — straight into the local Docker image store, tagging both the version and `latest` tags with a `-dirty` suffix so the result can never be mistaken for a release image. Before building it computes which modified/untracked files (incl. gitignored ones) will be baked into the context and warns the user. `--output` defaults to the local `docker` store instead of `registry`.
+- **Why add to Tengiz:** Developers currently can't test the exact Docker build of a work-in-progress tree without committing or running a full `tengiz deploy`. A `tengiz build dev` gives a fast, safe local image-build loop and surfaces dirty-worktree leakage into the context early. Distinct from `tengiz deploy`, from the recorded Local Development Emulator (#99, full stack), and from `tengiz build-logs` — this targets image building specifically. Implementation: buildx with `--output=type=docker` + `-dirty` tags in `internal/builder`, plus `git status --porcelain` diff warnings.
+- **Detected:** 2026-08-02
+
+## Rich One-off Exec Modes (`--reuse` / `--detach` / `--raw`)
+- **Source:** Kamal
+- **Description:** Kamal's `app exec` has four modes: `--interactive` (TTY shell), `--reuse` (run the command inside the already-running container via `docker exec`), `--detach` (run in a new detached container), and `--raw` (raw stdout for piping). Incompatible flag combinations are rejected, `--env` injects vars, and commands can be scoped to a pinned version.
+- **Why add to Tengiz:** The implemented `tengiz run` always spawns a temporary container that is auto-removed. `--reuse` runs a command in the existing live container (e.g. `tengiz run myapp --reuse -- rails console`), `--detach` runs long-lived background jobs, and `--raw` enables clean piping of output into scripts/CI. Small extensions to the existing `runtime.Exec` (`docker exec -it` vs `-i` based on TTY detection), high operational value. Complements the recorded TTL-Managed Detached Run lifecycle with in-container execution.
+- **Detected:** 2026-08-02
+
+## In-Use Image Protection During Prune (Active-Image Whitelist)
+- **Source:** Kamal
+- **Description:** Kamal's prune builds a dynamic "active image" whitelist — every image referenced by a running or stopped container, plus the floating `latest` tag, plus in-use dangling (`<none>`) images — and removes only images outside that set (`while read image tag; do docker rmi $tag; done`). Containers are pruned by status (created/exited/dead) keeping the newest `retain_containers` (default 5).
+- **Why add to Tengiz:** Blind `tengiz cleanup`/`docker image prune` can delete the very image a running container (or a rollback candidate) needs, or the `latest` tag the proxy resolves. An active-image whitelist makes housekeeping safe for Tengiz's scale-to-zero model where stopped containers and old images are deliberately retained for cold-start and rollback. Distinct from CapRover's recorded DiskCleanupManager (which keeps last-N *deployment versions*): this protects against *runtime* image dependencies. Complements Docker Housekeeping (#6) and Container Retention Policy with a safety guarantee.
+- **Detected:** 2026-08-02
+
+## Inline Command Substitution in Secrets/Env Files (`$(command)`)
+- **Source:** Kamal
+- **Description:** Kamal's dotenv-based secrets support `$(command)` substitution with nested parentheses and escaped `\(...)`: e.g. `RAILS_MASTER_KEY=$(cat config/master.key)` or `$(kamal secrets fetch --adapter 1password ...)`. A patched parser inlines `kamal secrets` invocations without shell quoting (so secrets never leak into shell history/args) and executes other commands normally.
+- **Why add to Tengiz:** Env/secret files often need values generated or stored elsewhere (master keys, cloud credentials, vault-fetched tokens). Supporting `$(command)` in `.tengiz.yaml` and secrets files lets users source dynamic values at deploy time without hardcoding them. The nested/escaped parser and safe inlining are straightforward in Go (`os/exec` + shell quoting of output). Distinct from the recorded `[[secret.NAME]]` interpolation (Komodo) and Secret Interpolation System (#54) — this adds command execution, not just secret lookup.
+- **Detected:** 2026-08-02
+
+## Registry-Based Build Cache (`type=registry` with `<image>-build-cache`)
+- **Source:** Kamal
+- **Description:** Kamal supports two BuildKit cache backends; the `registry` type pushes cache layers to a dedicated `<image>-build-cache` image in the app's registry (`--cache-to type=registry,ref=<repo>-build-cache` and matching `--cache-from`), while `gha` targets GitHub Actions. Both only emit when cache-to AND cache-from are configured; cache-from filters a safe option allowlist to avoid leaking secrets in cache keys.
+- **Why add to Tengiz:** The recorded "Persistent Docker BuildKit Cache" (CapRover, #114) uses local cache volumes — fast but not portable. A registry-pushed cache lets builds happen on one machine (CI runner, Remote Docker Builder) and deploys reuse the cache on another, cutting rebuild time dramatically in multi-machine/CI workflows. Complements Container Registry Integration (#19) and the Build Pipeline; `.tengiz.yaml`'da `build.cache.type: registry` ve `build.cache.image: <app>-build-cache` ile yapılandırılır.
+- **Detected:** 2026-08-02
+
+## Build Provenance & SBOM Attestations
+- **Source:** Kamal
+- **Description:** Kamal passes buildx `--provenance` and `--sbom` flags (e.g. `mode=max`, `true`/`false`) to attach SLSA provenance and software-bill-of-materials attestations to built images, alongside `--label service=<service>` for image identity.
+- **Why add to Tengiz:** Supply-chain security (SLSA provenance, SBOM) is becoming a deployment prerequisite for compliance and audit. Since Tengiz already shells out to `docker buildx`, emitting `--provenance`/`--sbom` is a two-flag addition in `internal/builder` that lets users produce verifiable, auditable images. Complements Build-Time Secrets (#82), digest pinning, and the GitOps/audit features with image metadata.
+- **Detected:** 2026-08-02
+
+## SSH Agent Forwarding During Build (`--ssh default`)
+- **Source:** Kamal
+- **Description:** When configured, Kamal mounts the developer's SSH agent into the build container via buildx `--ssh <value>` (e.g. `default`), letting `docker build` fetch private git/package dependencies (Go modules, npm, gems) over SSH without baking credentials into the image.
+- **Why add to Tengiz:** Tengiz builds frequently need private dependencies (git+ssh remotes) that fail without auth; the alternatives (embedding tokens, `--build-arg`) leak secrets into image history. `--ssh` reuses the local agent — no credentials in the image, no extra secret plumbing. One flag in `builder.go` plus `.tengiz.yaml`'da `build.ssh: default`, high value for monorepo/private-package users. Complements Build-Time Secrets and Private Registry Authentication.
+- **Detected:** 2026-08-02
