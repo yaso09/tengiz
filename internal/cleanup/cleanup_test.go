@@ -33,9 +33,21 @@ func TestVolumePruneArgs(t *testing.T) {
 }
 
 func TestContainerCandidatesArgs(t *testing.T) {
-	want := []string{"ps", "-a", "--filter", "status=exited", "--filter", "label!=tengiz-app", "--format", "{{.Names}}"}
+	want := []string{"ps", "-a", "--filter", "status=exited", "--format", "{{.Names}}\t{{.Labels}}"}
 	if got := containerCandidatesArgs(); !reflect.DeepEqual(got, want) {
 		t.Errorf("containerCandidatesArgs() = %v, want %v", got, want)
+	}
+}
+
+func TestContainerCandidatesFiltersTengizContainers(t *testing.T) {
+	out := "orphan1\t\n" +
+		"tengiz-myapp\tcom.docker.compose.project=x,tengiz-app=myapp\n" +
+		"orphan2\t\n" +
+		"tengiz-other\tfoo=bar,tengiz-app=other\n"
+	got := containerCandidates(out)
+	want := []string{"orphan1", "orphan2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("containerCandidates() = %v, want %v", got, want)
 	}
 }
 
@@ -186,7 +198,7 @@ func contains(list []string, s string) bool {
 func TestRunDryRunListsCandidates(t *testing.T) {
 	var calls []string
 	r := &Runner{run: fakeRun(&calls, map[string]string{
-		"ps -a --filter status=exited --filter label!=tengiz-app --format {{.Names}}": "orphan1\norphan2\n",
+		"ps -a --filter status=exited --format {{.Names}}\t{{.Labels}}": "orphan1\t\norphan2\t\n",
 		"ps -a --format {{.Image}}":                "",
 		"images --format {{.Repository}}:{{.Tag}}": "tengiz-apps/myapp:prod-latest\nnode:20-alpine\n",
 		"network ls --filter dangling=true --format {{.Name}}": "bridge_x\n",
@@ -225,7 +237,7 @@ func TestRunDryRunListsCandidates(t *testing.T) {
 func TestRunDryRunWithoutVolumesListsNoVolumes(t *testing.T) {
 	var calls []string
 	r := &Runner{run: fakeRun(&calls, map[string]string{
-		"ps -a --filter status=exited --filter label!=tengiz-app --format {{.Names}}": "",
+		"ps -a --filter status=exited --format {{.Names}}\t{{.Labels}}": "",
 		"ps -a --format {{.Image}}":                "",
 		"images --format {{.Repository}}:{{.Tag}}": "",
 		"network ls --filter dangling=true --format {{.Name}}": "",

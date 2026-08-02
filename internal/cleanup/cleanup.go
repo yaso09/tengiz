@@ -54,7 +54,29 @@ func containerPruneArgs() []string {
 }
 
 func containerCandidatesArgs() []string {
-	return []string{"ps", "-a", "--filter", "status=exited", "--filter", "label!=" + tengizAppLabel, "--format", "{{.Names}}"}
+	return []string{"ps", "-a", "--filter", "status=exited", "--format", "{{.Names}}\t{{.Labels}}"}
+}
+
+// containerCandidates filters `docker ps` output (name<TAB>labels lines) to
+// only stopped containers NOT managed by Tengiz. docker ps does not support
+// the label!= negation filter, so protection is applied client-side.
+func containerCandidates(out string) []string {
+	var result []string
+	for _, line := range lines(out) {
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) == 0 {
+			continue
+		}
+		labels := ""
+		if len(parts) == 2 {
+			labels = parts[1]
+		}
+		if strings.Contains(labels, tengizAppLabel+"=") {
+			continue
+		}
+		result = append(result, parts[0])
+	}
+	return result
 }
 
 func networkPruneArgs() []string {
@@ -213,7 +235,7 @@ func (r *Runner) dryRun(ctx context.Context, opts Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	res.ContainerCandidates = lines(out)
+	res.ContainerCandidates = containerCandidates(out)
 
 	usedOut, err := r.run(ctx, usedImagesArgs()...)
 	if err != nil {
