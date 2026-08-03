@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/yaso09/tengiz/internal/builder"
 	"github.com/yaso09/tengiz/internal/config"
+	"github.com/yaso09/tengiz/internal/deployhealth"
 	"github.com/yaso09/tengiz/internal/git"
 	"github.com/yaso09/tengiz/internal/gitdeploy"
 	"github.com/yaso09/tengiz/internal/health"
@@ -135,7 +136,7 @@ serverless:
 #   interval: 30
 #   retries: 3
 #   timeout: 5
-#   start_period: 0
+#   start_period: 0      # grace before deploy health gate polls (zero-downtime deploys)
 # volumes:
 #   - host_path: /data/myapp
 #     container_path: /app/data
@@ -407,9 +408,24 @@ var deployCmd = &cobra.Command{
 		}
 		fmt.Printf("[tengiz] new container starting on port %d\n", newPort)
 
-		// Wait for the new container to be ready
+		// Wait for the new container to be ready (TCP + app-level health when configured)
 		containerName := runtime.ContainerName(cfg.Name, cfg.Environment)
-		if err := rt.WaitForReady(context.Background(), fmt.Sprintf("%s-%s", containerName, deploymentID), cfg.Port); err != nil {
+		versionedName := fmt.Sprintf("%s-%s", containerName, deploymentID)
+		if err := deployhealth.Wait(context.Background(), rt, cfg, versionedName, cfg.Port); err != nil {
+			if cfg.HealthCheck != nil && cfg.HealthCheck.Enabled {
+				if abortErr := deployhealth.Abort(context.Background(), rt, store, cfg.Name, containerName, deploymentID, imageTag, newPort); abortErr != nil {
+					log.Printf("[tengiz] warning: rollback cleanup failed: %v", abortErr)
+				}
+				notifyMgr.SendAsync(context.Background(), types.NotificationEvent{
+					Type:    types.EventDeployFailure,
+					AppName: cfg.Name,
+					Message: fmt.Sprintf("Health check failed for %s: %v (rolled back)", cfg.Name, err),
+					Metadata: map[string]string{
+						"environment": envFlag,
+					},
+				})
+				return fmt.Errorf("deploy aborted: health check failed: %w", err)
+			}
 			log.Printf("[tengiz] warning: new container may not be ready: %v", err)
 		}
 

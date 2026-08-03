@@ -2,8 +2,13 @@ package runtime
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/yaso09/tengiz/internal/types"
 )
@@ -63,6 +68,66 @@ func TestCreateVersionedWithEnv(t *testing.T) {
 	}
 	if err := m.CreateVersioned(context.Background(), cfg, "test:latest", 9001, "v2"); err != nil {
 		t.Fatalf("CreateVersioned with env: %v", err)
+	}
+}
+
+func TestPollHealthURLSuccess(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	err := pollHealthURL(context.Background(), ts.URL, 500*time.Millisecond, 10*time.Millisecond, 3)
+	if err != nil {
+		t.Fatalf("pollHealthURL() error = %v", err)
+	}
+}
+
+func TestPollHealthURLHTTP500Fails(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+	err := pollHealthURL(context.Background(), ts.URL, 500*time.Millisecond, 10*time.Millisecond, 1)
+	if err == nil {
+		t.Fatal("expected error for HTTP 500")
+	}
+	if !strings.Contains(err.Error(), "HTTP 500") {
+		t.Errorf("error = %v, want it to contain 'HTTP 500'", err)
+	}
+}
+
+func TestPollHealthURLSuccessOnRetry(t *testing.T) {
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	err := pollHealthURL(context.Background(), ts.URL, 500*time.Millisecond, 10*time.Millisecond, 3)
+	if err != nil {
+		t.Fatalf("pollHealthURL() error = %v", err)
+	}
+}
+
+func TestPollHealthURLConnectionRefused(t *testing.T) {
+	err := pollHealthURL(context.Background(), "http://127.0.0.1:1", 100*time.Millisecond, 5*time.Millisecond, 2)
+	if err == nil {
+		t.Fatal("expected error for connection refused")
+	}
+}
+
+func TestPollHealthURLContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := pollHealthURL(ctx, "http://127.0.0.1:1", 100*time.Millisecond, 50*time.Millisecond, 5)
+	if err == nil {
+		t.Fatal("expected context cancellation error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want context.Canceled", err)
 	}
 }
 

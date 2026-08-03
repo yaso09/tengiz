@@ -161,6 +161,7 @@ const (
 	DeployActive   DeploymentStatus = "active"
 	DeployPrevious DeploymentStatus = "previous"
 	DeployRolled   DeploymentStatus = "rolled"
+	DeployFailed   DeploymentStatus = "failed"
 )
 
 const (
