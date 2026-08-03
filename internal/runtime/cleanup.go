@@ -57,3 +57,81 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	}
 	return nil
 }
+
+type PruneOptions struct {
+	Containers bool
+	Images     bool
+	Volumes    bool
+	Networks   bool
+	BuildCache bool
+	DryRun     bool
+}
+
+type PruneReport struct {
+	Containers string
+	Images     string
+	Volumes    string
+	Networks   string
+	BuildCache string
+}
+
+func buildPruneArgs(kind string, dryRun bool) []string {
+	switch kind {
+	case "containers":
+		if dryRun {
+			return []string{"container", "ls", "-a",
+				"--filter", "status=exited",
+				"--filter", "label!=tengiz-app",
+				"--format", "{{.ID}} {{.Names}} {{.Status}}"}
+		}
+		return []string{"container", "prune", "-f", "--filter", "label!=tengiz-app"}
+	case "images":
+		if dryRun {
+			return []string{"image", "ls", "--filter", "dangling=true", "--format", "{{.ID}} {{.Repository}}:{{.Tag}}"}
+		}
+		return []string{"image", "prune", "-f"}
+	case "volumes":
+		if dryRun {
+			return []string{"volume", "ls", "--filter", "dangling=true", "--format", "{{.Name}}"}
+		}
+		return []string{"volume", "prune", "-f"}
+	case "networks":
+		if dryRun {
+			return []string{"network", "ls", "--filter", "dangling=true", "--format", "{{.ID}} {{.Name}}"}
+		}
+		return []string{"network", "prune", "-f"}
+	case "build-cache":
+		if dryRun {
+			return []string{"builder", "du"}
+		}
+		return []string{"builder", "prune", "-af"}
+	}
+	return nil
+}
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneReport, error) {
+	var report PruneReport
+	var errs []error
+	run := func(kind string, enabled bool, dst *string) {
+		if !enabled {
+			return
+		}
+		args := buildPruneArgs(kind, opts.DryRun)
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("docker %s prune: %w\n%s", kind, err, string(out)))
+			return
+		}
+		*dst = string(out)
+	}
+	run("containers", opts.Containers, &report.Containers)
+	run("images", opts.Images, &report.Images)
+	run("volumes", opts.Volumes, &report.Volumes)
+	run("networks", opts.Networks, &report.Networks)
+	run("build-cache", opts.BuildCache, &report.BuildCache)
+	if len(errs) > 0 {
+		return report, fmt.Errorf("cleanup: %v", errs)
+	}
+	return report, nil
+}
