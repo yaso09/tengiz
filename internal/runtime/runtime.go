@@ -15,6 +15,31 @@ func ContainerName(name, env string) string {
 	return fmt.Sprintf("tengiz-%s-%s", name, env)
 }
 
+type CleanupOptions struct {
+	DryRun        bool
+	Containers    bool
+	Images        bool
+	Volumes       bool
+	Networks      bool
+	Cache         bool
+	Aggressive    bool
+	ProtectNames  []string
+	KeepImageTags []string
+}
+
+type CleanupReport struct {
+	DryRun     bool
+	Containers []string
+	Images     []string
+	Volumes    []string
+	Networks   []string
+	Reclaimed  []string
+}
+
+func (r *CleanupReport) emptyItems() bool {
+	return len(r.Containers)+len(r.Images)+len(r.Volumes)+len(r.Networks) == 0
+}
+
 type LogOptions struct {
 	Follow bool
 	Since  string
@@ -34,6 +59,7 @@ type Manager interface {
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
 	RemoveImage(ctx context.Context, imageTag string) error
 	KeepLastNImages(ctx context.Context, appName string, n int) error
+	Cleanup(ctx context.Context, opts CleanupOptions) (*CleanupReport, error)
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
@@ -116,6 +142,10 @@ func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
 
 func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
 	return nil
+}
+
+func (m *stubManager) Cleanup(ctx context.Context, opts CleanupOptions) (*CleanupReport, error) {
+	return &CleanupReport{DryRun: opts.DryRun}, nil
 }
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
