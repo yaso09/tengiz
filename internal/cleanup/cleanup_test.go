@@ -72,3 +72,60 @@ func TestCleanDryRunDoesNotRemove(t *testing.T) {
 		}
 	}
 }
+
+func TestParseReclaimed(t *testing.T) {
+	tests := []struct {
+		out  string
+		want int64
+	}{
+		{"Total reclaimed space: 1.5 GB\n", 1<<30 + 512<<20},
+		{"Deleted Images:\nTotal reclaimed space: 0 B\n", 0},
+		{"Deleted:\nTotal reclaimed space: 12 MB\n", 12 << 20},
+		{"Deleted:\nTotal reclaimed space: 512 kB\n", 512 << 10},
+		{"", 0},
+	}
+	for _, tc := range tests {
+		if got := parseReclaimed(tc.out); got != tc.want {
+			t.Errorf("parseReclaimed(%q) = %d, want %d", tc.out, got, tc.want)
+		}
+	}
+}
+
+func TestCleanPrunesImagesVolumesNetworks(t *testing.T) {
+	f := &fakeRunner{
+		responses: map[string]string{
+			"ps -a --format {{.ID}}|{{.Names}}|{{.Status}}|{{.Labels}}": "",
+			"image prune -f":   "Deleted Images:\nTotal reclaimed space: 1 GB\n",
+			"volume prune -f":  "Total reclaimed space: 2 GB\n",
+			"network prune -f": "Total reclaimed space: 3 GB\n",
+		},
+	}
+	c := NewCleaner(f)
+	res := c.Clean(context.Background(), Options{Containers: true, Images: true, Volumes: true, Networks: true})
+	for _, want := range []string{"image prune -f", "volume prune -f", "network prune -f"} {
+		found := false
+		for _, call := range f.calls {
+			if call == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected docker call %q, calls were %v", want, f.calls)
+		}
+	}
+	// 1 + 2 + 3 GB
+	if res.Reclaimed != (1+2+3)<<30 {
+		t.Errorf("Reclaimed = %d, want %d", res.Reclaimed, (1+2+3)<<30)
+	}
+}
+
+func TestCleanDryRunSkipsPrune(t *testing.T) {
+	f := &fakeRunner{responses: map[string]string{}}
+	c := NewCleaner(f)
+	c.Clean(context.Background(), Options{Images: true, Volumes: true, Networks: true, DryRun: true})
+	for _, call := range f.calls {
+		if strings.Contains(call, "prune") {
+			t.Errorf("dry-run must not run prune, got call %q", call)
+		}
+	}
+}
