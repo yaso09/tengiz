@@ -1820,3 +1820,27 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Per-app or global HSTS configuration for the proxy: `hsts` (on/off), `hsts-include-subdomains`, `hsts-preload`, `hsts-max-age`, plus `underscore-in-headers` and configurable `x-forwarded-for/proto/port/ssl` header values. Rendered into the vhost template only when HTTPS is enabled.
 - **Why add to Tengiz:** Force HTTPS Redirect (#52) covers the 301; HSTS adds the strict-transport-security response header with preload/include-subdomain to push browsers straight to HTTPS — a distinct, security-critical step beyond redirecting. `.tengiz.yaml`'da `proxy.hsts: { include_subdomains: true, preload: true }` ile konfigüre edilir ve proxy middleware'ine header enjeksiyonu olarak eklenir. Low effort, complements the SSL roadmap (#65). P2.
 - **Detected:** 2026-08-03
+
+## App Placeholder Image (Pre-Deploy Landing Page)
+- **Source:** CapRover
+- **Description:** Every newly-created app runs `caprover/caprover-placeholder-app:latest` until a real deployment happens. Visiting the app's subdomain before the first deploy shows a branded "Nothing here yet" landing page instead of a 404/502. The placeholder is auto-replaced by the first real build's container. Works alongside `notExposeAsWebApp` apps that should never be publicly routable.
+- **Why add to Tengiz:** New apps have a gap between `tengiz create` and the first `tengiz deploy` — currently the proxy cold-start path hits a stopped/missing container and returns an error. A placeholder container (or proxy-served placeholder page) gives a clean first-run UX: DNS resolves, HTTPS works, and the page says "deploy your app." Implementation: `runtime.Run()` the `tengiz-placeholder` image on app create, or serve a static placeholder from the proxy when an app has `deployedImageName == ""`. Low effort, improves first-impression UX. Complements Error Pages (#21) and Auto-Create on Deploy (#88). P3.
+- **Detected:** 2026-08-03
+
+## Pre-Deploy Function (Programmatic Deploy Override)
+- **Source:** CapRover
+- **Description:** `preDeployFunction` in the app definition is a user-supplied JavaScript function loaded via `requireFromString` and invoked with `(captainAppObj, dockerUpdateObject)` before every deploy. It can mutate the Docker service update object programmatically (add capability sets, environment, ports, placement, or any field) so advanced scenarios that no static config covers can be injected per-app at deploy time. A default no-op function is used when none is set.
+- **Why add to Tengiz:** Pre-Deploy Hooks (#9) run shell commands before deploy, but have no way to reshape the container spec itself. A programmable deploy override lets power users add `cap_add`, sysctl values, or custom labels via a small function. Go implementation: a per-app `deploy_override` hook in `.tengiz.yaml` evaluated at deploy time (`tengiz deploy --override "SetCapability NET_ADMIN"`), or embed a tiny JS engine (goja) for CapRover parity. Complements Custom Docker Options (#36) — override is dynamic/logic-based, options are static flags. Low-medium effort, P3.
+- **Detected:** 2026-08-03
+
+## Domain Ownership Verification Before SSL (DNS + HTTP Resolve Check)
+- **Source:** CapRover
+- **Description:** Before enabling HTTPS/custom domains for an app, CapRover's `DomainResolveChecker` verifies the user actually controls the domain: it writes a random UUID to `/.well-known/captain-identifier` on the app and confirms the domain resolves back to the server, failing fast with a clear error if DNS isn't pointed at this instance. This prevents issuing certificates or enabling custom domains for domains the user doesn't own.
+- **Why add to Tengiz:** Custom Domains (implemented) currently accept any hostname without proving ownership — a user could map someone else's domain and break its routing, and Let's Encrypt issuance (SSL roadmap #65) would fail repeatedly. A `tengiz domain verify <app> <domain>` pre-flight that checks DNS resolution + writes/reads a `/.well-known/` ownership file (well-known paths #59) before enabling the custom domain gives a deterministic "domain is ready" gate. Low effort (net.LookupHost + a marker HTTP fetch in `proxy`/`domain` package), prevents misconfigurations. P2.
+- **Detected:** 2026-08-03
+
+## Custom One-Click App Repository URLs (Multiple Template Sources)
+- **Source:** CapRover
+- **Description:** CapRover's one-click system supports registering multiple template repositories: `POST /oneclick/repositories/insert` validates a repository URL by fetching its `/v4/list` endpoint, then merges its apps into the one-click catalog alongside the official repo. Repositories can be deleted or listed, letting third-party or self-hosted template catalogs plug in.
+- **Why add to Tengiz:** One-Click Service Templates (#64) and the Service Template Registry (#130) cover a single built-in catalog. Multi-repo support lets teams point `tengiz service` at internal/air-gapped catalogs (`tengiz template repo add https://templates.corp.internal`) or curated community collections without forking Tengiz. Implementation: a `~/.tengiz/template-repos.json` list consulted when listing/searching templates, each validated by fetching its index. Low effort once templates (#64) land, P3.
+- **Detected:** 2026-08-03
