@@ -1670,3 +1670,45 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Webhook endpoints exist for GitHub (App + OAuth + manual), GitLab, Bitbucket, and Gitea (`routes/webhooks.php`), so push/PR events from any provider trigger the same deploy pipeline.
 - **Why add to Tengiz:** Webhook Auto-Deploy (#1, implemented) and Git Provider OAuth (#95) currently target GitHub/GitLab. Bitbucket and Gitea (popular self-hosted option) are missing. Adding parser/handler variants for their push + `pull_request` payloads — reusing the existing `webhook` package's event model — widens the deploy trigger surface with modest effort. P3, fills a concrete provider gap.
 - **Detected:** 2026-08-03
+
+## Forward Auth (OAuth2-Proxy-Style SSO Protection for Apps)
+- **Source:** Dokploy
+- **Description:** Deploys a dedicated `oauth2-proxy` container (`quay.io/oauth2-proxy/oauth2-proxy:v7.6.0`) on a separate auth domain with a shared cookie session (`setup/forward-auth-setup.ts`). Any per-app domain can then enable forward auth: unauthenticated requests are redirected to the auth domain for OIDC login, and once a session cookie exists the proxy forwards the request to the app with `X-Auth-Request-*` identity headers injected. The Traefik `forwardAuth` middleware is generated per domain and the auth-domain config is managed centrally (`utils/traefik/forward-auth.ts`).
+- **Why add to Tengiz:** The roadmap covers HTTP Basic Auth (#32) and admin-facing OIDC SSO (#157), but nothing protects arbitrary deployed apps (internal dashboards, staging, PR previews) behind real SSO. Because Tengiz's proxy is in-process Go, forward auth can be implemented natively as a middleware (auth redirect + session cookie + header injection) with no extra container — or by deploying oauth2-proxy for exact parity. Directly complements Preview Deployments (already implemented) by letting teams SSO-gate PR environments. Medium effort, P2.
+- **Detected:** 2026-08-03
+
+## SCIM User Provisioning (Enterprise Identity Sync)
+- **Source:** Dokploy
+- **Description:** SCIM 2.0 provisioning (`proprietary/scim.ts`) with per-provider bearer tokens generated from Okta/Azure AD/Google Workspace. Identity providers can auto-create, update, and de-provision users and groups on the platform, keeping team membership in sync without manual invites.
+- **Why add to Tengiz:** Multi-Team Tenancy (Coolify entry) covers manual invites and roles; SCIM automates the whole membership lifecycle for enterprises standardized on Okta/Azure AD. Once user management exists, a token-gated `/scim/v2/Users` + `/scim/v2/Groups` endpoint under the existing webhook/auth HTTP server is a small addition. Low-medium effort, P3 — gated on the user-management roadmap.
+- **Detected:** 2026-08-03
+
+## SAML SSO (Enterprise Login)
+- **Source:** Dokploy
+- **Description:** The SSO provider model supports both OIDC and SAML 2.0 (`sso.ts`): full IdP metadata import (entityID, signing cert, SSO location, encrypted assertions), SP metadata generation, signed authn requests, configurable signature/digest algorithms, and custom attribute-to-user mapping (id, email, name, image).
+- **Why add to Tengiz:** The recorded OIDC/OAuth SSO (#157) only covers OIDC providers, but Okta, Azure AD, and OneLogin deployments frequently standardize on SAML. A Go SAML service provider can be built with `crewjam/saml` and `goxmldsig`, integrated with the same session handling as OIDC. Complements OIDC SSO and Forward Auth for the enterprise story. Medium effort, P3.
+- **Detected:** 2026-08-03
+
+## Whitelabeling / Custom Branding (Enterprise Self-Hosted UI)
+- **Source:** Dokploy
+- **Description:** `whitelabelingConfig` (`webServerSettings`) lets admins rebrand the platform: app name, description, logo, favicon, login logo, custom CSS, support/docs URLs, custom error-page title/description, meta title, and footer text — all stored as JSON and applied to the web UI.
+- **Why add to Tengiz:** Tengiz is CLI-first today, but once the Web Dashboard (#150) ships, enterprise self-hosters will want to rebrand it for their own end users. Cheap to implement: a `~/.tengiz/branding.json` store + `tengiz branding set` command, with values injected into dashboard templates and error pages. P3, depends on the dashboard work.
+- **Detected:** 2026-08-03
+
+## File Upload to Running Container
+- **Source:** Dokploy
+- **Description:** `uploadFileToContainer(containerId, file, destinationPath)` (`services/docker.ts`) performs a docker cp-style upload of a local file into a running container's filesystem, exposed through the UI for quick file injection.
+- **Why add to Tengiz:** Tengiz has `tengiz run` for one-off commands, but no way to drop a file into a running container (e.g., inject a config, a TLS cert, a patch, or a DB dump into a stateful app — especially relevant on scale-to-zero where files are ephemeral). `tengiz cp <local-file> <app>:/path` is a thin `docker cp` wrapper in the `runtime` package reusing the existing exec pattern. Low effort, fills a real ops gap. P3.
+- **Detected:** 2026-08-03
+
+## Per-Domain Path Routing & Prefix Stripping
+- **Source:** Dokploy
+- **Description:** Each domain record supports `path`, `internalPath`, and `stripPath` (`db/schema/domain.ts`): a hostname can route a subpath (e.g. `/api`) to a specific backend, and the proxy can strip or rewrite that prefix before forwarding. `customEntrypoint`, per-domain `port`, and `serviceName` complete the routing matrix for compose/multi-service apps.
+- **Why add to Tengiz:** Tengiz's proxy routes by host only. Subpath routing lets one hostname serve multiple backends (e.g. `myapp.tengiz.local/api` → a separate service) and mount apps under a shared domain path. `stripPath` is essential so upstream apps don't see the injected prefix. Maps naturally onto the existing host-based router by adding a path-prefix match + rewrite. Low effort, P2.
+- **Detected:** 2026-08-03
+
+## Managed Database Credential Rotation
+- **Source:** Dokploy
+- **Description:** Managed database routers (Redis, Postgres, MySQL, MariaDB, Mongo, LibSQL) expose `changePassword` — a single operation that rotates a database user's password and updates the stored connection string so deployed apps pick up the new credential.
+- **Why add to Tengiz:** Pairs with Managed Database Provisioning (#63) and Magic Environment Variables (#158): periodic rotation of DB credentials is a security best practice and a compliance requirement. Once managed DBs exist, `tengiz db rotate-password <app>` can regenerate the credential and update `DATABASE_URL` through the existing config/secrets store. Low effort, P3 (depends on #63).
+- **Detected:** 2026-08-03
