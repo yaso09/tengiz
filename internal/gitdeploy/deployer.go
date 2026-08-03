@@ -10,6 +10,7 @@ import (
 
 	"github.com/yaso09/tengiz/internal/builder"
 	"github.com/yaso09/tengiz/internal/config"
+	"github.com/yaso09/tengiz/internal/deployhealth"
 	"github.com/yaso09/tengiz/internal/git"
 	"github.com/yaso09/tengiz/internal/notify"
 	"github.com/yaso09/tengiz/internal/proxy"
@@ -267,7 +268,22 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 	log.Printf("[tengiz] new container starting on port %d", newPort)
 
 	containerName := runtime.ContainerName(appName, p.env)
-	if err := p.rt.WaitForReady(ctx, fmt.Sprintf("%s-%s", containerName, deploymentID), cfg.Port); err != nil {
+	versionedName := fmt.Sprintf("%s-%s", containerName, deploymentID)
+	if err := deployhealth.Wait(ctx, p.rt, cfg, versionedName, cfg.Port); err != nil {
+		if cfg.HealthCheck != nil && cfg.HealthCheck.Enabled {
+			if abortErr := deployhealth.Abort(ctx, p.rt, p.store, appName, containerName, deploymentID, imageTag, newPort); abortErr != nil {
+				log.Printf("[tengiz] warning: rollback cleanup failed: %v", abortErr)
+			}
+			notifyMgr.SendAsync(ctx, types.NotificationEvent{
+				Type:    types.EventDeployFailure,
+				AppName: appName,
+				Message: fmt.Sprintf("Health check failed for %s: %v (rolled back)", appName, err),
+				Metadata: map[string]string{
+					"environment": p.env,
+				},
+			})
+			return fmt.Errorf("deploy aborted: health check failed: %w", err)
+		}
 		log.Printf("[tengiz] warning: new container may not be ready: %v", err)
 	}
 
