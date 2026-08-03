@@ -18,3 +18,17 @@ func TestStubKeepLastNImages(t *testing.T) {
 		t.Fatalf("KeepLastNImages() error = %v", err)
 	}
 }
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	report, err := m.Cleanup(context.Background(), CleanupOptions{DryRun: true})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if report == nil {
+		t.Fatal("Cleanup() returned nil report")
+	}
+	if !report.DryRun {
+		t.Error("Cleanup() DryRun = false, want true")
+	}
+}
