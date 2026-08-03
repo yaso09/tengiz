@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -122,5 +123,16 @@ func TestDefaultPruneOptions(t *testing.T) {
 	opts := DefaultPruneOptions()
 	if !opts.Containers || !opts.Images || opts.Volumes || !opts.Networks || !opts.BuildCache || opts.DryRun {
 		t.Errorf("unexpected DefaultPruneOptions: %+v", opts)
+	}
+}
+
+func TestStubPrune(t *testing.T) {
+	m := NewStub()
+	s, err := m.Prune(context.Background(), DefaultPruneOptions())
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if s != (PruneSummary{}) {
+		t.Errorf("Prune() summary = %+v, want zero value", s)
 	}
 }

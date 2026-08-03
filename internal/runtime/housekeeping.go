@@ -1,8 +1,11 @@
 package runtime
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -150,4 +153,130 @@ func parseDiskSize(s string) (int64, error) {
 		mult = 1
 	}
 	return int64(num * mult), nil
+}
+
+func (r *dockerRuntime) dockerOutput(ctx context.Context, args []string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker %s: %w\n%s", args[0], err, string(out))
+	}
+	return string(out), nil
+}
+
+func (r *dockerRuntime) runPrune(ctx context.Context, kind string) error {
+	args := pruneCommandArgs(kind)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker %s: %w\n%s", args[0], err, string(out))
+	}
+	return nil
+}
+
+func (r *dockerRuntime) candidatesFor(ctx context.Context, kind string) ([]string, error) {
+	out, err := r.dockerOutput(ctx, candidateQueryArgs(kind))
+	if err != nil {
+		return nil, err
+	}
+	if kind == "containers" {
+		return parseContainerCandidates(out), nil
+	}
+	return nonEmptyLines(out), nil
+}
+
+func (r *dockerRuntime) removeCandidates(ctx context.Context, kind string, ids []string) error {
+	if kind == "containers" {
+		for _, id := range ids {
+			cmd := exec.CommandContext(ctx, "docker", "rm", "-f", id)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				log.Printf("[runtime] cleanup: failed to remove container %s: %v\n%s", id, err, string(out))
+			}
+		}
+		return nil
+	}
+	return r.runPrune(ctx, kind)
+}
+
+func (r *dockerRuntime) systemDiskUsage(ctx context.Context) (systemDiskStats, error) {
+	out, err := r.dockerOutput(ctx, []string{"system", "df", "--format", "json"})
+	if err != nil {
+		return systemDiskStats{}, err
+	}
+	return parseSystemDF(out), nil
+}
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneSummary, error) {
+	var summary PruneSummary
+
+	before, err := r.systemDiskUsage(ctx)
+	if err != nil {
+		return summary, err
+	}
+	if opts.BuildCache {
+		if opts.DryRun {
+			n := before.buildCacheCount - before.buildCacheActive
+			if n < 0 {
+				n = 0
+			}
+			summary.BuildCache = n
+		} else {
+			summary.BuildCache = before.buildCacheCount
+		}
+	}
+
+	steps := []struct {
+		kind    string
+		enabled bool
+	}{
+		{"containers", opts.Containers},
+		{"images", opts.Images},
+		{"volumes", opts.Volumes},
+		{"networks", opts.Networks},
+	}
+	for _, step := range steps {
+		if !step.enabled {
+			continue
+		}
+		ids, err := r.candidatesFor(ctx, step.kind)
+		if err != nil {
+			return summary, err
+		}
+		count := len(ids)
+		switch step.kind {
+		case "containers":
+			summary.Containers = count
+		case "images":
+			summary.Images = count
+		case "volumes":
+			summary.Volumes = count
+		case "networks":
+			summary.Networks = count
+		}
+		if opts.DryRun {
+			continue
+		}
+		if err := r.removeCandidates(ctx, step.kind, ids); err != nil {
+			return summary, err
+		}
+	}
+
+	if opts.BuildCache && !opts.DryRun {
+		if err := r.runPrune(ctx, "buildcache"); err != nil {
+			return summary, err
+		}
+	}
+
+	if !opts.DryRun {
+		after, aerr := r.systemDiskUsage(ctx)
+		if aerr == nil {
+			if opts.BuildCache && after.buildCacheCount < before.buildCacheCount {
+				summary.BuildCache = before.buildCacheCount - after.buildCacheCount
+			}
+			if after.totalReclaimable < before.totalReclaimable {
+				summary.ReclaimedBytes = before.totalReclaimable - after.totalReclaimable
+			}
+		}
+	}
+	return summary, nil
 }
