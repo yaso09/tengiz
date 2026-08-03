@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -1780,6 +1781,96 @@ func addSecretProviderFlags(cmd *cobra.Command) {
 	cmd.Flags().String("doppler-token", "", "Doppler service token")
 	cmd.Flags().String("doppler-project", "", "Doppler project")
 	cmd.Flags().String("doppler-config", "", "Doppler config")
+}
+
+func collectProtectedContainers(dataDir string) []string {
+	var names []string
+	seen := make(map[string]bool)
+	add := func(n string) {
+		if n == "" || seen[n] {
+			return
+		}
+		seen[n] = true
+		names = append(names, n)
+	}
+
+	appFiles, _ := filepath.Glob(filepath.Join(dataDir, "apps*.json"))
+	for _, path := range appFiles {
+		apps := make(map[string]types.AppEntry)
+		if data, err := os.ReadFile(path); err == nil {
+			json.Unmarshal(data, &apps)
+		}
+		for _, a := range apps {
+			base := runtime.ContainerName(a.Name, a.Config.Environment)
+			add(base)
+			if a.DeploymentSuffix != "" {
+				add(base + "-" + a.DeploymentSuffix)
+			}
+		}
+	}
+
+	previewFiles, _ := filepath.Glob(filepath.Join(dataDir, "previews*.json"))
+	for _, path := range previewFiles {
+		previews := make(map[string]types.PreviewEntry)
+		if data, err := os.ReadFile(path); err == nil {
+			json.Unmarshal(data, &previews)
+		}
+		for _, p := range previews {
+			add(fmt.Sprintf("tengiz-%s-pr-%d", p.AppName, p.PRNumber))
+		}
+	}
+	return names
+}
+
+func collectKeepImageTags(dataDir string) []string {
+	var tags []string
+	seen := make(map[string]bool)
+	add := func(t string) {
+		if t == "" || seen[t] {
+			return
+		}
+		seen[t] = true
+		tags = append(tags, t)
+	}
+
+	appFiles, _ := filepath.Glob(filepath.Join(dataDir, "apps*.json"))
+	for _, path := range appFiles {
+		apps := make(map[string]types.AppEntry)
+		if data, err := os.ReadFile(path); err == nil {
+			json.Unmarshal(data, &apps)
+		}
+		for _, a := range apps {
+			add(a.ImageTag)
+			for _, d := range a.Deployments {
+				add(d.ImageTag)
+			}
+		}
+	}
+
+	depFiles, _ := filepath.Glob(filepath.Join(dataDir, "deployments*.json"))
+	for _, path := range depFiles {
+		deps := make(map[string][]types.DeploymentEntry)
+		if data, err := os.ReadFile(path); err == nil {
+			json.Unmarshal(data, &deps)
+		}
+		for _, list := range deps {
+			for _, d := range list {
+				add(d.ImageTag)
+			}
+		}
+	}
+
+	previewFiles, _ := filepath.Glob(filepath.Join(dataDir, "previews*.json"))
+	for _, path := range previewFiles {
+		previews := make(map[string]types.PreviewEntry)
+		if data, err := os.ReadFile(path); err == nil {
+			json.Unmarshal(data, &previews)
+		}
+		for _, p := range previews {
+			add(p.ImageTag)
+		}
+	}
+	return tags
 }
 
 func Execute() {
