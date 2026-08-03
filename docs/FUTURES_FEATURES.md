@@ -1712,3 +1712,111 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Managed database routers (Redis, Postgres, MySQL, MariaDB, Mongo, LibSQL) expose `changePassword` — a single operation that rotates a database user's password and updates the stored connection string so deployed apps pick up the new credential.
 - **Why add to Tengiz:** Pairs with Managed Database Provisioning (#63) and Magic Environment Variables (#158): periodic rotation of DB credentials is a security best practice and a compliance requirement. Once managed DBs exist, `tengiz db rotate-password <app>` can regenerate the credential and update `DATABASE_URL` through the existing config/secrets store. Low effort, P3 (depends on #63).
 - **Detected:** 2026-08-03
+
+## Declarative Port Map Management (scheme:host:container)
+- **Source:** Dokku
+- **Description:** A first-class port map system (`ports:add/set/remove/list`, `ports:report`) managing `scheme:host:container` mappings per app. Schemes include `http`, `https`, and the internal-only `__internal__` scheme. Ports are auto-detected from `EXPOSE` in the Dockerfile (`map-detected`), automatically gain an `https:443` mapping when a cert is added, and apps with vhost disabled get a random high port (1025–65535) allocated at deploy time instead of colliding on 80.
+- **Why add to Tengiz:** The recorded "Port Mapping Protocol Selection (TCP/UDP)" (CapRover) covers protocol choice, but Dokku's model adds a managed, persisted mapping list per app with scheme semantics, EXPOSE auto-detection, cert-triggered https mappings, and conflict-free random port allocation for non-proxied apps. This maps to a `ports` field in `AppEntry` (JSON store) and makes multi-service/containerized apps reachable without hardcoding. Medium effort, P2 — direct foundation for Accessory Services (#62) and Compose Import (#33).
+- **Detected:** 2026-08-03
+
+## Custom Container Labels Management
+- **Source:** Dokku
+- **Description:** Per-app custom Docker container labels via `proxy:labels:add/remove/show <app> <KEY=VALUE>`. Labels are stored per app and injected into the container at deploy time (shared by all vhost backends). Distinct from internal system labels (`com.dokku.*`), these are user-owned metadata for service discovery, filtering, monitoring, and cost accounting.
+- **Why add to Tengiz:** Tengiz already labels containers with `tengiz-app=<appname>` and `tengiz-env=<env>`. Giving users a managed way to add their own labels (`tengiz label add myapp team=billing`) enables cAdvisor/Prometheus scraping rules, container-level service discovery, and org-specific tagging without hand-editing Docker args. Low effort (label map in `AppEntry` + `--label` flags in `runtime.Run()`), high ops value.
+- **Detected:** 2026-08-03
+
+## Static Web Listener (Route to an External Backend)
+- **Source:** Dokku
+- **Description:** `network:set <app> static-web-listener <ip>:<port>` lets an app route its proxy/web listener to an existing external address instead of a locally running container. When set, the network plugin skips container IP/PORT bookkeeping and the proxy forwards `app.tengiz.local` traffic to the static listener. Useful for routing to services hosted outside the platform.
+- **Why add to Tengiz:** Enables hybrid deployments where some traffic is served by an existing host/container (e.g. a VM-hosted legacy service, an external cloud database console, or a service already behind the same hostname) while the rest uses Tengiz's scale-to-zero lifecycle. Complements Static IP/External Service scenarios and Per-App Proxy Toggle (#34) — a disabled proxy stops routing, a static listener points it somewhere specific. Low effort (a `proxy.upstream` override string in `AppEntry` consulted by the in-process proxy). P3.
+- **Detected:** 2026-08-03
+
+## Global Default Domains (Fallback Chain)
+- **Source:** Dokku
+- **Description:** `domains:add-global`, `domains:set-global`, `domains:clear-global`, and `domains:reset <app>` manage a global VHOST list that every app inherits unless it has its own domains. Resolution order: app domains → global domains → `hostname -f`. `domains:reset` re-syncs an app back to the global set, and a global wildcard (`*.tengiz.local`) is supported.
+- **Why add to Tengiz:** Today each app must have domains configured individually, and there's no instance-wide default. A global domain default (`tengiz domain add-global '*.myorg.com'`) lets any newly deployed app be reachable at `<app>.myorg.com` immediately, matching Vercel's "every project gets a URL" behavior. The fallback chain also simplifies multi-env setups (each env configures one global domain). Low effort (a global `VHOST` entry in `~/.tengiz/` consulted during proxy route registration). P2.
+- **Detected:** 2026-08-03
+
+## Proxy Config Validation & Inspection (nginx:validate-config / show-config)
+- **Source:** Dokku
+- **Description:** `nginx:validate-config [--clean]`, `nginx:show-config <app>`, and `nginx:reload` let operators validate the generated proxy configuration against the real engine before/after apply, view the exact rendered config per app, and atomically reload. `--clean` removes invalid stale configs; failed validation aborts the deploy.
+- **Why add to Tengiz:** The roadmap's Config Display Command (#48) targets merged app config, not the generated routing layer. `tengiz proxy show <app>` rendering the effective route table (domains → upstream port, TLS, headers) and a `tengiz proxy validate` dry-run before a proxy restart gives operators confidence when editing custom domains or path rules. Complements Proxy Configuration Versioning & Rollback (Coolify entry). Low-medium effort (render current `proxy.routes` to text + integration checks). P3.
+- **Detected:** 2026-08-03
+
+## Per-App Proxy Access/Error Log Management
+- **Source:** Dokku
+- **Description:** Per-app proxy access-log and error-log configuration: `nginx:set <app> access-log-path/access-log-format/error-log-path` plus commands `nginx:access-logs <app>` and `nginx:error-logs <app>` to view them. Log format/path overridable per app or globally, and proxy error pages are served from a configurable `dokku-errors` directory.
+- **Why add to Tengiz:** Tengiz captures container logs but not the proxy layer's request logs. Per-app proxy access logs (method, path, status, upstream, latency, cold-start flag) are the single best signal for debugging routing, load, and 502s — and are the data source for the recorded Prometheus Metrics from Proxy (#26). `tengiz proxy logs <app>` wraps this. Low-medium effort (structured logging middleware in `internal/proxy` writing per-app log files). P2, feeds the metrics/alert roadmap.
+- **Detected:** 2026-08-03
+
+## Alternative Deploy Sources (Archive / Directory / Source-from-Image)
+- **Source:** Dokku
+- **Description:** Beyond git push, Dokku supports four extra deploy sources: `git:from-archive <app> <url>` (tar/tar.gz/zip archive URL, or stdin), `git:from-directory <app> <dir>` (local directory), `git:from-image <app> <image>` (extracts source out of a Docker image into the repo), and `git:load-image <app>` (image tarball via stdin). Each records a distinct `deploy-source` and `deploy-source-metadata`.
+- **Why add to Tengiz:** CI/CD pipelines and artifact stores often produce archives or prebuilt image tarballs rather than git pushes. `tengiz deploy --archive <url>`, `--dir <path>`, or `--image <ref>` would let users deploy the exact artifact their pipeline built, bypassing a redundant source checkout/build. Extends Deploy Source Metadata Recording (#49) naturally and reuses the existing `builder` detection on the extracted tree. Medium effort (archive extraction + image-source extraction utilities), high CI/CD value. P2.
+- **Detected:** 2026-08-03
+
+## Private Git Repository Authentication (.netrc, known_hosts, deploy keys)
+- **Source:** Dokku
+- **Description:** `git:auth <host> [user] [password]` manages `.netrc` credentials for HTTP(S) git hosts (password pipable via stdin, `git:auth-status` verifies). `git:allow-host <host>` adds hosts to `~/.ssh/known_hosts` via `ssh-keyscan`. `git:generate-deploy-key` creates an `ed25519` SSH deploy key and `git:public-key` prints it for registration on the Git provider.
+- **Why add to Tengiz:** Git-Sync Deployment (#113) and git-based deploys break on private repositories because there's no credential plumbing. `tengiz git auth github.com <user>` + `tengiz git allow-host` + `tengiz git deploy-key` would make pulling from private GitHub/GitLab/Gitea repos (the common case) work out of the box — including secrets-managed tokens. Complements SSH Key Management for Deploy Access (#107) which handles *incoming* push auth; this handles *outgoing* pull auth. Low effort (`.netrc` + `ssh-keyscan` wrappers in the `gitdeploy` package). P1 — private repo deploys are table stakes.
+- **Detected:** 2026-08-03
+
+## Detached One-Off Task Lifecycle (run:list / run:logs / run:retire + TTL)
+- **Source:** Dokku
+- **Description:** `dokku run:detached [--force-tty] <app> <cmd>` starts a one-off task in the background and returns its container ID. `run:list [--format json]`, `run:logs`, and `run:stop` manage these containers, and `run:retire` garbage-collects them. Run containers have a default TTL of 86400s, support `--ttl-seconds`, and `--concurrency-policy allow|forbid|replace` (used by cron to prevent overlapping jobs).
+- **Why add to Tengiz:** The recorded One-off Process Execution (#26, implemented) covers interactive and foreground runs but not long-running background tasks (data imports, long migrations, batch workers) that outlive a shell session. `tengiz run --detached --ttl 24h -- python import.py` plus `tengiz runs list/logs/stop` gives operational control and automatic cleanup. Low effort on top of the existing `run` implementation (container TTL bookkeeping + list/retire commands). P3.
+- **Detected:** 2026-08-03
+
+## Cron Task Lifecycle Management (Manual Run, Suspend/Resume, Concurrency Policy)
+- **Source:** Dokku
+- **Description:** Dokku's cron plugin manages tasks with full lifecycle: `cron:list`, `cron:run <app> <id>` (manual trigger), `cron:suspend`/`cron:resume` (per-task and per-app maintenance), plus app.json-declared cron tasks with `schedule`, `maintenance`, and `concurrency_policy` (`allow`/`forbid`/`replace`). Reports expose each task's schedule/command/status and global `mailto`/`mailfrom`.
+- **Why add to Tengiz:** The recorded Scheduled Tasks / Cron Jobs (#54) covers basic scheduling. Dokku adds the operational lifecycle around it: manually triggering a job for testing, suspending a misbehaving task without deleting it, preventing overlapping runs (`forbid`) or forcing a fresh run (`replace`), and emailing results. `.tengiz.yaml`'da `cron:` tanımlarına `concurrency_policy` ve `maintenance` alanları eklenir; `tengiz cron run <app> <id>` el ile tetikleme. Low-medium effort on the existing cron roadmap. P3.
+- **Detected:** 2026-08-03
+
+## Named Storage Entries (Volume CRUD with Storage Classes, Access Modes, storage:exec)
+- **Source:** Dokku
+- **Description:** Dokku's storage plugin manages named volume entries (`storage:create <name>` with `--access-mode`, `--annotations`, `--chown`, `--labels`, `--namespace`, `--reclaim-policy`, `--scheduler`, `--size`, `--storage-class-name`; `storage:destroy/info/set/wait`). Attachments add per-process mounts with `--container-dir`, `--subpath`, `--readonly`, `--volume-options`, `--volume-chown`. `storage:exec <name> -- <cmd>` runs a command inside a storage container, and `storage:migrate` converts legacy `-v` docker-options into named entries.
+- **Why add to Tengiz:** Persistent Storage (Volume Management, implemented) covers mount/unmount only. Named entries add reuse (one volume mounted into many apps), per-process mounts (only `worker` gets the volume), advanced semantics (readonly/subpath/ownership), and k3s-ready properties (size, storage class, reclaim policy, access mode) for the scheduler roadmap (#162). `storage:exec` is a safe way to inspect/repair a volume without `docker run`. Medium effort, P2.
+- **Detected:** 2026-08-03
+
+## Init Process Injection (tini) for Signal Handling
+- **Source:** Dokku
+- **Description:** The docker-local scheduler injects `--init` (tini) by default (`scheduler-docker-local:set <app> init-process true/false`) so PID 1 inside the container is tini rather than the app's shell. This ensures SIGTERM is forwarded to child processes and zombie processes are reaped — critical for graceful shutdown and scale-to-zero. Automatically disabled for `linuxserver.io` vendor images, which ship their own init.
+- **Why add to Tengiz:** Tengiz's scale-to-zero stops containers after idle timeout; without proper signal handling, apps can hang on SIGTERM or leak zombie children, breaking graceful shutdown and leaving stuck containers. `runtime.Run()`'a `--init` flag'ini varsayılan eklemek (`.tengiz.yaml`'da `init_process: false` ile devre dışı) cold-stop'ları güvenilir hale getirir. Near-zero effort (one Docker flag), directly improves the core scale-to-zero feature. P1.
+- **Detected:** 2026-08-03
+
+## Runtime Architecture Emulation (--platform forcing)
+- **Source:** Dokku
+- **Description:** When deploying an image built for a different CPU architecture (e.g. `amd64`) onto a host that isn't (e.g. `arm64`), the docker-local scheduler detects the mismatch and adds `--platform=linux/amd64` to the container run, enabling QEMU-style emulation at runtime.
+- **Why add to Tengiz:** Multi-Architecture Builds (#141) covers building `amd64`+`arm64` manifests, but existing images (or third-party images) may only be published for one arch. Automatically detecting the image's architecture at deploy time and adding `--platform` lets those run on Apple Silicon / ARM hosts with zero config. Complements Server Bootstrap (#31) for mixed-arch installs. Low effort (`docker image inspect` architecture field check in `builder`/`runtime`). P3.
+- **Detected:** 2026-08-03
+
+## SSH-Based Kubernetes Cluster Node Provisioning (k3s cluster:add/remove)
+- **Source:** Dokku
+- **Description:** The k3s scheduler can bootstrap and grow a real cluster from the CLI: `scheduler-k3s:cluster:add --role server|worker [--taint-scheduling] [--kubelet-args ...] ssh://user@host` SSHs in, installs k3s, and joins the node; `cluster:list`, `cluster:remove`, `scheduler-k3s:initialize`, and `scheduler-k3s:profiles:add` manage reusable node profiles (name, role, taints, kubelet args). A `--server-ip` flag labels the node, and `show-kubeconfig` prints credentials for external `kubectl`.
+- **Why add to Tengiz:** The Pluggable Multi-Scheduler Architecture (#162) covers the abstraction, but Dokku's SSH-based node provisioning is what actually makes a single-node Tengiz into a multi-node cluster without a separate `k3sup`/Terraform step. `tengiz cluster add ssh://root@node2` + `tengiz cluster remove <id>` would be the operational bridge between today's single-server model and the recorded K3s backend. High effort (SSH + k3s install orchestration), P2 gated on #162.
+- **Detected:** 2026-08-03
+
+## Kubernetes Manifest Preview (helm diff before apply)
+- **Source:** Dokku
+- **Description:** `scheduler-k3s:preview <app> [--context N] [--show-secrets]` renders the app's generated Helm chart (Deployments, Services, Ingress, CronJobs, KEDA objects, ConfigMaps/Secrets) and diffs it against the live release client-side before anything is applied. Secret `data` is redacted by default and `--show-secrets-decoded` reveals them.
+- **Why add to Tengiz:** For the K3s roadmap (#162), a safe "what would this deploy change?" dry-run is essential — `tengiz k8s preview <app>` lets operators review Ingress rules, env ConfigMaps, and resource limits before a risky change, complementing the recorded GitOps/Declarative ResourceSync (#33). Reuses `helm template` + `kubectl diff` semantics against the rendered chart. Medium effort, P3 (depends on the k3s scheduler).
+- **Detected:** 2026-08-03
+
+## Kubernetes Resource Annotations & Labels (per resource type)
+- **Source:** Dokku
+- **Description:** `scheduler-k3s:annotations:set/report` and `scheduler-k3s:labels:set/report` manage annotations and labels per Kubernetes resource type (`deployment`, `ingress`, `service`, `secret`, `serviceaccount`, `cronjob`, `pod`, `certificate`, `traefik_ingressroute`, `traefik_middleware`) and per process type. Values are templated into the generated chart.
+- **Why add to Tengiz:** Operational metadata on k8s objects (e.g. `prometheus.io/scrape: "true"` on the web Deployment, `linkerd.io/inject: enabled` for mesh injection, cost-allocation labels) is the standard way to drive platform tooling. For the K3s scheduler, `tengiz k8s annotate <app> deployment prometheus.io/scrape=true` gives users the escape hatch Docker Custom Options (#23) provides today. Low-medium effort, P3 (depends on k3s scheduler).
+- **Detected:** 2026-08-03
+
+## Ordered Multi-Buildpack Management (--index ordering, stack property)
+- **Source:** Dokku
+- **Description:** `buildpacks:add --index N`, `buildpacks:set [--replace]`, `buildpacks:remove [--index N]`, `buildpacks:list`, and `buildpacks:clear` maintain an ordered list of buildpack URLs per app. Resolution order: buildpacks property → app.json `buildpacks` → detection. `buildpacks:set-property stack <value>` pins a buildpack stack and fires `post-stack-set`. Shorthand `owner/repo` URLs are expanded to canonical GitHub buildpack URLs, and a `.buildpacks` file is auto-rewritten from the property list.
+- **Why add to Tengiz:** Herokuish Buildpacks (#135) is recorded as "support buildpacks," but Dokku adds first-class ordering — apps routinely need a custom buildpack *before* the official one (e.g. a Java buildpack for a specific JDK). `tengiz buildpacks add --index 1 myapp https://github.com/org/my-buildpack.git` plus a `stack` pin maps cleanly onto the builder abstraction. Low effort once Herokuish (#135) lands. P3.
+- **Detected:** 2026-08-03
+
+## HSTS & Proxy Security Header Configuration
+- **Source:** Dokku
+- **Description:** Per-app or global HSTS configuration for the proxy: `hsts` (on/off), `hsts-include-subdomains`, `hsts-preload`, `hsts-max-age`, plus `underscore-in-headers` and configurable `x-forwarded-for/proto/port/ssl` header values. Rendered into the vhost template only when HTTPS is enabled.
+- **Why add to Tengiz:** Force HTTPS Redirect (#52) covers the 301; HSTS adds the strict-transport-security response header with preload/include-subdomain to push browsers straight to HTTPS — a distinct, security-critical step beyond redirecting. `.tengiz.yaml`'da `proxy.hsts: { include_subdomains: true, preload: true }` ile konfigüre edilir ve proxy middleware'ine header enjeksiyonu olarak eklenir. Low effort, complements the SSL roadmap (#65). P2.
+- **Detected:** 2026-08-03
