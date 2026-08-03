@@ -1580,3 +1580,135 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Each datastore collection can be configured with a memory type: `Heap` (fast, volatile — data lost on canister upgrade) or `Stable` (persistent across upgrades, slightly slower). This lets developers make performance/cost trade-offs per collection: cache/session data goes in Heap for speed, user profiles go in Stable for durability. Collections default to Heap for maximum performance. The memory type affects both read/write latency and upgrade behavior — Stable collections survive platform upgrades, Heap collections are re-initialized.
 - **Why add to Tengiz:** Tengiz's planned Built-in NoSQL Datastore (#1) needs a similar performance/storage trade-off. Some data is ephemeral (sessions, cache, rate limit counters) — stored in-memory for speed and automatically reset on restart. Other data is persistent (user profiles, settings, content) — written to SQLite or disk-backed storage for durability. A `db.<collection>.memory: ephemeral | persistent` setting in `.tengiz.yaml` lets developers choose: ephemeral collections use Go maps (fast, lost on container restart), persistent collections use embedded SQLite tables (durable, survives restarts). This is particularly important for scale-to-zero — ephemeral collections naturally reset on cold start (good for session data that should force re-login), persistent collections survive scale-to-zero cycles (good for app state). Implementation: two store backends (`MemoryStore` and `SQLiteStore`) implementing the same `DocStore` interface, selected per-collection at deploy time. Low-medium effort, fits Tengiz's embedded database philosophy. Complements the NoSQL Datastore with production-grade configurability.
 - **Detected:** 2026-07-17
+
+## Build Skip Detection (No-Op Deploy)
+- **Source:** Coolify
+- **Description:** Before building, Coolify resolves the remote branch head commit via `git ls-remote` (`check_git_if_build_needed` in `ApplicationDeploymentJob.php`) and compares it against the existing image's Git Commit SHA tag. If an image with the same SHA already exists locally (or can be pulled from the registry) and no build configuration (Dockerfile, build args, build-time envs) has changed since the last successful deploy, the build step is skipped entirely — the deployment job goes straight to rolling update with the existing image. Also records the commit SHA on the deployment queue record for traceability.
+- **Why add to Tengiz:** Tengiz rebuilds on every deploy even when nothing changed (e.g., webhook re-fired, manual redeploy, branch tag pushed). Image tags already embed the deployment ID, so commit-SHA-aware tags (`{env}-{sha}`) make this trivial: `docker images` / `docker manifest inspect` the target tag before building. Saves minutes of build time per no-op deploy, reduces disk churn, and makes CI/CD re-triggers cheap. Also sets up commit-SHA-based image naming needed by GitOps (#33) and Git-Based Image Version Tagging (#148). Complements Deploy Lock (#15) and Build Queue Dedup (#124).
+- **Detected:** 2026-08-03
+
+## Build-Time vs Runtime Environment Variable Separation
+- **Source:** Coolify
+- **Description:** Environment variables carry an `is_buildtime` flag (`EnvironmentVariable.php`). Build-time variables are injected into the Dockerfile at build time (`save_buildtime_environment_variables` injects them as `ENV`/`ARG` lines); runtime variables are passed to the container at start (`save_runtime_environment_variables` → `docker run -e`). The deployment job filters strictly by this flag in both the build and start phases, so secrets and runtime-only configs never get baked into the image layers.
+- **Why add to Tengiz:** Today Tengiz's env handling is single-mode (all vars → container start). Public/non-sensitive config (e.g., `NEXT_PUBLIC_*`, `VITE_*`) must be baked at build time for frontend frameworks, while secrets should only exist at runtime. This feature formalizes that split with a per-var toggle (`env:` entries get `buildtime: true` in `.tengiz.yaml` or `tengiz config set <app> <key> <value> --buildtime`). Reduces image-size leakage of runtime secrets and enables correct client-side env hydration for Next.js/Vite apps. Related to but distinct from Build-Time Secrets (#46) which targets Docker `--secret` mounts.
+- **Detected:** 2026-08-03
+
+## Deployment Queue with Cancellation
+- **Source:** Coolify
+- **Description:** Deployments are first-class queue records (`ApplicationDeploymentQueue` model) with per-deployment status, commit, and incremental log entries. Queued or in-progress deployments can be cancelled via the API/UI (`cancelDeploymentQueue`); cancellation kills the helper/build container, marks the deployment as cancelled, and appends a cancellation log entry. PR close triggers automatic cancellation of active PR deployments. Queue limits and concurrent-build settings per server bound parallel work.
+- **Why add to Tengiz:** `tengiz deploy` is synchronous and blocking — a long build occupies the terminal and there's no way to abort a stuck build or a queued deploy. A background deploy queue with `tengiz deploy --async` returning a deployment ID, plus `tengiz deployment cancel <id>` and `tengiz deployment list`, turns deploys into auditable, cancellable operations. Stores deployment records in `~/.tengiz/deployments/` (JSON Lines). Foundation for Build Queue Dedup (#124), Staged Deployments (#87), and the pending REST API (#8). Medium effort, high ops value.
+- **Detected:** 2026-08-03
+
+## Database Proxy for External Access (SSL)
+- **Source:** Coolify
+- **Description:** Standalone databases expose a proxy container (`StartDatabaseProxy.php`) that maps the database's internal TCP port to a public port with SSL termination. Connection URLs are auto-generated as `internalDbUrl` and `externalDbUrl` attributes (e.g., `postgres://user:pass@db.internal:5432/db` vs `postgres://user:pass@public-host:port/db`), with credentials injected as magic env vars into linked applications.
+- **Why add to Tengiz:** Managed Database Provisioning (#63) is already on the roadmap. Without a proxy, managed DBs are only reachable inside the Docker network — external tools (local psql, BI tools, admin UIs, other servers) can't connect. A `tengiz db proxy enable <name>` command exposing the DB port through Tengiz's reverse proxy with TLS, plus auto-generated `internalDbUrl`/`externalDbUrl` magic env vars (#96), makes managed databases genuinely usable. Builds directly on the existing port-allocation + proxy machinery. Medium effort, unlocks the entire managed-DB feature set.
+- **Detected:** 2026-08-03
+
+## Volume Backups & Restore (tar-based)
+- **Source:** Coolify
+- **Description:** Named persistent volumes can be scheduled for backup (`ScheduledVolumeBackup` model → `VolumeBackupJob`): the job stops the container (`stop_during_backup`), tar-archives the volume, uploads to S3, and restarts. Configurable retention (count/days/max storage) and 3600s timeout. `VolumeBackupRecoveryJob` restores a volume from a backup archive, and `VolumeCloneJob` clones a volume to another server. A cache-guarded retention enforcer (`CleanupInstanceStuffsJob`) prunes old backups.
+- **Why add to Tengiz:** Tengiz has `tengiz volume` CRUD and Automated Database Backups (#127) is planned, but app data lives in volumes — DB dumps don't capture uploaded files, caches, or stateful app data. `tengiz volume backup <app> --schedule "0 3 * * *"` + `tengiz volume restore <app> <backup>` covers the full data-loss-prevention story. Reuses the S3 storage config from #120 and pairs with Container Snapshot (#80). Directly implements data recovery — a core production requirement. Medium effort.
+- **Detected:** 2026-08-03
+
+## Sentinel Lightweight Monitoring Agent
+- **Source:** Coolify
+- **Description:** A token-authenticated agent container (`StartSentinel.php`, `SentinelController`) runs on the server and pushes real-time telemetry — CPU, memory, disk, network, and per-container status — to the platform's `/api/v1/sentinel/push` endpoint at intervals. Hash-based dedup and complete-snapshot detection avoid redundant payloads. Sentinels are provisioned per server from the same registry as the platform, replacing heavier pull-based agents.
+- **Why add to Tengiz:** Existing metrics ideas (Per-Container Metrics #41/#126, Server Monitoring #73, NetData #151) assume pull-based `docker stats` polling from the host. A push-based agent container is a lighter, zero-host-dependency alternative: it runs in Docker, needs no host agent install, and reports to Tengiz's own endpoint — which can be the same HTTP server that hosts webhooks. Useful for monitoring apps from inside the network and feeding the health (#57) + alert systems. Distinct from NetData (which is a heavier dashboard); Sentinel is a minimal telemetry shipper. Medium effort, P2.
+- **Detected:** 2026-08-03
+
+## Extended Notification Channels (Slack, Telegram, Pushover, Generic Webhook)
+- **Source:** Coolify
+- **Description:** Beyond Discord/email, Coolify ships dedicated senders for Slack, Telegram, Pushover, and arbitrary webhooks (`SendMessageToSlackJob.php`, `SendMessageToTelegramJob.php`, `SendMessageToPushoverJob.php`, `SendWebhookJob.php`), each with rich message formatting per channel.
+- **Why add to Tengiz:** The existing `notify` package implements only Discord and Email (`internal/notify/discord.go`, `email.go`), even though the notification roadmap (#5) names Telegram and Slack. Adding Slack (webhook), Telegram (bot), Pushover (push), and a generic webhook sender completes the channel matrix with little new logic — each is a thin `Notifier` implementation over an HTTP POST with channel-specific payload formatting. Low-medium effort per channel, directly increases operational reach for deploy-failure and health alerts.
+- **Detected:** 2026-08-03
+
+## API Enable/Disable + IP Allowlist
+- **Source:** Coolify
+- **Description:** Instance settings include `is_api_enabled` and an `allowed_ips` comma-separated allowlist enforced by the `ApiAllowed` middleware. When disabled, the API returns 403. When an allowlist is set (with `0.0.0.0` as the allow-all sentinel), only matching client IPs can reach the API; everything else is rejected.
+- **Why add to Tengiz:** Once the REST API (#8) and webhook server (#1) exist, they are publicly reachable attack surface. An operator switch to disable the API entirely, plus an IP allowlist for internal-only access, is a cheap, high-value security control. Config in `.tengiz.yaml` (`api.enabled`, `api.allowed_ips: ["10.0.0.0/8"]`) applied as middleware on the API/webhook handlers. Complements Auth Rate Limiting (#58) and Proxy Security Middleware (#135). Low effort.
+- **Detected:** 2026-08-03
+
+## Proxy Configuration Versioning & Rollback
+- **Source:** Coolify
+- **Description:** `SaveProxyConfiguration` generates the proxy config (Traefik/Caddy YAML), keeps up to 10 hash-named backups, and on a syntax/corruption failure restores the last valid configuration automatically. This makes proxy reconfiguration crash-safe — a bad config change can't permanently break routing.
+- **Why add to Tengiz:** Tengiz's proxy is in-process Go (`internal/proxy`) rather than a file-based config, but the same principle applies to the state it depends on: domain mappings, port allocations, and routing rules in `~/.tengiz/*.json`. Versioning those files (hash-named backups before each mutation, auto-restore on JSON-corruption detection) protects the routing layer from a partial write or manual edit. Complements Full System Backup (#23) with targeted, automatic rollback. Low effort, high safety value.
+- **Detected:** 2026-08-03
+
+## SSL Certificate Store & Self-Signed Local CA
+- **Source:** Coolify
+- **Description:** `SslCertificate` persists per-domain certificates with encrypted private key, full chain, SANs, and `valid_until`. `RegenerateSslCertJob` proactively regenerates certs expiring within 14 days (per-server or global, with force flag) and notifies before expiry. `SslHelper` generates a self-signed local CA (EC `secp521r1`, 10-year validity) for internal domains and custom CA config. Custom certificates can be uploaded per domain.
+- **Why add to Tengiz:** The SSL roadmap (#65/#160/#161) covers Let's Encrypt + alternative ACME providers, but not the certificate lifecycle store around it: tracking expiry, auto-renewal jobs with lead-time alerts, self-signed certs for `.tengiz.local`/`.localhost` apps (dev + staging), and custom-cert upload. A `~/.tengiz/certs/` store plus a renewal goroutine triggered on proxy startup and daily tick makes Tengiz's TLS story self-contained. Medium effort, complements the proxy's TLS termination.
+- **Detected:** 2026-08-03
+
+## Disk-Usage-Triggered Docker Cleanup with Savings Audit
+- **Source:** Coolify
+- **Description:** `DockerCleanupJob` reads host disk usage; when it crosses a configurable threshold (`docker_cleanup_threshold` on the server), it runs the prune sequence and records before/after usage plus a full audit trail in `DockerCleanupExecution`. Cleanup also prunes old images per app while keeping the N newest for rollback.
+- **Why add to Tengiz:** Docker Housekeeping (#6) and Granular Prune (#56) describe manual/scheduled pruning. A threshold trigger automates it: instead of a fixed cron, cleanup only fires when disk crosses a watermark (e.g., 80%), avoiding needless work while guaranteeing capacity. Combined with a `tengiz cleanup --status` report showing last-run savings, it gives operators an audit trail of what was reclaimed. Low effort (reuses label-based prune), directly addresses the #1 single-server ops issue.
+- **Detected:** 2026-08-03
+
+## Cloud Provider Server Provisioning (Hetzner / Vultr / DigitalOcean)
+- **Source:** Coolify
+- **Description:** Coolify creates and manages servers directly from cloud provider API tokens (`HetznerService`, `VultrService`, `DigitalOceanService`): server types, images, SSH keys, firewalls, private networks, plus status polling. The validated server is then onboarded automatically.
+- **Why add to Tengiz:** Tengiz targets single-node deployments today, but "give me a server and deploy to it" is the natural expansion path beyond SSH-based remote deployment (#105). `tengiz server create --provider hetzner --region nbg1 --type cx32` would provision, install Docker, and register the host in one command — removing the manual cloud-console + SSH setup step. This is the self-hosted answer to Vercel's one-click regions. High effort (per-provider API clients), lower priority given the single-node architecture, but a clear differentiator when multi-server lands.
+- **Detected:** 2026-08-03
+
+## Multi-Team Tenancy & Role Hierarchy
+- **Source:** Coolify
+- **Description:** Resources belong to Teams; every user has a role (`Role` enum: MEMBER < ADMIN < OWNER) enforced by ~15 model policies and custom gates (`createAnyResource`, `canAccessTerminal`). Teams auto-initialize notification settings and support invites/membership management.
+- **Why add to Tengiz:** The CLI is single-operator today, but shared servers are the norm for teams. A lightweight `teams.json` with roles (owner/admin/member) applied to commands — e.g., only `owner` can run `tengiz secret` or `tengiz rm`, members can deploy — plus per-team app scoping and shared notification settings, prepares Tengiz for multi-user operation without a full auth server. Complements OIDC/SSO (#157) (SSO authenticates, teams authorize) and RBAC User Groups (Komodo). Medium-high effort, P2 for team deployments.
+- **Detected:** 2026-08-03
+
+## Cloud-Init Server Bootstrap Scripts
+- **Source:** Coolify
+- **Description:** `CloudInitScript` stores encrypted per-team server bootstrap scripts that run automatically when a server is first provisioned (e.g., base packages, firewall rules, monitoring agents).
+- **Why add to Tengiz:** For Server Bootstrap (#31) and remote servers (#105), repeatable server setup is a pain point. A `tengiz server bootstrap` command that renders and stores an idempotent provisioning script (encrypted in `~/.tengiz/`) — run on first connect to install Docker, configure UFW, add swap — makes "new server → ready to deploy" deterministic. Low-medium effort, P3 until remote/multi-server support ships.
+- **Detected:** 2026-08-03
+
+## Multi-Provider Git Webhooks (Bitbucket, Gitea, GitHub App)
+- **Source:** Coolify
+- **Description:** Webhook endpoints exist for GitHub (App + OAuth + manual), GitLab, Bitbucket, and Gitea (`routes/webhooks.php`), so push/PR events from any provider trigger the same deploy pipeline.
+- **Why add to Tengiz:** Webhook Auto-Deploy (#1, implemented) and Git Provider OAuth (#95) currently target GitHub/GitLab. Bitbucket and Gitea (popular self-hosted option) are missing. Adding parser/handler variants for their push + `pull_request` payloads — reusing the existing `webhook` package's event model — widens the deploy trigger surface with modest effort. P3, fills a concrete provider gap.
+- **Detected:** 2026-08-03
+
+## Forward Auth (OAuth2-Proxy-Style SSO Protection for Apps)
+- **Source:** Dokploy
+- **Description:** Deploys a dedicated `oauth2-proxy` container (`quay.io/oauth2-proxy/oauth2-proxy:v7.6.0`) on a separate auth domain with a shared cookie session (`setup/forward-auth-setup.ts`). Any per-app domain can then enable forward auth: unauthenticated requests are redirected to the auth domain for OIDC login, and once a session cookie exists the proxy forwards the request to the app with `X-Auth-Request-*` identity headers injected. The Traefik `forwardAuth` middleware is generated per domain and the auth-domain config is managed centrally (`utils/traefik/forward-auth.ts`).
+- **Why add to Tengiz:** The roadmap covers HTTP Basic Auth (#32) and admin-facing OIDC SSO (#157), but nothing protects arbitrary deployed apps (internal dashboards, staging, PR previews) behind real SSO. Because Tengiz's proxy is in-process Go, forward auth can be implemented natively as a middleware (auth redirect + session cookie + header injection) with no extra container — or by deploying oauth2-proxy for exact parity. Directly complements Preview Deployments (already implemented) by letting teams SSO-gate PR environments. Medium effort, P2.
+- **Detected:** 2026-08-03
+
+## SCIM User Provisioning (Enterprise Identity Sync)
+- **Source:** Dokploy
+- **Description:** SCIM 2.0 provisioning (`proprietary/scim.ts`) with per-provider bearer tokens generated from Okta/Azure AD/Google Workspace. Identity providers can auto-create, update, and de-provision users and groups on the platform, keeping team membership in sync without manual invites.
+- **Why add to Tengiz:** Multi-Team Tenancy (Coolify entry) covers manual invites and roles; SCIM automates the whole membership lifecycle for enterprises standardized on Okta/Azure AD. Once user management exists, a token-gated `/scim/v2/Users` + `/scim/v2/Groups` endpoint under the existing webhook/auth HTTP server is a small addition. Low-medium effort, P3 — gated on the user-management roadmap.
+- **Detected:** 2026-08-03
+
+## SAML SSO (Enterprise Login)
+- **Source:** Dokploy
+- **Description:** The SSO provider model supports both OIDC and SAML 2.0 (`sso.ts`): full IdP metadata import (entityID, signing cert, SSO location, encrypted assertions), SP metadata generation, signed authn requests, configurable signature/digest algorithms, and custom attribute-to-user mapping (id, email, name, image).
+- **Why add to Tengiz:** The recorded OIDC/OAuth SSO (#157) only covers OIDC providers, but Okta, Azure AD, and OneLogin deployments frequently standardize on SAML. A Go SAML service provider can be built with `crewjam/saml` and `goxmldsig`, integrated with the same session handling as OIDC. Complements OIDC SSO and Forward Auth for the enterprise story. Medium effort, P3.
+- **Detected:** 2026-08-03
+
+## Whitelabeling / Custom Branding (Enterprise Self-Hosted UI)
+- **Source:** Dokploy
+- **Description:** `whitelabelingConfig` (`webServerSettings`) lets admins rebrand the platform: app name, description, logo, favicon, login logo, custom CSS, support/docs URLs, custom error-page title/description, meta title, and footer text — all stored as JSON and applied to the web UI.
+- **Why add to Tengiz:** Tengiz is CLI-first today, but once the Web Dashboard (#150) ships, enterprise self-hosters will want to rebrand it for their own end users. Cheap to implement: a `~/.tengiz/branding.json` store + `tengiz branding set` command, with values injected into dashboard templates and error pages. P3, depends on the dashboard work.
+- **Detected:** 2026-08-03
+
+## File Upload to Running Container
+- **Source:** Dokploy
+- **Description:** `uploadFileToContainer(containerId, file, destinationPath)` (`services/docker.ts`) performs a docker cp-style upload of a local file into a running container's filesystem, exposed through the UI for quick file injection.
+- **Why add to Tengiz:** Tengiz has `tengiz run` for one-off commands, but no way to drop a file into a running container (e.g., inject a config, a TLS cert, a patch, or a DB dump into a stateful app — especially relevant on scale-to-zero where files are ephemeral). `tengiz cp <local-file> <app>:/path` is a thin `docker cp` wrapper in the `runtime` package reusing the existing exec pattern. Low effort, fills a real ops gap. P3.
+- **Detected:** 2026-08-03
+
+## Per-Domain Path Routing & Prefix Stripping
+- **Source:** Dokploy
+- **Description:** Each domain record supports `path`, `internalPath`, and `stripPath` (`db/schema/domain.ts`): a hostname can route a subpath (e.g. `/api`) to a specific backend, and the proxy can strip or rewrite that prefix before forwarding. `customEntrypoint`, per-domain `port`, and `serviceName` complete the routing matrix for compose/multi-service apps.
+- **Why add to Tengiz:** Tengiz's proxy routes by host only. Subpath routing lets one hostname serve multiple backends (e.g. `myapp.tengiz.local/api` → a separate service) and mount apps under a shared domain path. `stripPath` is essential so upstream apps don't see the injected prefix. Maps naturally onto the existing host-based router by adding a path-prefix match + rewrite. Low effort, P2.
+- **Detected:** 2026-08-03
+
+## Managed Database Credential Rotation
+- **Source:** Dokploy
+- **Description:** Managed database routers (Redis, Postgres, MySQL, MariaDB, Mongo, LibSQL) expose `changePassword` — a single operation that rotates a database user's password and updates the stored connection string so deployed apps pick up the new credential.
+- **Why add to Tengiz:** Pairs with Managed Database Provisioning (#63) and Magic Environment Variables (#158): periodic rotation of DB credentials is a security best practice and a compliance requirement. Once managed DBs exist, `tengiz db rotate-password <app>` can regenerate the credential and update `DATABASE_URL` through the existing config/secrets store. Low effort, P3 (depends on #63).
+- **Detected:** 2026-08-03
