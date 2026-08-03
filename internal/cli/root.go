@@ -136,7 +136,7 @@ serverless:
 #   interval: 30
 #   retries: 3
 #   timeout: 5
-#   start_period: 0
+#   start_period: 0      # grace before deploy health gate polls (zero-downtime deploys)
 # volumes:
 #   - host_path: /data/myapp
 #     container_path: /app/data

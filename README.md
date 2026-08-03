@@ -450,6 +450,12 @@ resources:
   memory: "256m"     # Memory limit (e.g., "128m", "1g")
 ```
 
+### Deploy Health Gate
+
+When `healthcheck.enabled: true`, zero-downtime deploys verify the **new** container is healthy *before* traffic is switched to it. Tengiz waits for the container to be running, applies the `start_period` grace period, then polls `healthcheck.endpoint` (default `/health`) every `interval` seconds (default 2) for up to `retries` attempts (default 30), with a `timeout`-second per-request budget (default 5).
+
+If the new container never becomes healthy, the deployment is **automatically rolled back**: the new container is removed, its port is freed, the deployment is recorded as `failed`, and the previous version keeps serving traffic. Apps without `healthcheck.enabled` keep the historical behavior (TCP port readiness only, best-effort).
+
 Resource limits are passed to Docker as `--cpus` and `--memory` flags. When omitted, containers have no resource constraints. Values follow Docker CLI conventions (e.g., `"0.5"` for half a CPU core, `"512m"` for 512 MB memory).
 
 Without a config file, Tengiz uses defaults: app name = directory name, port auto-detected, serverless enabled, 5m timeout.
