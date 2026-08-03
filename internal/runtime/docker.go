@@ -278,52 +278,93 @@ func (r *dockerRuntime) getResourceArgs(ctx context.Context, containerName strin
 	return args
 }
 
-func (r *dockerRuntime) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error {
-	if hc == nil || !hc.Enabled {
-		return nil
-	}
-	containerName := name
+func (r *dockerRuntime) hostPort(ctx context.Context, containerName string) (int, error) {
 	portCmd := exec.CommandContext(ctx, "docker", "inspect",
 		"--format", "{{json .NetworkSettings.Ports}}", containerName)
 	portOut, err := portCmd.CombinedOutput()
 	if err != nil {
-		return nil
+		return 0, err
 	}
 	var ports map[string][]map[string]string
 	if err := json.Unmarshal(portOut, &ports); err != nil {
-		return nil
+		return 0, nil
 	}
-	var hostPort int
 	for _, bindings := range ports {
 		for _, b := range bindings {
 			if hp := b["HostPort"]; hp != "" {
+				var hostPort int
 				fmt.Sscanf(hp, "%d", &hostPort)
-				break
+				if hostPort != 0 {
+					return hostPort, nil
+				}
 			}
 		}
-		if hostPort != 0 {
-			break
-		}
 	}
-	if hostPort == 0 {
+	return 0, nil
+}
+
+func (r *dockerRuntime) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error {
+	if hc == nil || !hc.Enabled {
 		return nil
 	}
-	endpoint := hc.Endpoint
-	if endpoint == "" {
-		endpoint = "/health"
+
+	// Wait for the container to be running (it may take a moment to start)
+	for {
+		cmd := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{.State.Running}}", name)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("inspect: %w", err)
+		}
+		if strings.TrimSpace(string(out)) == "true" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
 	}
+
+	// Grace period for slow-booting applications
+	if hc.StartPeriod > 0 {
+		if err := sleepWithContext(ctx, time.Duration(hc.StartPeriod)*time.Second); err != nil {
+			return err
+		}
+	}
+
+	hostPort, err := r.hostPort(ctx, name)
+	if err != nil {
+		return fmt.Errorf("inspect ports: %w", err)
+	}
+	if hostPort == 0 {
+		return fmt.Errorf("no host port bound for %s", name)
+	}
+
 	timeout := hc.Timeout
 	if timeout <= 0 {
 		timeout = 5
 	}
+	interval := hc.Interval
+	if interval <= 0 {
+		interval = 2
+	}
 	retries := hc.Retries
 	if retries <= 0 {
-		retries = 3
+		retries = 30
+	}
+
+	endpoint := hc.Endpoint
+	if endpoint == "" {
+		endpoint = "/health"
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%d%s", hostPort, endpoint)
-	client := &http.Client{Timeout: time.Duration(timeout) * time.Second}
+	return pollHealthURL(ctx, url, time.Duration(timeout)*time.Second, time.Duration(interval)*time.Second, retries)
+}
+
+func pollHealthURL(ctx context.Context, url string, timeout, interval time.Duration, retries int) error {
+	client := &http.Client{Timeout: timeout}
 	var lastErr error
-	for i := 0; i <= retries; i++ {
+	for i := 0; i < retries; i++ {
 		resp, err := client.Get(url)
 		if err == nil {
 			resp.Body.Close()
@@ -334,13 +375,24 @@ func (r *dockerRuntime) WaitForHealth(ctx context.Context, name string, hc *type
 		} else {
 			lastErr = err
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(200 * time.Millisecond):
+		if i < retries-1 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(interval):
+			}
 		}
 	}
-	return fmt.Errorf("health check failed after %d retries: %w", retries, lastErr)
+	return fmt.Errorf("health check failed after %d attempts: %w", retries, lastErr)
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
 }
 
 func (r *dockerRuntime) Restart(ctx context.Context, name string) error {
@@ -543,29 +595,7 @@ func (r *dockerRuntime) RemoveBySuffix(ctx context.Context, name string, suffix 
 
 func (r *dockerRuntime) GetContainerPort(ctx context.Context, name string, suffix string) (int, error) {
 	containerName := fmt.Sprintf("%s-%s", name, suffix)
-	portCmd := exec.CommandContext(ctx, "docker", "inspect",
-		"--format", "{{json .NetworkSettings.Ports}}", containerName)
-	portOut, err := portCmd.CombinedOutput()
-	if err != nil {
-		return 0, fmt.Errorf("inspect %s: %w", containerName, err)
-	}
-	var ports map[string][]map[string]string
-	if err := json.Unmarshal(portOut, &ports); err != nil {
-		return 0, nil
-	}
-	var hostPort int
-	for _, bindings := range ports {
-		for _, b := range bindings {
-			if hp := b["HostPort"]; hp != "" {
-				fmt.Sscanf(hp, "%d", &hostPort)
-				break
-			}
-		}
-		if hostPort != 0 {
-			break
-		}
-	}
-	return hostPort, nil
+	return r.hostPort(ctx, containerName)
 }
 
 func (r *dockerRuntime) WaitForReady(ctx context.Context, name string, internalPort int) error {
@@ -587,32 +617,10 @@ func (r *dockerRuntime) WaitForReady(ctx context.Context, name string, internalP
 		}
 	}
 	// Auto-detect host port from container inspect
-	portCmd := exec.CommandContext(ctx, "docker", "inspect",
-		"--format", "{{json .NetworkSettings.Ports}}", containerName)
-	portOut, err := portCmd.CombinedOutput()
-	if err != nil {
-		return nil
+	if hostPort, _ := r.hostPort(ctx, containerName); hostPort != 0 {
+		return waitForPort(ctx, "127.0.0.1", hostPort, 30*time.Second)
 	}
-	var ports map[string][]map[string]string
-	if err := json.Unmarshal(portOut, &ports); err != nil {
-		return nil
-	}
-	var hostPort int
-	for _, bindings := range ports {
-		for _, b := range bindings {
-			if hp := b["HostPort"]; hp != "" {
-				fmt.Sscanf(hp, "%d", &hostPort)
-				break
-			}
-		}
-		if hostPort != 0 {
-			break
-		}
-	}
-	if hostPort == 0 {
-		return nil
-	}
-	return waitForPort(ctx, "127.0.0.1", hostPort, 30*time.Second)
+	return nil
 }
 
 func waitForPort(ctx context.Context, host string, port int, timeout time.Duration) error {
