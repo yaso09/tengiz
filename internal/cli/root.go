@@ -66,6 +66,7 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
@@ -87,6 +88,13 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without removing anything")
+	cleanupCmd.Flags().Bool("containers", false, "remove stale stopped containers")
+	cleanupCmd.Flags().Bool("images", false, "remove unused (dangling) images")
+	cleanupCmd.Flags().Bool("volumes", false, "remove unused Docker volumes")
+	cleanupCmd.Flags().Bool("networks", false, "remove unused Docker networks")
+	cleanupCmd.Flags().Bool("cache", false, "remove the Docker build cache")
+	cleanupCmd.Flags().Bool("all", false, "all categories plus stale tengiz containers/images")
 }
 
 var rootCmd = &cobra.Command{
@@ -1160,6 +1168,99 @@ Examples:
 
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Reclaim disk space by removing unused Docker resources",
+	Long: `Reclaims disk space by pruning stale containers, dangling images, the
+Docker build cache, unused volumes, and unused networks.
+
+Running, stopped-but-registered, and preview containers are always protected
+by label-based filtering. With no category flags, cleanup removes stale
+containers, dangling images, and the build cache.
+
+Use --dry-run to preview what would be removed without removing anything.
+Use --all for a full sweep (adds volumes, networks, unmanaged stopped
+containers, and old tengiz-apps/* images).`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		all, _ := cmd.Flags().GetBool("all")
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		networks, _ := cmd.Flags().GetBool("networks")
+		cache, _ := cmd.Flags().GetBool("cache")
+		if all {
+			containers, images, volumes, networks, cache = true, true, true, true, true
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		opts := runtime.CleanupOptions{
+			DryRun:        dryRun,
+			Containers:    containers,
+			Images:        images,
+			Volumes:       volumes,
+			Networks:      networks,
+			Cache:         cache,
+			Aggressive:    all,
+			ProtectNames:  collectProtectedContainers(dataDir),
+			KeepImageTags: collectKeepImageTags(dataDir),
+		}
+
+		report, err := rt.Cleanup(cmd.Context(), opts)
+		if err != nil {
+			return err
+		}
+		fmt.Print(renderCleanupReport(report))
+		return nil
+	},
+}
+
+func renderCleanupReport(r *runtime.CleanupReport) string {
+	var b strings.Builder
+	if r.DryRun {
+		b.WriteString("[tengiz] cleanup dry run — nothing was removed\n")
+		renderCleanupSection(&b, "would have removed", "container", r.Containers)
+		renderCleanupSection(&b, "would have removed", "image", r.Images)
+		renderCleanupSection(&b, "would have removed", "volume", r.Volumes)
+		renderCleanupSection(&b, "would have removed", "network", r.Networks)
+		if r.EmptyItems() {
+			b.WriteString("  nothing to clean\n")
+		}
+		return b.String()
+	}
+	b.WriteString("[tengiz] cleanup complete\n")
+	renderCleanupSection(&b, "removed", "container", r.Containers)
+	renderCleanupSection(&b, "removed", "image", r.Images)
+	renderCleanupSection(&b, "removed", "volume", r.Volumes)
+	renderCleanupSection(&b, "removed", "network", r.Networks)
+	for _, line := range r.Reclaimed {
+		b.WriteString("  reclaimed: " + line + "\n")
+	}
+	if r.EmptyItems() && len(r.Reclaimed) == 0 {
+		b.WriteString("  nothing to clean\n")
+	}
+	return b.String()
+}
+
+func renderCleanupSection(b *strings.Builder, verb, kind string, items []string) {
+	if len(items) == 0 {
+		return
+	}
+	plural := "s"
+	if len(items) == 1 {
+		plural = ""
+	}
+	b.WriteString(fmt.Sprintf("  %s %d %s%s:\n", verb, len(items), kind, plural))
+	for _, item := range items {
+		b.WriteString("    " + item + "\n")
+	}
 }
 
 var gitCmd = &cobra.Command{

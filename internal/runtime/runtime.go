@@ -36,7 +36,7 @@ type CleanupReport struct {
 	Reclaimed  []string
 }
 
-func (r *CleanupReport) emptyItems() bool {
+func (r *CleanupReport) EmptyItems() bool {
 	return len(r.Containers)+len(r.Images)+len(r.Volumes)+len(r.Networks) == 0
 }
 
