@@ -42,6 +42,7 @@ func init() {
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(rmCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(devCmd)
 	configCmd.AddCommand(configSetCmd)
@@ -83,6 +84,12 @@ func init() {
 	logsCmd.Flags().String("since", "", "show logs since timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
 	logsCmd.Flags().String("until", "", "show logs before timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
 	logsCmd.Flags().String("grep", "", "filter logs with a case-sensitive pattern (client-side)")
+	cleanupCmd.Flags().Bool("all", false, "also remove all unused images, not just dangling ones")
+	cleanupCmd.Flags().Bool("volumes", false, "also remove unused volumes")
+	cleanupCmd.Flags().String("until", "", "only remove resources created before this duration (e.g. 48h, 1w, 30d)")
+	cleanupCmd.Flags().Bool("dry-run", false, "show current Docker disk usage without removing anything")
+	cleanupCmd.Flags().Bool("build-logs", false, "also prune old build logs under ~/.tengiz/build-logs")
+	cleanupCmd.Flags().Int("keep", 5, "number of build logs to keep per app when --build-logs is set")
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
@@ -659,6 +666,76 @@ var rmCmd = &cobra.Command{
 		fmt.Printf("[tengiz] removed: %s\n", appName)
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources (containers, images, volumes, networks)",
+	Long: "Prunes unused Docker resources while protecting Tengiz-managed containers " +
+		"via the tengiz-app label. Use --all for unused images, --volumes for volumes, " +
+		"and --until to limit by age. Pass --dry-run to inspect disk usage first.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		all, _ := cmd.Flags().GetBool("all")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		until, _ := cmd.Flags().GetString("until")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		buildLogs, _ := cmd.Flags().GetBool("build-logs")
+		keep, _ := cmd.Flags().GetInt("keep")
+
+		opts := runtime.HousekeepingOptions{
+			All:     all,
+			Volumes: volumes,
+			Until:   until,
+			DryRun:  dryRun,
+			Filters: []string{runtime.HousekeepingProtectFilter()},
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+		result, err := rt.Cleanup(context.Background(), opts)
+		if err != nil {
+			return err
+		}
+		fmt.Print(result.Output)
+		if result.SpaceFreed != "" {
+			fmt.Printf("[tengiz] reclaimed: %s\n", result.SpaceFreed)
+		}
+
+		if buildLogs && !dryRun {
+			env := getEnv(cmd)
+			store := config.NewStoreWithEnv(dataDir, env)
+			removed := pruneBuildLogsAllApps(store, keep)
+			fmt.Printf("[tengiz] pruned %d build log(s), keeping %d per app\n", removed, keep)
+		}
+		return nil
+	},
+}
+
+func pruneBuildLogsAllApps(store *config.Store, keep int) int {
+	apps, err := store.ListApps()
+	if err != nil {
+		return 0
+	}
+	removed := 0
+	for _, app := range apps {
+		before, err := store.ListBuildLogs(app.Name)
+		if err != nil {
+			continue
+		}
+		if err := store.PruneBuildLogs(app.Name, keep); err != nil {
+			continue
+		}
+		after, err := store.ListBuildLogs(app.Name)
+		if err != nil {
+			continue
+		}
+		if len(before) > len(after) {
+			removed += len(before) - len(after)
+		}
+	}
+	return removed
 }
 
 var logsCmd = &cobra.Command{
