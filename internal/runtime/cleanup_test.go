@@ -18,3 +18,25 @@ func TestStubKeepLastNImages(t *testing.T) {
 		t.Fatalf("KeepLastNImages() error = %v", err)
 	}
 }
+
+func TestStubSystemPrune(t *testing.T) {
+	m := NewStub()
+	res, err := m.SystemPrune(context.Background(), SystemPruneOptions{All: true, Volumes: true})
+	if err != nil {
+		t.Fatalf("SystemPrune() error = %v", err)
+	}
+	if res == nil {
+		t.Fatal("SystemPrune() returned nil result")
+	}
+}
+
+func TestStubSystemDF(t *testing.T) {
+	m := NewStub()
+	out, err := m.SystemDF(context.Background())
+	if err != nil {
+		t.Fatalf("SystemDF() error = %v", err)
+	}
+	if out != "" {
+		t.Errorf("SystemDF() = %q, want empty string", out)
+	}
+}
