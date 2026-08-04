@@ -1978,3 +1978,117 @@ Aşağıdaki özellikler Dokku kaynak kodu analizinden tespit edilmiştir ve mev
 - **Description:** Kamal's secrets dotenv files support inline command substitution (`secrets/dotenv/inline_command_substitution.rb`): a line like `DB_PASSWORD=$(kamal secrets fetch DB_PASSWORD ...)` is evaluated at deploy time, so external secrets managers are queried live rather than storing plaintext values. Controlled via `kamal secrets print`/`.kamal/secrets` evaluation at config load.
 - **Why add to Tengiz:** Tengiz's `ResolveInterpolations` handles `[[secret.NAME]]` against the local store but has no live-fetch mechanism. Inline `$(...)` substitution lets `.tengiz.yaml` reference vault/doppler values fetched at deploy time — the missing bridge between config files and the external providers Tengiz already supports. Low-medium effort; extends the existing interpolation code path.
 - **Detected:** 2026-08-04
+
+---
+
+# Komodo Detections (2026-08-04)
+
+Aşağıdaki özellikler Komodo kaynak kodu analizinden tespit edilmiştir ve mevcut katalogda kayıtlı değildir.
+
+## Per-App Termination Signal & Graceful Shutdown Configuration
+- **Source:** Komodo
+- **Description:** Every deployment can configure the container termination signal (SIGHUP/SIGINT/SIGQUIT/SIGTERM), a termination timeout, and signal-to-label mappings (`term_signal_labels`). On stop/rm the container is removed with the configured signal + timeout (`bin/core/src/resource/deployment.rs:364-369`, `DeploymentConfig.termination_signal`/`termination_timeout`). Per-deploy overrides (`stop_signal`, `stop_time`) allow a one-off hard or graceful stop without mutating config. Periphery's `stop_container_command` also degrades gracefully: if the Docker CLI rejects `--signal`/`--time`, it transparently retries without the flags.
+- **Why add to Tengiz:** Tengiz's stop/rm path has a fixed shutdown; stateful services (webhooks, workers, DBs) need a configurable signal and drain window. `.tengiz.yaml`'da `termination.signal: SIGINT`, `termination.timeout: 30` alanları; `tengiz stop myapp --signal SIGTERM --time 45` one-off override'ı eklenir. Complements the Dokku "Graceful Retirement Protocol" (SIGTERM-drain timing) with explicit per-app signal selection. Low effort — one `docker stop --signal --time` call in `runtime.Stop()`.
+- **Detected:** 2026-08-04
+
+## Live Container Rename on Config Change (custom_name)
+- **Source:** Komodo
+- **Description:** Deployments can declare a `custom_name` for the container. When the name changes while the container is running, Komodo issues a Periphery `RenameContainer` request (`docker rename`) and persists the new name in `info.deployed_name` so logs, status, and cleanup stay matched (`bin/core/src/resource/deployment.rs:470-541`, `handle_custom_name_update`). In Swarm mode (services can't be renamed) it pins the old name until the next deploy.
+- **Why add to Tengiz:** Tengiz hardcodes container names as `tengiz-<appname>`; there's no way to pick a custom name or adopt a manually-run container into management. `.tengiz.yaml`'da `container.name: my-prod-web` + live `docker rename` on change enables "import an existing container" workflows and matches metrics/logs/cleanup to the real name. Complements the recorded "App Renaming" (which renames the whole app) — this renames just the container. Low effort: `docker rename` exec in `runtime`.
+- **Detected:** 2026-08-04
+
+## Compose Command Wrapper for External Secrets Tools (sops/op/vault-env)
+- **Source:** Komodo
+- **Description:** Stacks support a `compose_cmd_wrapper` that prefixes the whole `docker compose ...` invocation with an external tool such as `op run --`, `sops exec-file --no-fifo /path/secret.env`, or a custom script, using a mandatory `[[COMPOSE_COMMAND]]` placeholder. `compose_cmd_wrapper_include` selects which subcommands (`config`, `build`, `pull`, `up`, `run`, `deploy`) get wrapped (`bin/periphery/src/api/compose.rs:370-388`, `maybe_wrap_command`; `StackConfig.compose_cmd_wrapper`).
+- **Why add to Tengiz:** A cheap, generic way to let users decrypt `.env` files / certs at deploy time with their own secret tooling without Tengiz natively integrating each provider. `tengiz stack deploy` re-runs compose through the wrapper. `.tengiz.yaml`'da `compose.cmd_wrapper: "op run -- [[COMPOSE_COMMAND]]"`, `compose.wrapper_include: [up, config]`. Fits Tengiz's `os/exec` model (one wrapper command string) and complements the existing secrets providers (local/vault/doppler).
+- **Detected:** 2026-08-04
+
+## Config-File Dependency Tracking (Deploy-if-Changed with Requires Levels)
+- **Source:** Komodo
+- **Description:** Stacks can declare config-file dependencies (`StackFileDependency { path, services, requires }`) where `requires` is one of `Redeploy | Restart | None`. Changes to a dependency only trigger the minimal reaction: a config file change restarts the affected service, an env change redeploys, and files marked `None` never trigger anything. This feeds `DeployStackIfChanged` so external edits to tracked files auto-apply with the right severity (`StackConfig.config_files`, `bin/core/src/resource/stack.rs:548-558`).
+- **Why add to Tengiz:** Tengiz deploys are all-or-nothing. Per-file "redeploy vs restart vs nothing" lets operators edit a config file and have the app react minimally — less downtime and no full rebuild for a `postgresql.conf` tweak. `.tengiz.yaml`'da `stack.config_files: [{path: ./config/app.ini, requires: restart}]`. Foundation for future file watchers and GitOps sync. Low-medium effort on top of the compose/stack roadmap.
+- **Detected:** 2026-08-04
+
+## Pre-Existing Compose Project Adoption + Deployed Config Snapshot
+- **Source:** Komodo
+- **Description:** Stacks can adopt an already-running `docker compose` project whose project name differs from the stack name via `config.project_name` (`docker compose -p <name>`). After each successful deploy, Komodo stores `deployed_config` (the merged `docker compose config` output), `deployed_contents`, `deployed_hash`, and `deployed_project_name` on the stack info — so later operations target the right project even after a rename, and "what actually got deployed" is always inspectable (`StackInfo`, `bin/core/src/resource/stack.rs`).
+- **Why add to Tengiz:** Users running a reverse proxy or legacy compose stack want to import it into Tengiz management without tearing it down. Storing the resolved compose config per deploy gives auditability and is the basis for compose rollback (redeploy from the previous `deployed_config`). `tengiz stack adopt myproject --compose ./docker-compose.yml` imports; `tengiz stack show <name> --resolved` prints what's actually deployed. Complements Stack Lifecycle (#973) with import + audit snapshots.
+- **Detected:** 2026-08-04
+
+## Stack/Compose Env-File Management (auto-written .env + tracked/untracked env files)
+- **Source:** Komodo
+- **Description:** Stack and repo configs declare `environment` vars that Komodo writes to `env_file_path` (default `.env`) before `compose up`, plus `additional_env_files` passed via `--env-file`. Each additional file has a `track` flag: tracked files are diffed/validated; untracked files (e.g. sops-decrypted) pass through untouched so Komodo never reads or rewrites them (`StackConfig.environment`, `env_file_path`, `AdditionalEnvFile.track`).
+- **Why add to Tengiz:** Compose-based deploys need a managed `.env` and the ability to reference externally-managed env files without Tengiz clobbering them. `tengiz stack env set myapp KEY=value` writes the `.env`; `stack.env_files add ./secrets.env --untracked` injects read-only. The `track` escape hatch is important for tools that regenerate env files. Complements env var management (implemented) by extending it to compose projects. Low-medium effort.
+- **Detected:** 2026-08-04
+
+## Git Commit SHA Pinning + Clean Reclone Strategy
+- **Source:** Komodo
+- **Description:** Repos, Builds, Stacks, and ResourceSyncs all support a `commit: String` field to pin deployment to a specific git commit SHA. Stacks additionally support `reclone: bool` — instead of `git pull`, the repo folder is deleted and freshly cloned to guarantee a byte-for-byte clean checkout on every deploy (`clone_path` overrides the clone destination).
+- **Why add to Tengiz:** Image digest pinning (recorded) makes containers deterministic, but the source is still "whatever HEAD is". Commit SHA pinning makes `tengiz deploy --commit <sha>` reproducible from source, and `reclone` eliminates stale-file bugs and dirty-tree cache misses in git-based deploys (#5). `.tengiz.yaml`'da `git.commit: <sha>`, `git.reclone: true`. Low effort — `git checkout <sha>` / `rm -rf && git clone` in `gitdeploy`.
+- **Detected:** 2026-08-04
+
+## Service-Scoped Auto-Update with Skip & Ignore Lists
+- **Source:** Komodo
+- **Description:** For compose stacks, `auto_update_all_services` decides between updating only the services whose images changed vs redeploying the whole stack; `auto_update_skip_services` excludes specific services from the auto-update flow; `ignore_services` excludes services (e.g. init containers that exit 0) from stack-status health evaluation (`StackConfig.auto_update_all_services`, `auto_update_skip_services`, `ignore_services`).
+- **Why add to Tengiz:** The recorded image-digest auto-redeploy is app-level; this adds compose granularity. In a web + worker + db stack, auto-update should touch only the service with a new image, never restart a proxy or db, and not flag the stack "unhealthy" because an init sidecar exited. `.tengiz.yaml`'da `stack.auto_update.skip: [db, redis]`, `stack.health.ignore: [init]`. Prevents restart storms — essential for scale-to-zero multi-service setups.
+- **Detected:** 2026-08-04
+
+## Files-on-Host Build/Stack Source Mode
+- **Source:** Komodo
+- **Description:** Builds and Stacks can use `files_on_host: true` with `build_path`/`dockerfile_path` (Builds) or `run_directory`/`file_paths` (Stacks) pointing at files already on the server's filesystem — no git clone and no UI upload required. ResourceSync supports the same for declarative files-on-host resources.
+- **Why add to Tengiz:** Single-server operators often want to `scp`/clone a project to a path and have Tengiz build/deploy from it without configuring a git repo. `tengiz deploy . --files-on-host` builds from the current host directory (bypassing git entirely); compose stacks can reference absolute file paths. Naturally fits Tengiz's CLI-first, single-node model and complements source metadata recording. Low effort — skip the clone step when the flag is set.
+- **Detected:** 2026-08-04
+
+## Human-Readable English Scheduling (English-to-Cron) with Timezone
+- **Source:** Komodo
+- **Description:** Procedures and Actions accept a `schedule_format: English | Cron`. English expressions like "at midnight on the 1st and 15th of the month" are converted to CRON via the `english-to-cron` crate, with `schedule_timezone` (IANA) and `schedule_enabled`/`schedule_alert`/`failure_alert` toggles. Schedules are installed/removed on resource create/update/delete, and `next_scheduled_run`/`schedule_error` surface on list items (`bin/core/src/schedule.rs:308-321`, `ScheduleFormat`).
+- **Why add to Tengiz:** The recorded scheduled-deploy/task entries use raw cron expressions. English scheduling removes the cron-learning curve for CLI users: `.tengiz.yaml`'da `schedule: "every night at 3am"`, `schedule.timezone: Europe/Istanbul`. Go has no direct `english-to-cron` port, but a small parser mapping ~30 English patterns to cron covers 90% of real use; `robfig/cron` already supports timezones. Low-medium effort, high UX value.
+- **Detected:** 2026-08-04
+
+## Startup Actions & First-Boot Defaults
+- **Source:** Komodo
+- **Description:** Actions can declare `run_at_startup: true` and are executed after the server socket is up (`startup::run_startup_actions`, `bin/core/src/main.rs:80-90`). On first boot Komodo also seeds sensible defaults (default tags, a default server/builder, default procedures) so a fresh install is immediately usable, and startup can trigger global auto-update, key rotation, and core DB backup.
+- **Why add to Tengiz:** Tengiz has no bootstrap/init mechanism. `run_at_startup` gives a recovery/idempotent setup slot ("on boot: ensure proxy routes, start dependents, seed data") and first-boot defaults remove empty-state friction for new installs (`tengiz init` currently creates only `.tengiz.yaml`). `.tengiz.yaml`'da `startup.actions: [...]`. Complements Server Reboot Recovery (recorded) by running platform-level init, not just restarting containers. Low effort.
+- **Detected:** 2026-08-04
+
+## Retention-Based TTL Prune Loop (stats / alerts / images)
+- **Source:** Komodo
+- **Description:** A daily `prune_loop` (`bin/core/src/helpers/prune.rs`) removes stats and alerts older than `keep_stats_for_days` / `keep_alerts_for_days`, and prunes unused images on servers with `config.auto_prune` enabled — a centralized retention policy instead of per-resource cleanup logic.
+- **Why add to Tengiz:** Disk is the #1 single-server failure mode. Centralized TTL retention gives operators a single policy knob: keep stats 30 days, alerts 90 days, prune unused images nightly. `tengiz cleanup --ttl stats=30d,alerts=90d` or `.tengiz.yaml`'da `retention: {stats: 30d, alerts: 90d, images: auto}`. Distinct from scheduled disk cleanup (recorded, per-app image retention) — this covers the platform's own data (stats/alerts/logs) with TTL. Low effort: a `time.Ticker` loop reusing the recorded prune ops.
+- **Detected:** 2026-08-04
+
+## Zero-Downtime Secret/Config Value Rotation (tmp-swap)
+- **Source:** Komodo
+- **Description:** `rotate_swarm_config`/`rotate_swarm_secret` (`bin/periphery/src/docker/config.rs:193-287`, `docker/secret.rs:203-300`) rotate a secret/config value without downtime: create a `{name}-tmp-{random}` resource, switch every consuming Swarm service to the tmp via `docker service update`, recreate the original, flip back, and remove the tmp — atomic and crash-safe.
+- **Why add to Tengiz:** Tengiz stores encrypted per-app secrets but has no way to update a value without redeploying the app. For single containers, the same tmp-swap pattern becomes "rename container → recreate with new secret → remove old", giving a no-downtime secret rotation. `tengiz secret rotate myapp DATABASE_PASSWORD` rotates the value and re-applies it without full redeploy. High security value; complements key rotation (`tengiz secret rotate-key`, implemented) which re-encrypts the store — this changes the secret value itself.
+- **Detected:** 2026-08-04
+
+## In-Use Resource Detection for Safe Pruning (cross-resource dependency flags)
+- **Source:** Komodo
+- **Description:** Every image/volume/network list computes an `in_use` flag by cross-referencing running containers: images by `container.image_id`, volumes by `container.volumes`, networks by `container.networks`, swarm secrets/configs by `service.secrets`/`service.configs`. Lists sort in-use items first so operators never accidentally destroy something a running app depends on (`bin/periphery/src/docker/{image,volume,network}.rs`).
+- **Why add to Tengiz:** Safe garbage collection requires knowing "this volume/image is mounted by which app" before pruning. `tengiz images ls --in-use`, `tengiz volume ls --in-use`, and prune commands that refuse to delete referenced resources prevent breaking running containers. Complements Safe Volume Deletion (recorded) with a general in-use signal across all Docker objects. Low effort — one `docker ps` cross-reference in the ls commands.
+- **Detected:** 2026-08-04
+
+## Secret-Safe Command Execution & Log Redaction (stdin pipe + sanitized logging)
+- **Source:** Komodo
+- **Description:** Komodo's command runner supports `stdin: Option<&str>` so secrets go to a child's stdin (e.g. `docker login --password-stdin`) and never appear in process arguments visible via `ps`; it also spawns timeouts/cancels in their own process group so the whole tree is killed (`lib/command/src/options.rs:7-27`). Executed commands are logged in sanitized form — secret bytes are replaced with `<secret-data>` placeholders in the audit log (`bin/periphery/src/docker/secret.rs:146-158`, `config_log.sanitize(&replacers)` in `api/compose.rs`).
+- **Why add to Tengiz:** Tengiz runs Docker exclusively via `os/exec` — the two weakest points are secret leakage via argv and orphaned descendant processes on timeout/cancel. A `CommandOptions{stdin, timeout, kill_process_group}` abstraction plus a `sanitize()` pass before logging any command closes both gaps. Essential now that Tengiz has a secrets system; also relevant for registry login (`--password-stdin`) and build secrets. Low effort, high security value.
+- **Detected:** 2026-08-04
+
+## Multi-Term Log Search (AND/OR/Invert grep)
+- **Source:** Komodo
+- **Description:** `format_log_grep` (`bin/periphery/src/helpers.rs:117-137`) builds `grep -E 'a|b'` for OR, `grep -P '^(?=.*a)(?=.*b)'` (PCRE lookahead) for AND semantics, and adds `-v` for inversion. Wired into `GetContainerLogSearch` (`bin/periphery/src/api/container/mod.rs:81-112`) which tails 5000 lines then filters; also used for Swarm service and compose logs.
+- **Why add to Tengiz:** Tengiz's `--grep` (implemented) supports a single pattern. AND/OR/invert over a rolling tail lets operators answer "find lines with both `ERROR` and `auth`", "everything except healthcheck noise", etc. `tengiz logs myapp --grep "ERROR AND auth"` / `--grep "redis|postgres" -v`. Pure Docker CLI passthrough — no Docker API needed. Low effort, high debugging value.
+- **Detected:** 2026-08-04
+
+## Per-Image Pull Deduplication (Single-Flight Lock + TTL Cache)
+- **Source:** Komodo
+- **Description:** `PullImage` uses a `TimeoutCache<String, Log>` keyed by image name: it acquires a per-image lock, and if a pull completed within `PULL_TIMEOUT` (5000 ms) it returns the cached log instead of re-pulling — so concurrent deploy requests for the same image collapse into a single pull (`bin/periphery/src/api/docker.rs:83-149`).
+- **Why add to Tengiz:** Concurrent webhook/preview-triggered deploys of the same app/image hammer the registry with duplicate pulls, wasting bandwidth and risking rate limits. A single-flight per-image lock + short TTL cache in the `runtime`/`builder` pull path deduplicates them. This is the pull-side counterpart to the recorded Build Queue with Dedup. Low effort (`sync.Map` of per-image mutexes), immediate reliability win.
+- **Detected:** 2026-08-04
+
+## Config Versioning & One-Click Restore (before/after snapshots on every update)
+- **Source:** Komodo
+- **Description:** Every resource `update` exports the resource to TOML before and after the change and stores both on the `Update` record (`prev_toml`/`current_toml`); `delete` stores the pre-delete TOML (`bin/core/src/resource/mod.rs:758-811,1010-1017`). This produces a per-change audit trail and enables "show what changed" and "restore previous config" for any resource.
+- **Why add to Tengiz:** Tengiz persists config in `~/.tengiz/apps.json` but keeps no per-change snapshot — an accidental `tengiz config set` can't be reverted and there's no "who changed what". A before/after JSON snapshot per state-modifying operation (config, env, domains, resources) in `~/.tengiz/versions/` enables `tengiz config history myapp` and `tengiz config restore myapp <version>`. Distinct from the recorded config-diffing (Coolify) which compares deployments — this is per-operation versioning with restore. Low effort, high ops value.
+- **Detected:** 2026-08-04
