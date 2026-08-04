@@ -58,6 +58,7 @@ tengiz preview list <app>       → list preview deployments
 tengiz preview rm <app> <pr>    → remove a preview deployment
 tengiz preview deploy <app> <pr> → create/update preview deployment (webhook preferred)
 tengiz rollback <app>           → rollback to previous deployment
+tengiz cleanup             → prune unused Docker resources (label-protected)
 tengiz notification enable      → enable notifications
 tengiz notification disable     → disable notifications
 tengiz notification config <app> [--events ...] [--all] → configure which events trigger notifications
