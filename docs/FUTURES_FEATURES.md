@@ -1718,3 +1718,159 @@ Aşağıdaki özellikler Dokploy kaynak kodu analizinden tespit edilmiştir ve m
 - **Description:** `services/environment.ts` + `services/project.ts` — her proje `production` adında `isDefault: true` bir ortam ile otomatik oluşturulur (`createProductionEnvironment`). Environment birinci sınıf bir varlıktır: kendi adı, açıklaması, ortama özel env değişkenleri (`env` kolonu) ve default flag'i vardır; içinde applications, compose ve tüm database tipleri (postgres, mysql, mariadb, mongo, redis, libsql) gruplanır. `duplicateEnvironment` ortamı env değişkenleriyle birlikte kopyalar; silme koruması default ortamı ve hâlâ servis barındıran ortamları engeller. Servisler ortama bağlı olduğundan aynı app farklı ortamlarda izole deploy edilir.
 - **Why add to Tengiz:** Tengiz'in mevcut Multi-Environment Desteği (implemented) yalnızca `.tengiz.{env}.yaml` config merge eder — ortamlar birinci sınıf varlık değildir, servisler ortama bağlı değildir. Dokploy'un modeli: `tengiz project create myapp` → otomatik `production` ortamı; `tengiz env create myapp staging` → staging'de izole servisler; `tengiz env duplicate myapp --name qa` → env + env değişkenleriyle birlikte kopyalama. Project-Based App Organization (#112) ile birleşince app'ler hem projede hem ortamda organize olur. `AppEntry`'ye `ProjectID` + `EnvironmentID` alanları eklenerek `tengiz ps --env staging` filtrelemesi sağlanır; ortam başına env değişkenleri (`.tengiz.yaml` merge yerine per-env store) daha temiz bir modeldir.
 - **Detected:** 2026-08-04
+
+---
+
+# Dokku Detections (2026-08-04)
+
+Aşağıdaki özellikler Dokku kaynak kodu analizinden tespit edilmiştir ve mevcut katalogda kayıtlı değildir.
+
+## Scale-to-Zero Placeholder Page with Auto-Retry (502 + JS Reload)
+- **Source:** Dokku
+- **Description:** For apps with no running `web` process (stopped, undeployed, or scaled-to-zero), Dokku generates a minimal nginx config returning `502 Bad Gateway` whose error page embeds auto-retry JavaScript that reloads the page as soon as the app comes back up. The placeholder config is auto-replaced once web containers are healthy. See `docs/networking/proxies/nginx.md` (lines 31–44) and the `nginx-vhosts` templates.
+- **Why add to Tengiz:** This is the single most relevant Dokku feature for Tengiz's scale-to-zero model. Today a cold start or idle-timeout produces a raw connection error/502 to the user. A proxy middleware that checks container state and serves a self-healing placeholder page (with JS poll + refresh) turns cold starts into a smooth experience. `tengiz proxy --placeholder` veya `.tengiz.yaml`'da `proxy.placeholder: true`. Complements Error Pages (#21) — that covers static errors, this covers the scale-to-zero transition specifically.
+- **Detected:** 2026-08-04
+
+## Scheme-Based Port Map Management (ports:add/set/remove/list)
+- **Source:** Dokku
+- **Description:** Explicit, persistent host→container port mappings in `scheme:host-port:container-port` form (`http:80:5000`, `https:443:5000`, `grpc:8080:50051`, custom schemes). `ports:add/set/remove/clear/list` manage the map, stored separately from the proxy and consumed as JSON (`ports:get`). When a cert exists, an `https:baseSSLPort:containerPort` mapping is auto-synthesized from the `http:80:...` mapping. `PORT` env var is derived from the map. Source: `plugins/ports/{proxy.go,functions.go,subcommands.go}`.
+- **Why add to Tengiz:** Tengiz hardcodes port allocation (9000–9999, persisted in `ports.json`) with no user control. Scheme-based port maps let users bind explicit ports, expose non-web processes, add HTTPS/grpc mappings, and drive proxy config generation from a single JSON source. `tengiz ports add myapp http:8080:5000`. Complements Port Mapping Protocol Selection (#111) — this adds the scheme/host/container triples and persistence layer on top.
+- **Detected:** 2026-08-04
+
+## gRPC Proxy Support (grpc/grpcs Schemes)
+- **Source:** Dokku
+- **Description:** The nginx/openresty vhost templates render `grpc_pass` blocks with HTTP/2 for `grpc`/`grpcs` scheme entries in the port map, enabling end-to-end gRPC traffic (including gRPC-Web) to app containers. Source: `plugins/nginx-vhosts/templates/nginx.conf.sigil` (lines 116–147).
+- **Why add to Tengiz:** Port Mapping Protocol Selection (#111) covers raw TCP/UDP forwarding, but gRPC requires HTTP/2 transport (h2c) that `httputil.ReverseProxy` must be configured for. Adding `grpc`/`grpcs` scheme support to the proxy plus a `tengiz ports add myapp grpc:9090:50051` config makes Tengiz a viable host for gRPC services (microservices, protobuf APIs). Small change: set HTTP/2 + content-type handling in the proxy for grpc-mapped ports.
+- **Detected:** 2026-08-04
+
+## Detached One-Off Runs with TTL Reaper (run:detached/list/logs/stop/retire)
+- **Source:** Dokku
+- **Description:** `run:detached` starts a one-off container in the background with a TTL deadline (`--ttl-seconds`, default 24h) and concurrency policy (`allow/forbid/replace`). `run:list` (stdout/json), `run:logs` (per-container, `--tail`), `run:stop` (all or `--container`), and `run:retire` garbage-collect expired run containers by reading a `run-deadline` label. Source: `plugins/run/*`, `plugins/scheduler-docker-local/scheduler-run-retire`.
+- **Why add to Tengiz:** `tengiz run` (implemented) is interactive only. Background jobs (batch workers, scheduled migrations, data imports) need detached mode with automatic TTL cleanup so one-off containers never leak on the host. `tengiz run --detached --ttl 24h myapp python script.py`, `tengiz run list`, `tengiz run retire`. Directly reuses the existing `runtime.Run()` exec pattern — add `-d`, a deadline label, and a reaper goroutine.
+- **Detected:** 2026-08-04
+
+## Per-App Proxy Tuning Properties (client-max-body-size, timeouts, buffers, keepalive)
+- **Source:** Dokku
+- **Description:** ~30 proxy tuning properties settable per-app or globally with a 3-level resolution (app → global → default): `client-max-body-size` (default 1m), client body/header timeouts, `keepalive-timeout`, proxy connect/read/send timeouts, `proxy-buffering`/buffer sizes, upstream `keepalive`, bind addresses (IPv4/IPv6), `underscore-in-headers`, access/error log paths. Source: `plugins/nginx-vhosts/nginx_vhosts.go`, `subcommands/set`.
+- **Why add to Tengiz:** Upload-heavy apps hit the default 1MB body limit; slow APIs need longer timeouts; buffering and keepalive tuning affect throughput. Gelişmiş Proxy Konfigürasyonu (#76) is high-level; this defines the concrete tunable surface. `.tengiz.yaml`'da `proxy.client_max_body_size`, `proxy.read_timeout`, `proxy.buffering` — a small middleware/route-option map in the existing proxy. High value for production workloads.
+- **Detected:** 2026-08-04
+
+## Built-in Proxy Response Compression (On-the-Fly gzip)
+- **Source:** Dokku
+- **Description:** The generated nginx config enables inline gzip for HTML/CSS/JS/XML/JSON/WASM/SVG with `gzip_min_length 1100`, `gzip_buffers 4 32k`, `gzip_vary on`, `gzip_comp_level 6`. Source: `plugins/nginx-vhosts/templates/nginx.conf.sigil` (lines 52–57).
+- **Why add to Tengiz:** Build Precompression (#86) handles pre-compressed static assets at build time; on-the-fly gzip covers dynamic responses and apps without precompressed output. Go: a gzip middleware wrapping the reverse proxy response writer (respecting `Accept-Encoding` and skipping already-compressed content types). Small, dependency-free, immediate bandwidth/latency win for HTML/JSON APIs.
+- **Detected:** 2026-08-04
+
+## Catch-All Default Site (Reject Unknown Hosts)
+- **Source:** Dokku
+- **Description:** A default vhost rejects requests whose Host header / TLS SNI matches no app: `ssl_reject_handshake on` for HTTPS, `return 444` (connection dropped) for unknown HTTP hosts, optionally `return 410`. Installed via debconf (`dokku/install_default_site`). Source: `docs/networking/proxies/nginx.md` (lines 187–289).
+- **Why add to Tengiz:** Prevents DNS rebinding / host-header attacks and stops scanners probing arbitrary subdomains of the Tengiz root domain. The current proxy silently 404s unknown hosts; a configurable catch-all default site is stronger. `tengiz proxy --reject-unknown-hosts` or `.tengiz.yaml`'da `proxy.catchall: reject|410`. Easy in Go: default `http.ServeMux`/`ReverseProxy` handler for unmatched hosts.
+- **Detected:** 2026-08-04
+
+## Internal Service Discovery via Network Aliases (app.<proctype>.<tld>)
+- **Source:** Dokku
+- **Description:** Containers on non-default networks get a stable DNS alias `<app>.<proctype>` (e.g. `node-js-app.web:5000`), optionally suffixed with a configurable `tld` (e.g. `svc.cluster.local`) — Docker-native service discovery, the equivalent of Kubernetes service DNS on a single host. Source: `plugins/network/network.go`, `functions.go` (GetListeners, network aliases), `docs/networking/network.md` (lines 257–311).
+- **Why add to Tengiz:** Accessory services (#62), compose stacks (#91), and multi-service apps need stable inter-container hostnames that survive IP churn (which scale-to-zero restart cycles cause). Go: pass `--network-alias` at `docker run` and attach apps to a shared user-defined network. `.tengiz.yaml`'da `network.aliases: true`, `network.tld: svc.cluster.local`. Foundation for service-to-service communication without proxy.
+- **Detected:** 2026-08-04
+
+## Phased Network Attachment (attach-post-create / attach-post-deploy)
+- **Source:** Dokku
+- **Description:** Attach app containers to user networks at distinct lifecycle phases: `attach-post-create` (right after container create), `attach-post-deploy` (after successful deploy, re-attach running containers). Multiple networks per app supported, with global defaults. Source: `plugins/network/{subcommands.go,triggers.go,network.go}`.
+- **Why add to Tengiz:** Custom Docker Network (#30) records a single `--network` flag. Phased attachment handles apps that need to join a network only after passing health checks (e.g. an app that must be healthy before joining the VPN overlay), and lets the proxy/accessory containers join late. `network:set myapp attach-post-deploy vpn-net`. Extends #30/#102 with lifecycle-aware attach semantics.
+- **Detected:** 2026-08-04
+
+## Event-Listener Self-Healing Daemon (Proxy Rebuild on IP Change, Rebuild on Crash Loop)
+- **Source:** Dokku
+- **Description:** A background `dokku-event-listener` watches container state: if a web process restarts and its IP changes → proxy config is rebuilt automatically; if a process exceeds its restart count → the app is rebuilt. Self-healing without operator action. Source: `docs/processes/process-management.md` (lines 398–401).
+- **Why add to Tengiz:** Tengiz's scale-to-zero causes constant container state churn; a proxy pointing at a stale container IP yields 502s until the next cold start. A Go watcher (polling `docker events`/`docker inspect` via exec, or a goroutine on the idle/health packages) that regenerates routes and restarts crash-looping apps adds resilience. Complements Background Monitoring Scheduler (#57) — this reacts to events, that polls on a schedule.
+- **Detected:** 2026-08-04
+
+## Graceful Retirement Protocol (SIGTERM-Drain + wait-to-retire Grace Period)
+- **Source:** Dokku
+- **Description:** After a zero-downtime deploy, new containers get traffic and old containers immediately receive SIGTERM (graceful drain), then remain running for a configurable `wait-to-retire` grace period (default 60s) before being stopped; a hard `stop-timeout-seconds` (default 30s) precedes SIGKILL — mirroring Heroku dyno shutdown. Source: `docs/deployment/zero-downtime-deploys.md` (lines 29–43), `checks:set wait-to-retire`, `ps:set stop-timeout`.
+- **Why add to Tengiz:** Tengiz's zero-downtime deploy (implemented) swaps traffic but the old-container shutdown timing is not tunable. Adding SIGTERM-then-drain with a configurable grace window ensures in-flight requests complete before the old container is removed. `ps:set <app> stop-timeout 60` + `deploy.checks.wait_to_retire: 30` in `.tengiz.yaml`. Small change to the deploy pipeline ordering.
+- **Detected:** 2026-08-04
+
+## CHECKS File with Content Assertions & checks:run/disable/skip
+- **Source:** Dokku
+- **Description:** A repo-level `CHECKS` file: `WAIT`/`TIMEOUT`/`ATTEMPTS` directives plus `path expected-content` lines (regex-matched) verified before routing traffic. `checks:run <app>` triggers manually; `checks:disable` stops old containers before new ones start (incompatible deploys); `checks:skip` avoids the default 10s wait. Source: `plugins/checks/*`, `plugins/scheduler-docker-local/check-deploy`, `docs/deployment/zero-downtime-deploys.md`.
+- **Why add to Tengiz:** Zero-downtime deploy health checks (#28) exist but only verify HTTP status. Content assertions catch wrong deployments (e.g. check `/health` returns `ok`, or `/version` contains the expected SHA). Per-proctype skip/disable gives fine control over deploy behavior and avoids false failures for slow apps. Low effort on top of the existing health-check system.
+- **Detected:** 2026-08-04
+
+## Deploy from Release Archive / Image Tarball (git:from-archive / git:load-image)
+- **Source:** Dokku
+- **Description:** Deploy directly from a tar/zip release URL or stdin (`git:from-archive <app> <url>|-- --archive-type tar.gz`), or from a `docker save` tarball piped on stdin (`git:load-image <app> <image>`), with `--build-dir` for monorepo contexts. All record deploy-source metadata. Source: `plugins/git/internal-functions`, `plugins/git/triggers/{git-from-archive,git-from-image,git-from-directory}`.
+- **Why add to Tengiz:** CI systems and firewall-restricted users often can't `git push` — a release archive URL or image tarball is the only transport. `tengiz deploy --from-archive https://.../release.tar.gz` and `tengiz deploy --load-image < app.tar` expand deploy sources beyond git/webhook. Complements Explicit Image Name Deploy (#13) — this pulls by URL or stdin rather than a local/registry image name.
+- **Detected:** 2026-08-04
+
+## Git Host Trust & Netrc Auth (git:allow-host / git:auth / git:generate-deploy-key)
+- **Source:** Dokku
+- **Description:** `git:allow-host <host>` adds hosts to `known_hosts` via `ssh-keyscan`; `git:auth <host> <user> [pass]` writes a chmod-600 `.netrc` entry (password read from stdin to avoid shell history); `git:generate-deploy-key` creates a passwordless ed25519 pair; `git:public-key` prints it. Enables private-repo auto-deploy without interactive prompts. Source: `plugins/git/internal-functions`, `plugins/git/subcommands/`.
+- **Why add to Tengiz:** Private-repo `git:sync`/auto-deploy currently requires manual SSH deploy-key setup. A `tengiz git auth <host>` command family manages `.netrc` + `known_hosts` so `tengiz deploy --sync <private-repo>` works non-interactively in CI. Complements Git Provider Account Management (#200, token-based) — this is the HTTP(S) credential path for git operations. Low effort: file writes + `ssh-keyscan` exec.
+- **Detected:** 2026-08-04
+
+## Archive Extraction Security Limits (max-size / max-files + Path-Traversal Validation)
+- **Source:** Dokku
+- **Description:** Before extracting deploy archives, validate against `archive-max-size` (default 1 GiB) and `archive-max-files` (default 10000), and reject path-traversal / symlink-escape entries. Source: `plugins/git/subcommands.go` (`git:set archive-max-*`), `plugins/git/internal-functions` (git-from-archive validation), `docs/deployment/methods/archive.md`.
+- **Why add to Tengiz:** Malicious or broken archives can exhaust disk or overwrite files via `../` paths during `tengiz deploy --from-archive`. Go's `archive/tar`/`archive/zip` with explicit entry-path validation and size/count limits is cheap and protects single-server instances. `git:set --global archive-max-size` / per-app overrides. A mandatory safety layer for the archive-deploy feature.
+- **Detected:** 2026-08-04
+
+## ps:inspect (Sanitized docker inspect with Secret Redaction)
+- **Source:** Dokku
+- **Description:** `ps:inspect <app>` outputs sanitized `docker inspect` JSON — env values masked as `XXXXXX` except allowlisted prefixes (`CACHE_PATH`, `DOCKER_`, `DOKKU_`, `DYNO`, `PATH`, `PORT`, `USER`) — safe to copy-paste/share when debugging. Source: `plugins/scheduler-docker-local/scheduler-inspect`, `docs/processes/process-management.md`.
+- **Why add to Tengiz:** Sharing container config for debugging currently leaks secrets. A redacting `tengiz inspect <app>` makes support requests and team debugging safe. Go: parse `docker inspect` JSON, mask non-allowlisted env values. Especially important now that Tengiz has a Secrets system (#32 implemented) — inspect output must never expose them. Tiny effort, high safety value.
+- **Detected:** 2026-08-04
+
+## Container --init Zombie Reaping (per-app toggle)
+- **Source:** Dokku
+- **Description:** `docker create --init` (tini) toggled per app/global (`scheduler-docker-local:set <app> init-process true|false`); automatically disabled for images labeled `org.opencontainers.image.vendor=linuxserver.io` (already ship S6). Prevents PID-1 zombie accumulation. Source: `plugins/scheduler-docker-local/internal-functions` (lines 8–29), `bin/scheduler-deploy-process-container`.
+- **Why add to Tengiz:** Node/Python containers that spawn subprocesses accumulate zombies and cannot reap them without an init process — a common source of leaked processes on long-running containers. `.tengiz.yaml`'da `container.init: true` (default on) → pass `--init` to `docker run`. One flag in `runtime.Run()`, immediate reliability win for scale-to-zero restarts.
+- **Detected:** 2026-08-04
+
+## skip-deploy Mode (Build + Tag Without Deploy)
+- **Source:** Dokku
+- **Description:** `ps:set <app> skip-deploy true` makes the deploy pipeline build and tag the image but skip the deploy phase; a later deploy reuses the tagged image. `--skip-deploy` flag variant exists per-invocation. Source: `docs/deployment/application-deployment.md` (lines 144–151), `docs/processes/process-management.md` (line 514).
+- **Why add to Tengiz:** Enables build-once-deploy-later workflows and lets operators test build changes without touching the running container. Fits Tengiz's rollback (#11) and staged-deploy (#87) stories: `tengiz deploy --skip-deploy` builds a new image tag, then `tengiz deploy --image <tag>` applies it. Small pipeline change (early return after build + tag).
+- **Detected:** 2026-08-04
+
+## storage-exec (Run Command Against a Mounted Volume)
+- **Source:** Dokku
+- **Description:** `storage-exec <app> <volume> <cmd>` runs a command inside a throwaway container that mounts a named volume or host path — for inspecting or migrating volume data without touching the running app. Interactive/tty/user flags supported. Source: `plugins/scheduler-docker-local/storage_exec.go`.
+- **Why add to Tengiz:** Volume debugging (e.g. inspect a SQLite DB, list uploads, prune old files) currently requires entering the app container or a manual `docker run -v`. `tengiz storage exec myapp mydata ls -la` executes against just the volume. Complements Persistent Storage (#21 implemented) with a safe, targeted inspection path. Low effort: `docker run --rm -v <vol> <cmd>`.
+- **Detected:** 2026-08-04
+
+## Custom Dockerfile Path + EXPOSE Port Auto-Detection
+- **Source:** Dokku
+- **Description:** Per-app/global `dockerfile-path` property points to a custom Dockerfile location (copied to `Dockerfile` at extract). Container port auto-detected from the Dockerfile's `EXPOSE` directive (or from the built image) when no Procfile/port is specified. Source: `plugins/builder-dockerfile/{internal-functions,core-post-extract}`.
+- **Why add to Tengiz:** Monorepos and non-root Dockerfiles need a path override; auto-detecting `EXPOSE` removes the hardcoded port assumption in Tengiz's runtime and makes Dockerfile apps work without manual port config. `dockerfile_path: apps/web/Dockerfile` in `.tengiz.yaml`; parse `EXPOSE` in the builder. Complements Custom Build Commands (#12) and Monorepo Support (#11).
+- **Detected:** 2026-08-04
+
+## Non-Root App User (Run as Unprivileged User)
+- **Source:** Dokku
+- **Description:** Processes run as a non-root user (default `herokuishuser`) via `DOKKU_APP_USER`; chown disabled via `HEROKUISH_DISABLE_CHOWN`. Source: `plugins/builder-herokuish/internal-functions`, `dockerfiles/*.Dockerfile`.
+- **Why add to Tengiz:** Containers running as root are a major security risk; Tengiz currently runs whatever the image default user is. `.tengiz.yaml`'da `run.user: appuser` → pass `--user` to `docker run` (or emit `USER` in the generated Dockerfile). Principle of least privilege, complements Linux Capabilities Management (#190). Small change in `runtime.Run()`.
+- **Detected:** 2026-08-04
+
+## Buildpack Pinning, Ordering & Stack Selection (buildpacks:add --index / .buildpacks)
+- **Source:** Dokku
+- **Description:** Explicit buildpack management: `buildpacks:add <app> <url> [--index N]`, `remove/list/clear/set`, a `.buildpacks` file rewritten on changes, and a `stack` property to pin the base stack image. Source: `plugins/buildpacks/{functions.go,commands,triggers}`.
+- **Why add to Tengiz:** Herokuish buildpacks (#68) are recorded at a high level; ordering/pinning for polyglot apps and deterministic base images is a distinct capability. `.tengiz.yaml`'da `buildpacks: [{url: ..., index: 1}]` gives reproducible multi-buildpack builds. Essential for a deterministic migration path from Heroku. Complements the builder abstraction.
+- **Detected:** 2026-08-04
+
+## Per-App Config File Path Overrides (procfile-path / appjson-path / config paths)
+- **Source:** Dokku
+- **Description:** Per-app/global relative paths for `Procfile` (`ps:set procfile-path .dokku/Procfile`), `app.json` (`app-json:set appjson-path .dokku/app.json`), `nixpacks.toml` / `railpack.json` — enabling monorepos and per-branch config without moving files to the repo root. Source: `plugins/ps/ps.go`, `plugins/builder-nixpacks/internal-functions`, `docs/processes/process-management.md`.
+- **Why add to Tengiz:** Monorepo Support (#11) records `base_dir`; these per-file path overrides are more granular and compose with it — each sub-app points at its own manifest. `procfile_path: apps/web/Procfile` in `.tengiz.yaml`. Low effort (path resolution in the builder/detector), high value for multi-app repos.
+- **Detected:** 2026-08-04
+
+## Config Change Auto-Redeploy + --no-restart (Config Drives Deploy)
+- **Source:** Dokku
+- **Description:** `config:set`/`config:unset` trigger an app redeploy by default; `--no-restart` defers it for scripting multiple vars (apply later via `ps:rebuild`). `--encoded` stores base64/multiline values byte-for-byte. Source: `plugins/config/subcommands.go`, `docs/configuration/environment-variables.md` (lines 39–62).
+- **Why add to Tengiz:** Tengiz `config set` currently requires a manual redeploy; implicit redeploy on change guarantees apps always run the latest env. `--no-restart` batches multi-var changes; `--encoded` supports multiline secrets (PEM keys, JSON blobs). Extends the implemented env management (#403). Complements Config Hash Auto-Redeploy (#1633-detection) with explicit, user-controlled redeploy triggers.
+- **Detected:** 2026-08-04
+
+## amd64→arm64 Runtime Emulation (auto --platform for third-party images)
+- **Source:** Dokku
+- **Description:** The docker-local scheduler auto-detects amd64-only images and runs them with `--platform=linux/amd64` on arm64 hosts (via `docker image inspect` architecture check); the dockerfile builder can force the build platform similarly. Source: `plugins/scheduler-docker-local/bin/scheduler-deploy-process`, `plugins/builder-dockerfile/internal-functions`, `docs/deployment/schedulers/docker-local.md` (lines 28–33).
+- **Why add to Tengiz:** Multi-architecture builds (#69/71) cover images Tengiz builds itself; third-party images that are amd64-only still fail on arm64 hosts. Auto-adding `--platform` at `docker run` on arm64 keeps such apps running (with QEMU emulation). Go: inspect image Arch, conditionally append the flag. Low effort, closes an arm64 gap.
+- **Detected:** 2026-08-04
