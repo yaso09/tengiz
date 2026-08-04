@@ -57,3 +57,43 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	}
 	return nil
 }
+
+func buildSystemPruneArgs(opts SystemPruneOptions) []string {
+	args := []string{"system", "prune", "-f", "--filter", "label!=tengiz-app"}
+	if opts.All {
+		args = append(args, "-a")
+	}
+	if opts.Volumes {
+		args = append(args, "--volumes")
+	}
+	return args
+}
+
+func parseReclaimedSpace(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "Total reclaimed space:") {
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, "Total reclaimed space:"))
+		}
+	}
+	return ""
+}
+
+func (r *dockerRuntime) SystemPrune(ctx context.Context, opts SystemPruneOptions) (*SystemPruneResult, error) {
+	cmd := exec.CommandContext(ctx, "docker", buildSystemPruneArgs(opts)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker system prune: %w\n%s", err, string(out))
+	}
+	output := string(out)
+	return &SystemPruneResult{Output: output, Reclaimed: parseReclaimedSpace(output)}, nil
+}
+
+func (r *dockerRuntime) SystemDF(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "system", "df")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker system df: %w\n%s", err, string(out))
+	}
+	return string(out), nil
+}

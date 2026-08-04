@@ -28,12 +28,24 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type SystemPruneOptions struct {
+	All     bool
+	Volumes bool
+}
+
+type SystemPruneResult struct {
+	Output    string
+	Reclaimed string
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
 	RemoveImage(ctx context.Context, imageTag string) error
 	KeepLastNImages(ctx context.Context, appName string, n int) error
+	SystemPrune(ctx context.Context, opts SystemPruneOptions) (*SystemPruneResult, error)
+	SystemDF(ctx context.Context) (string, error)
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
@@ -116,6 +128,14 @@ func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
 
 func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
 	return nil
+}
+
+func (m *stubManager) SystemPrune(ctx context.Context, opts SystemPruneOptions) (*SystemPruneResult, error) {
+	return &SystemPruneResult{}, nil
+}
+
+func (m *stubManager) SystemDF(ctx context.Context) (string, error) {
+	return "", nil
 }
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
