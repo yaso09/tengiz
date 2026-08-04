@@ -1580,3 +1580,99 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Each datastore collection can be configured with a memory type: `Heap` (fast, volatile — data lost on canister upgrade) or `Stable` (persistent across upgrades, slightly slower). This lets developers make performance/cost trade-offs per collection: cache/session data goes in Heap for speed, user profiles go in Stable for durability. Collections default to Heap for maximum performance. The memory type affects both read/write latency and upgrade behavior — Stable collections survive platform upgrades, Heap collections are re-initialized.
 - **Why add to Tengiz:** Tengiz's planned Built-in NoSQL Datastore (#1) needs a similar performance/storage trade-off. Some data is ephemeral (sessions, cache, rate limit counters) — stored in-memory for speed and automatically reset on restart. Other data is persistent (user profiles, settings, content) — written to SQLite or disk-backed storage for durability. A `db.<collection>.memory: ephemeral | persistent` setting in `.tengiz.yaml` lets developers choose: ephemeral collections use Go maps (fast, lost on container restart), persistent collections use embedded SQLite tables (durable, survives restarts). This is particularly important for scale-to-zero — ephemeral collections naturally reset on cold start (good for session data that should force re-login), persistent collections survive scale-to-zero cycles (good for app state). Implementation: two store backends (`MemoryStore` and `SQLiteStore`) implementing the same `DocStore` interface, selected per-collection at deploy time. Low-medium effort, fits Tengiz's embedded database philosophy. Complements the NoSQL Datastore with production-grade configurability.
 - **Detected:** 2026-07-17
+
+---
+
+# Coolify Detections (2026-08-04)
+
+Aşağıdaki özellikler Coolify kaynak kodu analizinden tespit edilmiştir ve mevcut katalogda kayıtlı değildir.
+
+## Sentinel Agent (Push-Based Monitoring Daemon)
+- **Source:** Coolify
+- **Description:** Coolify v4'te her sunucuda çalışan ayrı bir monitoring agent container'ı (`coollabsio/sentinel`). Docker socket'i mount eder, token tabanlı auth (encrypted JSON token) ile `POST /api/v1/sentinel/push` endpoint'ine periyodik olarak container state ve metrikleri push eder. Heartbeat süresi dolan agent otomatik yeniden deploy edilir (`CheckAndStartSentinelJob`). Container state hash (xxh128) ile dedupe yapılır — sadece state değişince push edilir. SSH polling'i tamamen bypass eder (`isSentinelLive()`). Per-server ve per-container CPU/memory metrik geçmişi agent API'sinden LTTB downsampling ile sorgulanır.
+- **Why add to Tengiz:** Tengiz'in mevcut "Background Monitoring Scheduler" (#57) ve "Per-Container Resource Metrics" (#41) özellikleri merkezi polling modeline dayanır. Sentinel, multi-server'da kontrol düzlemini SSH bağlantılarından kurtaran push-based agent mimarisidir — her sunucu metriklerini kendi iter, kontrol düzlemi sadece push'ları toplar. `tengiz agent start --server <host>` ile bir yardımcı container başlatılır, `~/.tengiz/agents.json`'da heartbeat takip edilir. Gereksiz SSH round-trip'leri ortadan kalkar ve scale-to-zero'daki container durumları gerçek zamanlı görünür. Per-server/agent izleme için Coollify'in Sentinel'i referans uygulamasıdır.
+- **Detected:** 2026-08-04
+
+## Cloud Provider Server Provisioning (DO/Hetzner/Vultr)
+- **Source:** Coolify
+- **Description:** Cloud provider API token'ları (`CloudProviderToken`) ile sunucular doğrudan sağlayıcı üzerinden provision edilir: DigitalOcean, Hetzner ve Vultr için location, server-type, image, SSH key, firewall ve network seçimi. `ServerCloudProviderStatusCheckJob` sağlayıcı kesintilerini algılar. `CloudInitScript` ile yeniden kullanılabilir sunucu kurulum script'leri tanımlanır. Provision sonrası `ValidateAndInstallServerJob` Docker + proxy kurulumunu otomatik yapar.
+- **Why add to Tengiz:** Mevcut "Server Bootstrap" (#31) mevcut bir sunucuya Docker kurar; "Builder Resource" (#195) ise sadece AWS EC2 build hedefini kapsar. Cloud provider'dan sıfırdan sunucu ayağa kaldırmak (create droplet → SSH key inject → Docker kur → kaydet) hiç kayıtlı değil. `tengiz server create --provider hetzner --type cpx31 --region ash` ile tek komutta production sunucusu provision edilebilir. Go'da her provider için hafif bir REST API wrapper (`net/http`) yeterli. Multi-server'a geçişin ilk adımıdır.
+- **Detected:** 2026-08-04
+
+## Volume Snapshot Backups (Graceful Stop + Auto-Recovery) & Cross-Server Volume Cloning
+- **Source:** Coolify
+- **Description:** `ScheduledVolumeBackup` ile persistent volume'lar yedeklenir; yedek sırasında container `stop_during_backup` ile graceful durdurulur, snapshot alınır, ardından container otomatik geri başlatılır. Yedekler S3 ve/veya lokal saklanır, retention (count/day/max-size) ayrı ayrı uygulanır. `VolumeBackupRecoveryJob` container'ı yedekten geri yükler (S3 helper container + güvenli tmp temizliği). `VolumeCloneJob` volume'ları SCP/tar ile aynı veya farklı sunucuya klonlar.
+- **Why add to Tengiz:** Mevcut "Automated Database Backups" (#127) DB-dump tabanlıdır (pg_dump vb.); volume snapshot yedeklemesi farklıdır — SQLite dosyaları, uploads, generated caches gibi dump edilemeyen state'i yakalar. Scale-to-zero ortamında container'lar durdurulup başlatıldığı için volume yedekleme sırasında durdurma/başlatma sırası kritiktir. `tengiz volume backup myapp --schedule "0 3 * * *" --s3 destination`, `tengiz volume restore myapp --backup <id>` ve `tengiz volume clone myapp --server <other>` komutları eklenir. DB dump + volume snapshot birlikte tam yedekleme stratejisi sağlar.
+- **Detected:** 2026-08-04
+
+## Local File Volumes (Single-File Mounts with Content Editing & Git-Based Files)
+- **Source:** Coolify
+- **Description:** `LocalFileVolume` modeli ile bireysel dosya mount'ları yönetilir: `fs_path`/`mount_path` + AES-256 şifreli `content` alanı (UI'dan dosya içeriği düzenlenebilir), host dosya/dizin bind (`is_host_file`, `is_directory`), `chown`/`chmod` dosya izinleri, `is_based_on_git` ile dosyanın repo'dan gelmesi ve `is_preview_suffix_enabled` ile PR başına izole volume. Ayrıca `LocalPersistentVolume` ile isimli Docker volume'lar ve standalone (container'a bağlı olmayan) volume'lar.
+- **Why add to Tengiz:** Mevcut "Persistent Storage" (#21) named volume/host path mount'larını kapsar ama dosya-seviyesi yönetim yoktur. Konfigürasyon dosyaları (nginx.conf, .env, php.ini) tek dosya mount edilip içeriği yönetilebilmelidir. `tengiz file mount myapp --path /etc/nginx.conf --content-file ./nginx.conf` komutu ile deploy sırasında dosya mount edilir; git tabanlı dosya mount'u (`--from-repo`) monorepo'dan tek dosya çekmeyi sağlar. Preview'larda per-PR izole volume suffix'i mevcut preview sistemiyle (#2) doğal birleşir.
+- **Detected:** 2026-08-04
+
+## Database Public Proxy (Expose Private DB Ports with Timeout)
+- **Source:** Coolify
+- **Description:** Her veritabanı için `{uuid}-proxy` adında bir Nginx tabanlı proxy container'ı çalıştırılır (`StartDatabaseProxy`/`StopDatabaseProxy`). Özel DB portlarını localhost üzerinde expose eder ve `{uuid}-proxy` host adıyla Traefik'e rota ekler. `is_public` + `public_port` + `public_port_timeout` alanları ile veritabanı geçici olarak dışarıya açılır; timeout sonrası otomatik kapatılır. `DB_STANDBY_IP`/`DB_IP` ile diğer container'lara DB adresi enjekte edilir.
+- **Why add to Tengiz:** Managed database (#47/#63) yol haritasında varken, DB'lerin dışarıya nasıl açılacağı hiç kayıtlı değil. Vercel Postgres benzeri "geçici public endpoint" kullanıcıların migration/local geliştirme yapmasını sağlar. `tengiz db expose mydb --port 5432 --timeout 1h` komutu ile DB portu güvenli şekilde geçici açılır, timeout sonrası otomatik kapanır. `public_port_timeout` scale-to-zero felsefesiyle uyumludur (kullanılmayan açık port kalmaz). Ayrıca uygulama container'larına DB connection bilgisinin otomatik enjekte edilmesi (#183 ile uyumlu) bu proxy mekanizması üzerinden çözülür.
+- **Detected:** 2026-08-04
+
+## Database SSL Lifecycle (Per-DB Self-Signed Certificates)
+- **Source:** Coolify
+- **Description:** PostgreSQL ve MySQL container'ları için SSL sertifikası üretimi: `StartPostgresql` action'ı server SSL cert/key üretir, container'a mount eder ve `server.crt`/`server.key` yazar. `enable_ssl` + `ssl_mode` alanları ile per-DB SSL açılıp kapatılabilir, `SslCertificate` modeli sertifika durumunu takip eder. `RegenerateSslCertJob` 14 gün öncesinden yenileme yapar.
+- **Why add to Tengiz:** Managed DB'lerde veri aktarımı genellikle şifresiz olur — production güvenliği için DB-level TLS kritik. Mevcut "Manual SSL Certificate Management" (#188) ve "Otomatik SSL/TLS" (#65) proxy/domain seviyesindedir; veritabanı container'ı seviyesinde SSL hiç kayıtlı değil. `tengiz db ssl enable mydb` komutu ile self-signed cert üretilip DB container'ına mount edilir, connection string'de `sslmode=require` otomatik set edilir. Go'da `crypto/x509` ile cert üretimi birkaç yüz satırdır.
+- **Detected:** 2026-08-04
+
+## Deployment Configuration Diffing (Change Detection Between Deployments)
+- **Source:** Coolify
+- **Description:** `ConfigurationGenerator` mevcut app konfigürasyonunun tam snapshot'ını (build, source, domains, env vars, health check, webhooks, swarm, limits) JSON/YAML olarak export eder. `ConfigurationRepository` ve `DeploymentConfiguration/` paketi (`ConfigurationDiff`, `ConfigurationDiffer`) iki deployment arasındaki konfigürasyon farkını hesaplar. UI'da "bu deploy'ta ne değişti" görünümünü besler.
+- **Why add to Tengiz:** Deploy sırasında hangi konfigürasyonun değiştiğini bilmek debugging ve audit için değerlidir. Mevcut "Event Logging & Audit Trail" (#7) aksiyonları loglar ama konfigürasyon farkını yapılandırılmış şekilde tutmaz. `tengiz deploy --show-diff` veya `tengiz build diff <app> <deployA> <deployB>` komutu: env var eklendi/silindi, port değişti, domain eklendi gibi farkları listeler. Snapshot'lar deployment kaydına (#49 source metadata ile birlikte) eklenir. Regresyonları hızla bulmayı sağlar.
+- **Detected:** 2026-08-04
+
+## Config Hash Auto-Redeploy (Detect Configuration Changes)
+- **Source:** Coolify
+- **Description:** Her app/database/service için `config_hash` alanı tutulur; konfigürasyon (env, build settings, limits, domains) değişince hash yeniden hesaplanır. `isConfigurationChanged()` ile eski hash karşılaştırılır; değişiklik varsa UI "deploy edilmemiş değişiklikler" uyarısı gösterir ve yeniden deploy tetiklenebilir. Deployment sonrası hash güncellenir, böylece "deploy edildi mi?" sorusu hash karşılaştırmasıyla doğrulanır.
+- **Why add to Tengiz:** Kullanıcılar env var veya config değiştirip deploy etmeyi unutabilir — üretimde eski konfigürasyonla koşar. `tengiz ps` çıktısına "config changed (not deployed)" sütunu eklenir; `tengiz deploy` çalıştırılınca önce hash farkı gösterilir. `tengiz status --drift` ile tüm app'lerin deploy edilmemiş değişiklikleri listelenir. Mevcut `AppEntry.Config` yapısına `ConfigHash` alanı eklemek ve her deploy'da hash'i güncellemek düşük maliyetlidir. Yapılandırma kayması (config drift) algılaması, GitOps sync (#33) için de temel sağlar.
+- **Detected:** 2026-08-04
+
+## Typed Environment Variables (Build-Time/Runtime/Multi-Line/Literal)
+- **Source:** Coolify
+- **Description:** Environment variable'lar per-var olarak tiplenir: `is_buildtime` (yalnızca build'de), `is_runtime` (yalnızca runtime'da), `is_multiline` (çok satırlı değerler), `is_literal` (escape edilmez, olduğu gibi), `is_shown_once` (yalnızca bir kez gösterilen secret), `is_preview` (yalnızca PR preview'larında), `comment` (açıklama). Bu tipler build arg olarak mı, runtime env olarak mı, yoksa hiç mi geçirileceğini belirler.
+- **Why add to Tengiz:** Mevcut "Build Arguments from Env" (#14) tüm env'leri otomatik build-arg yapar — bazı secret'ların build'de görünmemesi gerekir. Per-var typing: `NEXT_PUBLIC_API_URL` → buildtime, `DATABASE_URL` → runtime, multiline PEM anahtarları → literal/multiline. `tengiz config set myapp NPM_TOKEN x --buildtime` gibi flag'lerle env yönetimi hassaslaşır. `AppEntry.Config.Env`'e per-var metadata eklemek geriye dönük uyumludur (varsayılan: hem buildtime hem runtime). Secret'ların build cache/history'den sızmasını önlemek için güvenlik değeri de yüksektir.
+- **Detected:** 2026-08-04
+
+## Per-Server Deployment Queue with Cancellation
+- **Source:** Coolify
+- **Description:** `ApplicationDeploymentQueue` modeli ve `deployment_queue_limit` (varsayılan 25) ile her sunucuda deploy'lar seri kuyruğa alınır, yüksek öncelikli queue üzerinden çalışır. `queue_application_deployment()` helper'ı rollback, sadece-şu-server, image tag gibi parametreleri işler. Deployment iptal edilebilir (`DELETE /deployments/{uuid}/cancel`), kuyruk durumu görüntülenebilir (`CheckApplicationDeploymentQueue`), takılı kuyruk kayıtları temizlenebilir (`CleanupApplicationDeploymentQueue`).
+- **Why add to Tengiz:** Mevcut "Build Queue with Dedup" (#124) per-app last-one-wins'tir. Per-server seri kuyruk farklıdır: tek Docker daemon'da aynı anda N deploy koşarsa kaynak yarışı ve daemon overload olur. `tengiz deploy --wait` sıraya girer ve önündeki deploy'lar bitince çalışır; `tengiz queue ls` ve `tengiz queue cancel <id>` ile operatör kontrolü sağlanır. Deploy kilit mekanizması (#15) eşzamanlı state bozulmasını önler; kuyruk ise kaynak taşmasını. Sınır aşıldığında HTTP 429/CLI hatası döner.
+- **Detected:** 2026-08-04
+
+## Backup File Security Validation (Restore Injection Prevention)
+- **Source:** Coolify
+- **Description:** `DatabaseBackupFileValidator` yedek dosyalarını restore öncesi güvenlik taramasından geçirir: izin verilen extension allowlist'i (sql/gz/zip/tar/tgz/dump/bak/bson), tehlikeli extension blocklist'i (asp/aspx/bat/sh/php/py), dosya boyut limiti, içeriğin extension ile uyumluluğu ve gzip üzerinden "canlı tarama" ile PostgreSQL restore direktiflerinin OS komut yürütmesine yol açıp açmadığı kontrolü. `ClickhouseBackupCommand` shell-safe dosya/komut doğrulaması yapar.
+- **Why add to Tengiz:** Yedek import özelliği (#184) güvenli hale getirilmelidir — kötü niyetli bir SQL dump'ı pg_restore üzerinden OS komutu çalıştırabilir. `tengiz backup import` komutu gönderilen dosyayı import öncesi doğrular: extension, boyut, içerik-uydurma ve tehlikeli direktif taraması. Go'da gzip'li akışı okurken regex tabanlı direktif taraması kolayca eklenir. Restore güvenliği, yedekleme özelliğinin production'a alınması için ön koşuldur.
+- **Detected:** 2026-08-04
+
+## Server OS Patch Monitoring
+- **Source:** Coolify
+- **Description:** `ServerPatchCheckJob` sunucularda bekleyen OS paket güncellemelerini periyodik kontrol eder, `UpdatePackage` action'ı paket güncelleme komutlarını çalıştırır, `ServerPackageUpdated` event'i bildirim gönderir. `CheckUpdates` action'ı hem OS paketleri hem de platform güncellemelerini tarar. Patches UI'da sunucu bazında bekleyen güncelleme listesi gösterilir.
+- **Why add to Tengiz:** Production sunucularında bekleyen güvenlik yamaları (CVE düzeltmeleri) kritiktir. Mevcut "Server Monitoring" (#73) disk/container/backup durumuna odaklanır; OS patch takibi yoktur. `tengiz server patches` komutu bekleyen güncellemeleri listeler, `tengiz server update --packages` ile uygular. `os/exec` ile `apt list --upgradable` / `dnf check-update` çıktısı ayrıştırılır. Docker image tabanlı build'lerle birlikte base image güncellemeleri için scheduled deployment'larla (#42) birleşir.
+- **Detected:** 2026-08-04
+
+## SSH Jump Server & Connection Multiplexing
+- **Source:** Coolify
+- **Description:** `is_jump_server` ile bazı sunucular SSH atlama sunucusu (jump host) olarak kullanılır; hedef sunuculara doğrudan değil, jump üzerinden erişilir. `SshMultiplexingHelper` aynı sunucuya olan SSH bağlantılarını multiplex eder (tek TCP bağlantı, çoklu channel), `CleanupStaleMultiplexedConnections` ve `ServerCleanupMux` bayat bağlantıları temizler. `ServerConnectionCheckJob` SSH ping ile erişilebilirliği izler, başarısız olunca mux'u devre dışı bırakır.
+- **Why add to Tengiz:** Uzak deployment (#105/#73) yol haritasında varken, doğrudan erişilemeyen (NAT arkası, kapalı port) sunucular için jump host gerekliliği hiç kayıtlı değil. Multiplexing ise çok sayıda komut çalıştıran deploy pipeline'larında SSH handshake maliyetini ciddi azaltır (her komut için yeni TCP bağlantısı kurmak yerine tek oturum). Go'da `golang.org/x/crypto/ssh` ile multiplexing implementasyonu veya `ssh -J` jump host passthrough'u `os/exec` ile doğrudan kullanılabilir. `.tengiz.yaml`'da `servers.jump_host: bastion.example.com` alanı eklenir.
+- **Detected:** 2026-08-04
+
+## PR Comment Deployment Status Updates
+- **Source:** Coolify
+- **Description:** `ApplicationPullRequestUpdateJob` preview deployment durumunu (queued/in_progress/finished/error) doğrudan PR thread'ine yorum olarak gönderir. `issue_comment_id` ile yorum güncellenir (her deploy için yeni yorum açılmaz, mevcut yorum update edilir). `pull_request_html_url`, `pull_request_id`, `fqdn` gibi preview metadata'sı yorumda kullanılır.
+- **Why add to Tengiz:** Mevcut "Commit Status Reporting" (#38) commit status API'ye yazar (PR timeline'da yeşil/red onay işareti). PR yorumu farklıdır: gözden geçirenler PR thread'inde detaylı deploy bilgisi (preview URL, başarı/başarısızlık, build süresi) görür. `tengiz preview deploy <app> <pr>` komutu tamamlandığında PR'a otomatik yorum bırakır. GitHub API'ye `issues/{n}/comments` POST + PATCH ile yorum create/update yapılır. Preview deployments (#2) özelliğinin developer UX'ini tamamlar.
+- **Detected:** 2026-08-04
+
+## Container Status Aggregator (Multi-Container Health State Machine)
+- **Source:** Coolify
+- **Description:** `ContainerStatusAggregator` çok-container'lı bir kaynağın (app + accessory'ler, compose stack'leri) container health'lerini öncelik tabanlı state machine ile tek bir duruma indirger: `running:healthy`, `degraded:unhealthy`, `stopped` vb. `ComplexStatusCheck` per-container durumları toplar, `ServiceChecked` event'i periyodik sağlık kontrolü sonucunu yayınlar. `GetContainersStatus` `docker inspect` ile isim→durum haritası çıkarır.
+- **Why add to Tengiz:** Compose stack (#181) ve accessory servisler (#45) yol haritasındayken, "stack sağlıklı mı?" sorusuna tek cevap vermek gerekir. `tengiz ps` bir container'ın durumunu gösterir; bir web + worker + db stack'inde bir container çökerse aggregate durum `degraded` olmalıdır. `tengiz stack status <name>` komutu öncelik tabanlı aggregate durumu raporlar (db çökerse critical, sadece worker çökerse degraded). Bu state machine aynı zamanda health check + auto-restart (#4) ve alert system (#197) ile beslenir.
+- **Detected:** 2026-08-04
