@@ -33,6 +33,10 @@ func (m *mockRuntime) RemoveImage(ctx context.Context, imageTag string) error { 
 func (m *mockRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
+func (m *mockRuntime) Cleanup(ctx context.Context, opts runtime.HousekeepingOptions) (*runtime.HousekeepingResult, error) {
+	return &runtime.HousekeepingResult{}, nil
+}
+
 func TestResetExtendsTimer(t *testing.T) {
 	mock := &mockRuntime{}
 	mgr := New(mock, 50*time.Millisecond)

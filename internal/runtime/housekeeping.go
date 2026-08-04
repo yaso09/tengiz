@@ -1,6 +1,9 @@
 package runtime
 
 import (
+	"context"
+	"fmt"
+	"os/exec"
 	"strings"
 )
 
@@ -50,4 +53,27 @@ func parseReclaimedSpace(output string) string {
 		}
 	}
 	return ""
+}
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts HousekeepingOptions) (*HousekeepingResult, error) {
+	if opts.DryRun {
+		cmd := exec.CommandContext(ctx, "docker", "system", "df")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("docker system df: %w\n%s", err, string(out))
+		}
+		return &HousekeepingResult{Output: string(out)}, nil
+	}
+
+	args := buildPruneArgs(opts)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker system prune: %w\n%s", err, string(out))
+	}
+	output := string(out)
+	return &HousekeepingResult{
+		Output:     output,
+		SpaceFreed: parseReclaimedSpace(output),
+	}, nil
 }
