@@ -1910,3 +1910,71 @@ Aşağıdaki özellikler Dokku kaynak kodu analizinden tespit edilmiştir ve mev
 - **Description:** Deploy requests accept an `isDetachedBuild` flag (`AppDataHandler.ts`, `AppDefinitionRouter.ts`). With it the API returns immediately with the deployment queued; the build runs in the background and the app definition exposes `isAppBuilding` / `isBuildFailed` status plus retrievable build logs (`getBuildStatus`). Without it, the request blocks until the build completes. Combined with the build queue (#763-detection) this gives reliable non-blocking deploys from CI.
 - **Why add to Tengiz:** Tengiz's `deploy` command blocks until the build finishes — fine for a terminal, but CI scripts and webhook handlers (implemented) want to fire a deploy and poll status. `tengiz deploy --async` returns a build token immediately; `tengiz status <app>` / `tengiz build-logs <app>` (already implemented) close the loop. This is the request/response contract that makes the existing async build infrastructure usable programmatically, and it is a prerequisite for the Build Pipeline (#129) and Build-to-Deploy Trigger Chain (#130). Low effort — a flag threaded through the deploy handler plus the existing status/log endpoints.
 - **Detected:** 2026-08-04
+
+# Kamal Detections (2026-08-04)
+
+## Dirty Working Tree Detection & Uncommitted Image Tag
+- **Source:** Kamal
+- **Description:** Before building, Kamal runs `git status --porcelain` to detect uncommitted/untracked changes (`cli/build.rb`, `cli/main.rb`). If the working tree is dirty it prints a warning listing the changed files (skippable with `--skip-dirty-check`), and dirty builds get tagged `_uncommitted_<random-suffix>` instead of a clean short SHA — so every image still maps to a source state, and "clean" tags can't be produced from a dirty tree. `kamal build dev` uses this dirty tag to push a local-only image for iterative development.
+- **Why add to Tengiz:** Prevents the classic trap where a deploy appears to match commit X but was built from a dirty tree with forgotten changes. Combined with existing image tagging, the `_uncommitted_<suffix>` suffix keeps the version↔code mapping honest and makes accidental dirty deploys visible in `tengiz ps --versions`. Also surfaces untracked `.env`/`node_modules` that are about to ship inside the image. Low effort: `git status --porcelain` + tag suffix in `builder.go`.
+- **Detected:** 2026-08-04
+
+## Build Context File Audit (Included-Files Detection)
+- **Source:** Kamal
+- **Description:** `Kamal::Docker.included_files` (`docker.rb`) determines exactly which files Docker actually receives in the build context. It builds a temporary busybox image with a `COPY . /` + `RUN find / -type f` to enumerate the real context files (dockerignore-aware), then cross-references that list against `git status` to flag which uncommitted/untracked files will end up inside the image — catching stray `.env`, secrets, and build artifacts before they ship.
+- **Why add to Tengiz:** Build context leaks are a real security issue (committed `.env`, `credentials.json` baked into an image layer). Today Tengiz generates a Dockerfile but never inspects what context the build sends. The busybox-COPY enumeration is a small, self-contained technique (one short-lived build) that powers both a pre-build secret scanner and a `tengiz build context` diagnostic showing exactly what will be baked into the image.
+- **Detected:** 2026-08-04
+
+## Reproducible Clean-Clone Builds (Git Clean Builds)
+- **Source:** Kamal
+- **Description:** For remote builds Kamal clones the repo fresh on the build machine (`commands/builder/clone.rb`): `git clone --recurse-submodules`, then `git reset --hard <sha>` + `git clean -fdx` to guarantee the checkout matches the tagged commit byte-for-byte, plus `git gc --auto` before shipping the source archive. Local dirtiness, ignored files, and stale build output cannot leak into the image.
+- **Why add to Tengiz:** Makes image builds reproducible and cacheable — the same commit always produces the same context, which also makes Docker layer caching much more effective across deploys (a dirty tree otherwise busts the cache with a different context hash). For Tengiz's future remote builder (FUTURES #1420) this is the exact contract to implement; for local builds it can warn when a dirty tree will cause cache misses. Distinct from Dokku's `repo:gc` (disk cleanup) — this is build reproducibility.
+- **Detected:** 2026-08-04
+
+## Env Tags (Per-Host-Tag Environment Groups)
+- **Source:** Kamal
+- **Description:** Servers can declare tags (`host: [beta]`) and `env.tags.beta: { KEY: value }` defines env vars applied only to hosts carrying that tag (`configuration/env/tag.rb`, `configuration/role.rb`). One app runs with different configuration on tagged server groups (feature flags on `beta` hosts, different traffic weight on `canary` hosts) while sharing the rest of the config.
+- **Why add to Tengiz:** Tengiz's multi-server/role story currently applies one env set to all containers. Env tags give per-host-group env injection without forking apps — useful for canary groups, blue/green hosts, or per-region overrides. Fits `.tengiz.yaml` cleanly (`env.tags.<tagname>`), and since Tengiz already labels containers (`tengiz-env`), tags compose naturally. Low-medium effort.
+- **Detected:** 2026-08-04
+
+## SSH Reverse Port Forwarding for Local Registry Distribution
+- **Source:** Kamal
+- **Description:** When using a local registry to distribute images to remote builders/hosts, Kamal opens SSH reverse port-forwarding tunnels (`ssh -R 5000:127.0.0.1:5000`, `cli/build/port_forwarding.rb`) so remote machines pull from the operator's local registry via `127.0.0.1:5000`. No public exposure of the registry — the tunnel rides the existing SSH connection and is torn down when the build finishes.
+- **Why add to Tengiz:** A self-hosted registry behind SSH avoids standing up a public (or TLS+auth) registry just to feed build servers. It extends the recorded Self-Hosted Docker Registry feature with a zero-exposure distribution channel for multi-server builds, and it is the missing transport for the recorded Remote Docker Builder (#1420). Maps directly to `ssh -R` against the same SSH config Tengiz will already use for remote deploys.
+- **Detected:** 2026-08-04
+
+## Dependency-Ordered Boot with Healthcheck Barrier
+- **Source:** Kamal
+- **Description:** Kamal's BootBarrier (`cli/app/boot.rb`, `cli/healthcheck/barrier.rb`) coordinates multi-container boot: the primary (web) container must become healthy before any other role (worker/job) containers start; if the primary fails its healthcheck, the other roles abort boot and their logs are collected. A gatekeeper/queuer pair implements the barrier; `boot.limit`, `boot.wait`, and `boot.parallel_roles` control how many containers boot concurrently.
+- **Why add to Tengiz:** Tengiz currently starts all containers independently, so a worker can boot against a not-yet-ready web container (or start uselessly when the web deploy failed). A barrier gives dependency-ordered startup for role-based apps and clean failure semantics (don't start workers for a dead deploy). Distinct from Rolling Boot (FUTURES #585, host limits) — this is about start ordering and abort-on-failure. Medium effort, valuable once multi-container/role support lands.
+- **Detected:** 2026-08-04
+
+## Accessory Config File Templating & Permissioned Upload
+- **Source:** Kamal
+- **Description:** Accessories (sidecar containers) can ship config files/directories to hosts via `config/` entries (`commands/accessory.rb`): each is ERB-templated locally, uploaded to a path, and chmod/chown'd via `mode:` and `owner:` options (e.g. a cron config with `mode: 0644`). Useful for databases, cron containers, and log shippers that need a config file inside the container.
+- **Why add to Tengiz:** Sidecar support (FUTURES #45) is recorded generically but lacks the file-provisioning piece. Templated, permissioned config upload is what makes sidecars practical (a Postgres needs `postgresql.conf`; a log shipper needs its config). Tengiz already has templating (Dockerfile generation) — reuse it to render accessory configs and upload them with correct modes. Low-medium effort.
+- **Detected:** 2026-08-04
+
+## Build Provenance & SBOM Metadata
+- **Source:** Kamal
+- **Description:** Kamal's builder exposes `provenance` (build provenance attestation, default `mode: min`) and `sbom` (Software Bill of Materials generation) options (`configuration/builder.rb`, `commands/builder/base.rb`) passed through to Docker BuildKit via buildx. These produce SLSA-style attestations and an SBOM listing every package in the image without changing the build itself.
+- **Why add to Tengiz:** Supply-chain transparency is increasingly a compliance requirement. `tengiz build --provenance --sbom` (or `build.provenance`/`build.sbom` in `.tengiz.yaml`) gives users SBOM + provenance attestations for every deploy for free via BuildKit — no extra tooling. Low effort (flags to `docker build`), high trust value for production users.
+- **Detected:** 2026-08-04
+
+## Managed Cloud Buildx Builder (Docker Cloud Driver)
+- **Source:** Kamal
+- **Description:** `builder.driver: cloud` uses Docker's managed cloud builders (`commands/builder/cloud.rb`): `docker buildx create --driver cloud <docker-org>/builder` provides a cloud-hosted build pool with no local infrastructure. Kamal configures local/remote/hybrid/cloud builders uniformly, so switching build capacity is a config change.
+- **Why add to Tengiz:** Complements the recorded Remote Docker Builder (#1420) with a zero-ops option: no SSH setup, no build server to maintain, just an org credential. Useful for users who want heavy builds off-box without operating a builder. Implementation is one `docker buildx create --driver cloud` call in `builder.go` behind the existing builder abstraction.
+- **Detected:** 2026-08-04
+
+## SSH Private Keys from Secrets Manager (key_data)
+- **Source:** Kamal
+- **Description:** Kamal's SSH configuration resolves `ssh.key_data` (the private key) from the secrets manager at runtime — e.g. `key_data: <%= Kamal::Secrets.fetch("KAMAL_SSH_PRIVATE_KEY") %>` — instead of requiring a key file on disk. Deploy credentials stay out of the filesystem and the vault is the single source of truth.
+- **Why add to Tengiz:** Tengiz already has a secrets manager with providers (local/vault/doppler). Allowing `ssh.private_key` to resolve from `[[secret.NAME]]` means CI agents and deploy servers need no SSH key files mounted — the deploy authenticates from the configured secrets provider. Ties the remote-deploy future to the existing secrets abstraction. Low effort.
+- **Detected:** 2026-08-04
+
+## Secret File Inline Command Substitution (Vault Fetch in dotenv)
+- **Source:** Kamal
+- **Description:** Kamal's secrets dotenv files support inline command substitution (`secrets/dotenv/inline_command_substitution.rb`): a line like `DB_PASSWORD=$(kamal secrets fetch DB_PASSWORD ...)` is evaluated at deploy time, so external secrets managers are queried live rather than storing plaintext values. Controlled via `kamal secrets print`/`.kamal/secrets` evaluation at config load.
+- **Why add to Tengiz:** Tengiz's `ResolveInterpolations` handles `[[secret.NAME]]` against the local store but has no live-fetch mechanism. Inline `$(...)` substitution lets `.tengiz.yaml` reference vault/doppler values fetched at deploy time — the missing bridge between config files and the external providers Tengiz already supports. Low-medium effort; extends the existing interpolation code path.
+- **Detected:** 2026-08-04
