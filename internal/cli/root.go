@@ -63,6 +63,7 @@ func init() {
 	volumeCmd.AddCommand(volumeListCmd)
 	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(rollbackCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
@@ -86,6 +87,9 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().BoolP("all", "a", false, "remove all unused images, not just dangling ones")
+	cleanupCmd.Flags().Bool("volumes", false, "remove unused volumes (contain data — use with care)")
+	cleanupCmd.Flags().Bool("dry-run", false, "show disk usage and what would be removed without deleting anything")
 }
 
 var rootCmd = &cobra.Command{
