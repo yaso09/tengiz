@@ -42,6 +42,9 @@ func init() {
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(rmCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("all", false, "prune all unused images (not just dangling) and build cache")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(devCmd)
 	configCmd.AddCommand(configSetCmd)
@@ -659,6 +662,45 @@ var rmCmd = &cobra.Command{
 		fmt.Printf("[tengiz] removed: %s\n", appName)
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Prune unused Docker resources (containers, images, networks, volumes)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		all, _ := cmd.Flags().GetBool("all")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return err
+		}
+		report, err := rt.Prune(cmd.Context(), runtime.CleanupOptions{
+			All:            all,
+			IncludeVolumes: volumes,
+		})
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+		fmt.Print(buildCleanupOutput(report))
+		return nil
+	},
+}
+
+// buildCleanupOutput formats a CleanupReport for the cleanup command.
+func buildCleanupOutput(r runtime.CleanupReport) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[tengiz] cleanup complete: %d containers, %d images, %d networks removed\n",
+		r.ContainersRemoved, r.ImagesRemoved, r.NetworksRemoved)
+	if r.BuildCacheRemoved > 0 {
+		fmt.Fprintf(&b, "[tengiz]   build cache entries removed: %d\n", r.BuildCacheRemoved)
+	}
+	if r.VolumesRemoved > 0 {
+		fmt.Fprintf(&b, "[tengiz]   volumes removed: %d\n", r.VolumesRemoved)
+	}
+	if r.SpaceReclaimed != "" {
+		fmt.Fprintf(&b, "[tengiz]   space reclaimed: %s\n", r.SpaceReclaimed)
+	}
+	return b.String()
 }
 
 var logsCmd = &cobra.Command{
