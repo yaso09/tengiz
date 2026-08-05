@@ -3,6 +3,7 @@ package cleanup
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -152,5 +153,115 @@ func TestCleanPropagatesError(t *testing.T) {
 	h := &dockerHousekeeper{run: run}
 	if _, err := h.Clean(context.Background(), Options{Containers: true}); err == nil {
 		t.Fatal("expected error from prune failure")
+	}
+}
+func TestCleanRunsPruneCommandsInOrder(t *testing.T) {
+	var calls [][]string
+	run := func(ctx context.Context, name string, args ...string) (string, error) {
+		calls = append(calls, append([]string{name}, args...))
+		switch args[0] {
+		case "container":
+			return "Deleted Containers:\nabc123\nTotal reclaimed space: 27 B\n", nil
+		case "image":
+			return "Deleted Images:\nsha:1\nTotal reclaimed space: 100 MB\n", nil
+		case "volume":
+			return "Deleted Volumes:\nvol1\nTotal reclaimed space: 5 B\n", nil
+		case "network":
+			return "Deleted Networks:\nnet1\nTotal reclaimed space: 0 B\n", nil
+		case "builder":
+			return "Total: 200 MB\n", nil
+		default:
+			return "", nil
+		}
+	}
+	h := &dockerHousekeeper{run: run}
+	summary, err := h.Clean(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("Clean() error = %v", err)
+	}
+	if len(calls) != 5 {
+		t.Fatalf("expected 5 prune commands, got %d: %v", len(calls), calls)
+	}
+	wantFirst := "docker container prune -f --filter label!=tengiz-app"
+	if got := strings.Join(calls[0], " "); got != wantFirst {
+		t.Errorf("first command = %q, want %q", got, wantFirst)
+	}
+	wantImages := "docker image prune -f"
+	if got := strings.Join(calls[1], " "); got != wantImages {
+		t.Errorf("images command = %q, want %q", got, wantImages)
+	}
+	if len(summary.Containers) != 1 || summary.Containers[0] != "abc123" {
+		t.Errorf("summary.Containers = %v", summary.Containers)
+	}
+	if len(summary.Images) != 1 || summary.Images[0] != "sha:1" {
+		t.Errorf("summary.Images = %v", summary.Images)
+	}
+	if summary.BuildCache != "" {
+		t.Errorf("summary.BuildCache = %q, want empty (builder Total line is captured as reclaimed space)", summary.BuildCache)
+	}
+	if !strings.Contains(summary.Reclaimed, "27 B") || !strings.Contains(summary.Reclaimed, "200 MB") {
+		t.Errorf("summary.Reclaimed = %q, want it to include 27 B and 200 MB", summary.Reclaimed)
+	}
+	if strings.Contains(summary.Reclaimed, "0 B") {
+		t.Errorf("summary.Reclaimed = %q, must not include 0 B", summary.Reclaimed)
+	}
+}
+
+func TestCleanUnusedImagesUsesAggressiveFilter(t *testing.T) {
+	var calls [][]string
+	run := func(ctx context.Context, name string, args ...string) (string, error) {
+		calls = append(calls, append([]string{name}, args...))
+		return "", nil
+	}
+	h := &dockerHousekeeper{run: run}
+	if _, err := h.Clean(context.Background(), Options{Images: true, Unused: true}); err != nil {
+		t.Fatal(err)
+	}
+	want := "docker image prune -a -f --filter label!=tengiz-app"
+	if got := strings.Join(calls[0], " "); got != want {
+		t.Errorf("unused images command = %q, want %q", got, want)
+	}
+	if len(calls) != 1 {
+		t.Errorf("expected only 1 command, got %d: %v", len(calls), calls)
+	}
+}
+
+func TestCleanDryRunListsInsteadOfPruning(t *testing.T) {
+	var calls [][]string
+	run := func(ctx context.Context, name string, args ...string) (string, error) {
+		calls = append(calls, append([]string{name}, args...))
+		switch args[0] {
+		case "ps":
+			return "abc123\tmyapp\ttengiz-apps/myapp:prod-1\n", nil
+		case "images":
+			return "sha:1\t<none>:<none>\t5 MB\n", nil
+		case "volume":
+			return "vol1\n", nil
+		case "network":
+			return "net1\n", nil
+		case "builder":
+			return "ID\tRECLAIMABLE\nabc\t123 MB\n", nil
+		default:
+			return "", nil
+		}
+	}
+	h := &dockerHousekeeper{run: run}
+	summary, err := h.Clean(context.Background(), Options{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range calls {
+		if c[1] == "prune" {
+			t.Errorf("dry-run must not call prune, got %v", c)
+		}
+	}
+	if len(summary.Containers) != 1 || summary.Containers[0] != "abc123\tmyapp\ttengiz-apps/myapp:prod-1" {
+		t.Errorf("dry-run containers = %v", summary.Containers)
+	}
+	if len(calls) != 5 {
+		t.Errorf("expected 5 list commands, got %d: %v", len(calls), calls)
+	}
+	if summary.Reclaimed != "" {
+		t.Errorf("dry-run should not report reclaimed space, got %q", summary.Reclaimed)
 	}
 }
