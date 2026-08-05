@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/yaso09/tengiz/internal/cleanup"
 	"github.com/yaso09/tengiz/internal/config"
 	"github.com/yaso09/tengiz/internal/runtime"
 	"github.com/yaso09/tengiz/internal/types"
@@ -374,5 +375,71 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
 		}
+	}
+}
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not found: %v", err)
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCommandFlags(t *testing.T) {
+	expected := []string{"containers", "images", "unused", "volumes", "networks", "build-cache", "all", "dry-run"}
+	for _, flag := range expected {
+		if cleanupCmd.Flags().Lookup(flag) == nil {
+			t.Errorf("cleanup command missing --%s flag", flag)
+		}
+	}
+}
+
+func resetCleanupFlags(t *testing.T) {
+	t.Helper()
+	for _, flag := range []string{"containers", "images", "unused", "volumes", "networks", "build-cache", "all", "dry-run"} {
+		if err := cleanupCmd.Flags().Set(flag, "false"); err != nil {
+			t.Fatalf("reset --%s: %v", flag, err)
+		}
+	}
+}
+
+func TestCleanupOptionsFromFlags(t *testing.T) {
+	resetCleanupFlags(t)
+	cleanupCmd.ParseFlags([]string{"--containers", "--dry-run"})
+	opts := cleanupOptionsFromFlags(cleanupCmd)
+	if !opts.Containers {
+		t.Error("containers = false, want true")
+	}
+	if !opts.DryRun {
+		t.Error("dry-run = false, want true")
+	}
+	if opts.Images || opts.Volumes || opts.Networks || opts.BuildCache {
+		t.Error("unset categories should be false")
+	}
+}
+
+func TestCleanupNoFlagsResolvesToAll(t *testing.T) {
+	resetCleanupFlags(t)
+	cleanupCmd.ParseFlags([]string{})
+	opts := cleanupOptionsFromFlags(cleanupCmd)
+	resolved := cleanup.Resolve(opts)
+	if !resolved.Containers || !resolved.Images || !resolved.Volumes || !resolved.Networks || !resolved.BuildCache {
+		t.Error("no flags should resolve to cleaning all categories")
+	}
+}
+
+func TestCleanupUnusedFlagRequiresImagesResolution(t *testing.T) {
+	resetCleanupFlags(t)
+	cleanupCmd.ParseFlags([]string{"--unused"})
+	opts := cleanupOptionsFromFlags(cleanupCmd)
+	resolved := cleanup.Resolve(opts)
+	if !resolved.Images {
+		t.Error("--unused alone should still enable image pruning")
+	}
+	if !resolved.Unused {
+		t.Error("Unused flag was dropped")
 	}
 }

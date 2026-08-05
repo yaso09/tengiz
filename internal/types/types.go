@@ -2,6 +2,11 @@ package types
 
 import "time"
 
+const (
+	LabelApp = "tengiz-app"
+	LabelEnv = "tengiz-env"
+)
+
 type NotificationEventType string
 
 const (

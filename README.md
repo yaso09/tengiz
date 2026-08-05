@@ -19,6 +19,7 @@
 - **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
+- **Docker housekeeping** — `tengiz cleanup` prunes unused containers, images, volumes, networks, and build cache while always protecting Tengiz-managed resources.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
 
@@ -234,6 +235,31 @@ Rollback to the previous deployment. The previous active container is started on
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name (required) |
+
+### `tengiz cleanup`
+
+Remove unused Docker resources to reclaim disk space.
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Prune stopped containers not managed by Tengiz |
+| `--images` | Prune dangling images |
+| `--unused` | Also remove unused tagged images (with `--images` or `--all`) |
+| `--volumes` | Prune unused volumes |
+| `--networks` | Prune unused networks |
+| `--build-cache` | Prune Docker build cache |
+| `--all` | Prune all resource types (default when no category flag is given) |
+| `--dry-run` | Show what would be removed without removing |
+
+Tengiz-managed resources are always protected: containers, volumes, and networks labeled `tengiz-app=...` are never pruned, and all Tengiz-built images carry the `tengiz-app` label and are preserved even when `--unused` is used.
+
+Examples:
+```
+tengiz cleanup                # prune all safe categories
+tengiz cleanup --containers   # stopped containers only
+tengiz cleanup --all --unused # aggressive: also unused tagged images
+tengiz cleanup --dry-run      # show what would be removed
+```
 
 ### `tengiz domain`
 

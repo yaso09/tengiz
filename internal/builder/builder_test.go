@@ -256,3 +256,38 @@ func searchString(s, substr string) bool {
 	}
 	return false
 }
+
+func TestDockerBuildArgsIncludeLabels(t *testing.T) {
+	b := New(t.TempDir())
+	b.SetBuildSecrets(map[string]string{"NPM_TOKEN": "secret-token"})
+	args := b.dockerBuildArgs("myapp", "staging", "tengiz-apps/myapp:staging-123", "/tmp/app")
+	got := strings.Join(args, " ")
+	for _, want := range []string{
+		"--label", "tengiz-app=myapp",
+		"--label", "tengiz-env=staging",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dockerBuildArgs() missing %q in %q", want, got)
+		}
+	}
+	if !strings.Contains(got, "--secret") {
+		t.Errorf("dockerBuildArgs() should keep build secrets: %q", got)
+	}
+}
+
+func TestNixpacksBuildArgsIncludeLabels(t *testing.T) {
+	b := New(t.TempDir())
+	b.SetNixpacksConfig(&types.NixpacksConfig{Packages: []string{"curl"}})
+	args := b.nixpacksBuildArgs("myapp", "production", "tengiz-apps/myapp:production-456", "/tmp/app")
+	got := strings.Join(args, " ")
+	for _, want := range []string{
+		"--label", "tengiz-app=myapp",
+		"--label", "tengiz-env=production",
+		"--name", "tengiz-apps/myapp:production-456",
+		"--pkgs", "curl",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("nixpacksBuildArgs() missing %q in %q", want, got)
+		}
+	}
+}

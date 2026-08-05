@@ -116,3 +116,12 @@ func TestNixpacksConfigFields(t *testing.T) {
 		t.Error("packages not set correctly")
 	}
 }
+
+func TestLabelConstants(t *testing.T) {
+	if LabelApp != "tengiz-app" {
+		t.Errorf("LabelApp = %q, want %q", LabelApp, "tengiz-app")
+	}
+	if LabelEnv != "tengiz-env" {
+		t.Errorf("LabelEnv = %q, want %q", LabelEnv, "tengiz-env")
+	}
+}
