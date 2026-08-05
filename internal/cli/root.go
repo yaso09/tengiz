@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/yaso09/tengiz/internal/builder"
+	"github.com/yaso09/tengiz/internal/cleanup"
 	"github.com/yaso09/tengiz/internal/config"
 	"github.com/yaso09/tengiz/internal/git"
 	"github.com/yaso09/tengiz/internal/gitdeploy"
@@ -64,6 +65,7 @@ func init() {
 	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
@@ -83,6 +85,14 @@ func init() {
 	logsCmd.Flags().String("since", "", "show logs since timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
 	logsCmd.Flags().String("until", "", "show logs before timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
 	logsCmd.Flags().String("grep", "", "filter logs with a case-sensitive pattern (client-side)")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers not managed by Tengiz")
+	cleanupCmd.Flags().Bool("images", false, "prune dangling images")
+	cleanupCmd.Flags().Bool("unused", false, "also remove unused tagged images (with --images or --all)")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune Docker build cache")
+	cleanupCmd.Flags().Bool("all", false, "prune all resource types (default when no category flag is given)")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without removing")
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
@@ -780,6 +790,85 @@ var healthCmd = &cobra.Command{
 		fmt.Printf("[tengiz] %s is healthy\n", appName)
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Clean up unused Docker resources",
+	Long: `Removes unused Docker containers, images, volumes, networks, and build
+cache to reclaim disk space.
+
+Tengiz-managed resources are always protected:
+  - containers, volumes, and networks labeled "tengiz-app=..."
+  - images carrying the "tengiz-app" label (all Tengiz-built images)
+
+When no category flag is given, all categories are cleaned (dangling images
+only). Use --unused to also remove unused tagged images.
+
+Examples:
+  tengiz cleanup                # prune all safe categories
+  tengiz cleanup --containers   # stopped containers only
+  tengiz cleanup --all --unused # aggressive: also unused tagged images
+  tengiz cleanup --dry-run      # show what would be removed`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		hk := cleanup.NewDocker()
+		summary, err := hk.Clean(cmd.Context(), cleanupOptionsFromFlags(cmd))
+		if err != nil {
+			return err
+		}
+		printCleanupSummary(summary)
+		return nil
+	},
+}
+
+func cleanupOptionsFromFlags(cmd *cobra.Command) cleanup.Options {
+	containers, _ := cmd.Flags().GetBool("containers")
+	images, _ := cmd.Flags().GetBool("images")
+	unused, _ := cmd.Flags().GetBool("unused")
+	volumes, _ := cmd.Flags().GetBool("volumes")
+	networks, _ := cmd.Flags().GetBool("networks")
+	buildCache, _ := cmd.Flags().GetBool("build-cache")
+	all, _ := cmd.Flags().GetBool("all")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	return cleanup.Options{
+		Containers: containers,
+		Images:     images,
+		Unused:     unused,
+		Volumes:    volumes,
+		Networks:   networks,
+		BuildCache: buildCache,
+		All:        all,
+		DryRun:     dryRun,
+	}
+}
+
+func printCleanupSummary(s *cleanup.Summary) {
+	if s == nil {
+		fmt.Println("[tengiz] cleanup complete")
+		return
+	}
+	printGroup := func(label string, items []string) {
+		if len(items) == 0 {
+			return
+		}
+		fmt.Printf("[tengiz] %s (%d):\n", label, len(items))
+		for _, it := range items {
+			fmt.Printf("  %s\n", it)
+		}
+	}
+	printGroup("removed containers", s.Containers)
+	printGroup("removed images", s.Images)
+	printGroup("removed volumes", s.Volumes)
+	printGroup("removed networks", s.Networks)
+	if s.BuildCache != "" {
+		fmt.Printf("[tengiz] build cache: %s\n", s.BuildCache)
+	}
+	if s.Reclaimed != "" {
+		fmt.Printf("[tengiz] total reclaimed space: %s\n", s.Reclaimed)
+	} else {
+		fmt.Println("[tengiz] cleanup complete")
+	}
 }
 
 var domainCmd = &cobra.Command{
