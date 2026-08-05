@@ -149,6 +149,20 @@ List all deployed applications and their status.
 
 Output: `NAME`, `STATE` (running/stopped), `PORT`, `ENVIRONMENT`, `HEALTH`.
 
+### `tengiz cleanup`
+
+Remove unused Docker resources to reclaim disk space: orphaned containers, dangling images, unused volumes and networks.
+
+Tengiz-managed containers are protected by the `tengiz-app` label and are never removed, even when stopped (scale-to-zero keeps containers stopped between requests). Only untagged (dangling) images are removed, so rollback images are always kept.
+
+```
+tengiz cleanup                     # prune all categories
+tengiz cleanup --dry-run           # preview what would be removed
+tengiz cleanup --images --volumes  # prune only images and volumes
+```
+
+Flags: `--dry-run`, `--containers`, `--images`, `--volumes`, `--networks`.
+
 ### `tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] <app>`
 
 Show application logs.
