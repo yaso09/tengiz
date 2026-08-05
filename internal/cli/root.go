@@ -19,6 +19,7 @@ import (
 	"github.com/yaso09/tengiz/internal/git"
 	"github.com/yaso09/tengiz/internal/gitdeploy"
 	"github.com/yaso09/tengiz/internal/health"
+	"github.com/yaso09/tengiz/internal/housekeeping"
 	"github.com/yaso09/tengiz/internal/notify"
 	"github.com/yaso09/tengiz/internal/idle"
 	"github.com/yaso09/tengiz/internal/preview"
@@ -38,6 +39,7 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(deployCmd)
 	rootCmd.AddCommand(proxyCmd)
+	proxyCmd.Flags().Duration("cleanup-interval", 0, "run docker housekeeping cleanup at this interval (e.g. 1h); 0 disables")
 	rootCmd.AddCommand(psCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(startCmd)
@@ -512,6 +514,15 @@ var proxyCmd = &cobra.Command{
 
 		healthChecker := health.NewWithEnv(rt, store, env)
 		defer healthChecker.StopAll()
+
+		cleanupInterval, _ := cmd.Flags().GetDuration("cleanup-interval")
+		var hk *housekeeping.Manager
+		if cleanupInterval > 0 {
+			hk = housekeeping.New(rt, cleanupInterval, runtime.CleanupOptions{})
+			hk.Start()
+			defer hk.Stop()
+			fmt.Printf("[tengiz] housekeeping: pruning every %s\n", cleanupInterval)
+		}
 
 		apps, err := store.ListApps()
 		if err == nil {

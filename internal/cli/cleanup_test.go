@@ -35,3 +35,10 @@ func TestCleanupCmdRunEHelper(t *testing.T) {
 		}
 	}
 }
+
+func TestProxyCmdCleanupIntervalFlag(t *testing.T) {
+	flag := proxyCmd.Flags().Lookup("cleanup-interval")
+	if flag == nil {
+		t.Fatal("proxy command missing --cleanup-interval flag")
+	}
+}
