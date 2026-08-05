@@ -138,6 +138,7 @@ Start the reverse proxy.
 |------|-------------|
 | `-a`, `--app` | Route all requests to this app (bypasses hostname routing) |
 | `-p`, `--port` | Listen port (default: 8080) |
+| `--cleanup-interval` | Run Docker housekeeping cleanup every interval (e.g. `1h`); default `0` = disabled |
 
 Restores previously deployed apps from `~/.tengiz/apps.json` and registers their routes. Routes by hostname: `http://<app-name>.tengiz.local:8080` → container port. Use `-a <app>` to route all traffic (including `localhost:8080`) to a single app. If a container is stopped, performs a cold start on the first request. Resets the idle timer on each request (default 5m timeout). Press Ctrl+C to stop.
 
@@ -226,6 +227,17 @@ Remove an application completely — stops the container, deletes it, and cleans
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name (required) |
+
+### `tengiz cleanup`
+
+Prune unused Docker resources (stopped non-Tengiz containers, networks, and images) to reclaim disk.
+
+Tengiz-managed containers (labeled `tengiz-app`) are always protected.
+
+| Flag | Description |
+|------|-------------|
+| `--all` | Also prune all unused images (not just dangling) and build cache |
+| `--volumes` | Also prune unused volumes |
 
 ### `tengiz rollback <app>`
 
