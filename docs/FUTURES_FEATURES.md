@@ -1580,3 +1580,58 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Each datastore collection can be configured with a memory type: `Heap` (fast, volatile — data lost on canister upgrade) or `Stable` (persistent across upgrades, slightly slower). This lets developers make performance/cost trade-offs per collection: cache/session data goes in Heap for speed, user profiles go in Stable for durability. Collections default to Heap for maximum performance. The memory type affects both read/write latency and upgrade behavior — Stable collections survive platform upgrades, Heap collections are re-initialized.
 - **Why add to Tengiz:** Tengiz's planned Built-in NoSQL Datastore (#1) needs a similar performance/storage trade-off. Some data is ephemeral (sessions, cache, rate limit counters) — stored in-memory for speed and automatically reset on restart. Other data is persistent (user profiles, settings, content) — written to SQLite or disk-backed storage for durability. A `db.<collection>.memory: ephemeral | persistent` setting in `.tengiz.yaml` lets developers choose: ephemeral collections use Go maps (fast, lost on container restart), persistent collections use embedded SQLite tables (durable, survives restarts). This is particularly important for scale-to-zero — ephemeral collections naturally reset on cold start (good for session data that should force re-login), persistent collections survive scale-to-zero cycles (good for app state). Implementation: two store backends (`MemoryStore` and `SQLiteStore`) implementing the same `DocStore` interface, selected per-collection at deploy time. Low-medium effort, fits Tengiz's embedded database philosophy. Complements the NoSQL Datastore with production-grade configurability.
 - **Detected:** 2026-07-17
+
+---
+## Configuration Drift Detection (Pending Deploy Changes vs Last Deploy)
+- **Source:** Coolify
+- **Description:** Coolify computes a hashed configuration snapshot (`deploymentConfigurationSnapshot`, `configuration_hash`, `configuration_diff`) after every successful deployment. When the app's config changes (env vars, build commands, domains, storage, branch, commit SHA) without a redeploy, Coolify reports a "changed" state: the current snapshot no longer matches the last successful deployment's snapshot. The `ConfigurationDiffer` produces an itemized diff (added/changed/removed keys, sensitive values masked) after each deploy. This flags that the running container is out of sync with saved configuration.
+- **Why add to Tengiz:** `tengiz config set` updates `~/.tengiz/apps.json` but the running container doesn't reflect it until a redeploy — users don't realize they must redeploy. A per-app drifted/pending flag answers "is my running app actually using my current config?". `tengiz ps` and `tengiz app report` can show `⚠ config drift` (deploy needed). Implementation: store a config hash in each AppEntry at deploy time; on every config change, recompute and compare; surface in `tengiz ps -a`. Low effort, high operational value — prevents the classic "I changed the env but nothing happened" confusion.
+- **Detected:** 2026-08-06
+
+## Cloud Provider Server Auto-Provisioning (DigitalOcean/Hetzner/Vultr)
+- **Source:** Coolify
+- **Description:** Register a cloud provider API token (Hetzner, DigitalOcean, Vultr) and Coolify provisions a brand-new server directly through the provider API: selects region, image (Docker base), size, enables IPv6, injects an SSH key, creates the droplet/VPS, waits for a public IP, then auto-installs Docker + requirements — all from a wizard, with a multi-step status flow (`ByDigitalOcean`, `ByHetzner`, `ByVultr` Livewire components, `HetznerService`/`DigitalOceanService`/`VultrService` with rate-limit retry handling, `CloudProviderToken` model).
+- **Why add to Tengiz:** This is the fastest path from "nothing" to "a working Tengiz server". Rather than manually provisioning a VPS then running `tengiz server init`, a `tengiz server create --provider hetzner --region fra1 --size cx22` command calls the provider API and bootstraps a server that Tengiz then manages. Crucially it enables ephemeral worker/architectures and self-healing infra (provision a replacement server on failure). Implementation: `CloudProviderToken` in `~/.tengiz/providers.json`, thin Go clients for each provider's HTTP API, an SSH bootstrapping step reusing Tengiz's existing remote executor. Medium effort (HTTP + polling for IP/install readiness), huge onboarding + scale-out value.
+- **Detected:** 2026-08-06
+
+## Reusable Cloud-Init Scripts
+- **Source:** Coolify
+- **Description:** Save reusable cloud-init/user-data scripts (`CloudInitScript`, `ValidCloudInitYaml` rule) as first-class, team-scoped resources. Saved scripts are applied to new cloud-provisioned servers instead of retyping the same user-data, with an editor + live YAML validation UI. Supports labeled, reusable bootstrap configurations.
+- **Why add to Tengiz:** Server provisioning is now reproducible: a user bootstraps one server with custom packages/mounts/tuning, saves that user-data, and every future provisioned server (including via the Cloud Provider Auto-Provisioning feature) uses the same script. A `tengiz cloud-init create/ls/edit` command family storing YAML in `~/.tengiz/cloud-init/` lets teams keep server images uniform. Complements the auto-provisioning feature above. Low-medium effort.
+- **Detected:** 2026-08-06
+
+## Public Database Proxy with TLS (Expose DB via Sidecar)
+- **Source:** Coolify
+- **Description:** `StartDatabaseProxy` starts a dedicated `-proxy` sidecar container for a standalone database that exposes the internal DB port to the public through the platform proxy, with optional SSL termination (`isSSLEnabled`, secure internal ports). This lets developers access their managed database externally (e.g., from their laptop or another app) without exposing the raw DB container.
+- **Why add to Tengiz:** Tengiz's managed databases and accessory services run on a private internal network. Developers need to connect to a DB from their laptop or a local tool. A `tengiz db proxy <app> --port 5432` starts a proxy sidecar (using the core runtime manager) mapped to a public port with optional TLS. Complements managed database provisioning and accessory services. Medium effort, medium value — gives Tengiz parity with managed-DB "public tunnel" features.
+- **Detected:** 2026-08-06
+
+## Scheduled Task Skip Detection (Scheduler Log Parser)
+- **Source:** Coolify
+- **Description:** `SchedulerLogParser` reads scheduled-task log files and extracts "skip" events — tasks that were scheduled but not executed — with timestamp, skip reason, and team context. Coolify's scheduled task system records executed scheduled tasks as well, and surfaces skipped runs with reasons to operators.
+- **Why add to Tengiz:** Tengiz's future scheduled tasks / cron feature (and any cron runner) can silently skip/runtime aborts. Being able to `tengiz scheduled-task logs <app>` and detect skips with reasons surfaces reliability issues that affect app-critical scheduled jobs. Implementation: JSON-lines log that records every scheduled run with skip_reason, and a parser/`daily report`. Seeks parity with Coolify's SchedulerLogParser. Low effort, good reliability value.
+- **Detected:** 2026-08-06
+
+## Per-Server Deployment Concurrency Limit
+- **Source:** Coolify
+- **Description:** Coolify added a per-server `deployment_queue_limit` setting in its `ServerSetting` (`2025_12_04_134435_add_deployment_queue_limit_to_server_settings`), ninth-edited through the Advanced server settings. This caps the number of deployments, whose parent jobs can run concurrently against a server, protecting an overloaded host from a burst of concurrent deployments.
+- **Why add to Tengiz:** Deploying multiple apps at once on one server (via webhook events, CI, a sync) can saturate CPU/disk/have higher chance of registry rate-limiting. A per-server/lock setting `deploy.concurrency_limit: 1` and channel/semaphore would queue excess Deployables. Complements existing Deploy Lock (which is about collisions) — this is about throttling burst load. Implementation: a Go channel semaphore over the deployment goroutine per server, with a `--queue`/`--wait` option. Low-medium.
+- **Detected:** 2026-08-06
+
+## Shared (Global/Team-Scoped) Environment Variables
+- **Source:** Coolify
+- **Description:** `SharedEnvironmentVariable` model defines environment-shared env vars scoped to a team and optionally server, referenced by one or many synthetic applications/services/composes so that common values (registry creds, proxy URLs, global API keys) are set once and applied to every resource in that environment. A `server` variant adds per-server share.
+- **Why add to Tengiz:** Today `tengiz config set <app>` is per-app. Global/team-scoped shared env cuts across variable duplication — set once at the environment level, every app inherits. Coolify distinguishes shared env from the global interpolation variables (which Tengiz already has, `[[variable]]`) — shared env is inherited at resource scope rather than referenced via placeholder template. `.tengiz.yaml`'da `env_shared.environment: {KEY: value}` scoped by environment, merged before per-app vars. Complements but does not plagiarize the existing Variable Resource. Low effort.
+- **Detected:** 2026-08-06
+
+## Webhook Internal Allowlist (SSRF Protection)
+- **Source:** Coolify
+- **Description:** Coolify added an instance-level `webhook_internal_allowlist` setting (`2025_07_02_142003_add_webhook_internal_allowlist_to_instance_settings_table`) to restrict which IPs/ranges are allowed to trigger internal webhooks and app-facing endpoints, defending the platform from SSRF-style abuse (a remote attacker forcing the local server and its sockets to hit the internal webhook to redeploy).
+- **Why add to Tengiz:** Tengiz's webhook-based auto-deploy (feature) exposes a webhook endpoint on the platform. If the Tengiz host can reach its own internal webhooks from a compromised/malicious container, an attacker could redeploy or leak. An `--allowlist` for internal webhook sources. Implementation in `proxy`/`webhook` handler. Low effort, high security value. Reinforces hardened self-hosted deployment posture.
+- **Detected:** 2026-08-06
+
+## Consistent Container Naming Across Restarts
+- **Source:** Coolify
+- **Description:** `is_consistent_container_name_enabled` settings (application/compose) make the container name deterministic across recreation, instead of a randomized suffix each deployment. This stabilizes hostnames for shared-data apps and DNS/networking references that rely on the container name.
+- **Why add to Tengiz:** Tengiz disk-restarts rename containers on each deploy (usually because of a deployment ID suffix), which breaks any config referencing the old name (`--name tengiz-foo`). A `.tengiz.yaml` `container.stable_name: true` keeps the name stable across deploy/rollback, preserving firewall/hosts/DNS/adjacent-app references. Low effort — pass fixed name to `docker run`.
+- **Detected:** 2026-08-06
