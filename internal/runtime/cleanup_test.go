@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -142,5 +144,130 @@ func TestStubSatisfiesManager(t *testing.T) {
 	var m Manager = NewStub()
 	if m == nil {
 		t.Fatal("NewStub() does not implement Manager")
+	}
+}
+
+const fakeDockerScript = `#!/bin/sh
+case "$1" in
+  ps)
+    printf '%s\n' \
+      '{"ID":"1111","Name":"orphan-app","Labels":"","State":"exited"}' \
+      '{"ID":"2222","Name":"tengiz-myapp","Labels":"tengiz-app=myapp","State":"exited"}'
+    ;;
+  container)
+    printf 'Deleted Containers:\n111\n\nTotal reclaimed space: 5MB\n'
+    ;;
+  images)
+    printf 'sha256:aaa\nsha256:bbb\n'
+    ;;
+  image)
+    printf 'Deleted Images:\nuntagged: sha256:aaa\ndeleted: sha256:ccc\n\nTotal reclaimed space: 2GB\n'
+    ;;
+  volume)
+    if [ "$2" = "ls" ]; then
+      printf 'vol1\n'
+    else
+      printf 'Deleted Volumes:\nvol1\nvol2\n\nTotal reclaimed space: 1.4kB\n'
+    fi
+    ;;
+  network)
+    if [ "$2" = "ls" ]; then
+      printf 'net1\n'
+    else
+      printf 'Deleted Networks:\nnet1\n\nTotal reclaimed space: 0B\n'
+    fi
+    ;;
+  *)
+    exit 3
+    ;;
+esac
+`
+
+func setupFakeDocker(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "docker")
+	if err := os.WriteFile(script, []byte(fakeDockerScript), 0755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestDockerRuntimeCleanupLive(t *testing.T) {
+	setupFakeDocker(t)
+	r := &dockerRuntime{}
+
+	res, err := r.Cleanup(context.Background(), CleanupOptions{
+		Containers: true,
+		Images:     true,
+		Volumes:    true,
+		Networks:   true,
+	})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if res.ContainersRemoved != 1 {
+		t.Errorf("ContainersRemoved = %d, want 1", res.ContainersRemoved)
+	}
+	if res.ImagesRemoved != 1 {
+		t.Errorf("ImagesRemoved = %d, want 1", res.ImagesRemoved)
+	}
+	if res.VolumesRemoved != 2 {
+		t.Errorf("VolumesRemoved = %d, want 2", res.VolumesRemoved)
+	}
+	if res.NetworksRemoved != 1 {
+		t.Errorf("NetworksRemoved = %d, want 1", res.NetworksRemoved)
+	}
+	wantBytes := int64(5<<20) + int64(2<<30) + 1433
+	if res.ReclaimedBytes != wantBytes {
+		t.Errorf("ReclaimedBytes = %d, want %d", res.ReclaimedBytes, wantBytes)
+	}
+}
+
+func TestDockerRuntimeCleanupDryRun(t *testing.T) {
+	setupFakeDocker(t)
+	r := &dockerRuntime{}
+
+	res, err := r.Cleanup(context.Background(), CleanupOptions{
+		Containers: true,
+		Images:     true,
+		Volumes:    true,
+		Networks:   true,
+		DryRun:     true,
+	})
+	if err != nil {
+		t.Fatalf("Cleanup(dry run) error = %v", err)
+	}
+	// container dry-list parses JSON labels: the tengiz-app labeled one is skipped
+	if res.ContainersRemoved != 1 {
+		t.Errorf("ContainersRemoved = %d, want 1 (tengiz-labeled container excluded)", res.ContainersRemoved)
+	}
+	if res.ImagesRemoved != 2 {
+		t.Errorf("ImagesRemoved = %d, want 2", res.ImagesRemoved)
+	}
+	if res.VolumesRemoved != 1 {
+		t.Errorf("VolumesRemoved = %d, want 1", res.VolumesRemoved)
+	}
+	if res.NetworksRemoved != 1 {
+		t.Errorf("NetworksRemoved = %d, want 1", res.NetworksRemoved)
+	}
+	if res.ReclaimedBytes != 0 {
+		t.Errorf("ReclaimedBytes = %d, want 0 (dry run must not delete)", res.ReclaimedBytes)
+	}
+}
+
+func TestDockerRuntimeCleanupSelective(t *testing.T) {
+	setupFakeDocker(t)
+	r := &dockerRuntime{}
+
+	res, err := r.Cleanup(context.Background(), CleanupOptions{Volumes: true})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if res.VolumesRemoved != 2 {
+		t.Errorf("VolumesRemoved = %d, want 2", res.VolumesRemoved)
+	}
+	if res.ContainersRemoved != 0 || res.ImagesRemoved != 0 || res.NetworksRemoved != 0 {
+		t.Errorf("unrequested categories were touched: %+v", res)
 	}
 }

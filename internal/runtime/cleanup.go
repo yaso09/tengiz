@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os/exec"
@@ -59,8 +60,120 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	return nil
 }
 
+func runDockerOutput(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker %s: %w\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return string(out), nil
+}
+
 func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (*CleanupResult, error) {
-	return &CleanupResult{}, nil
+	res := &CleanupResult{}
+	var err error
+	if opts.Containers {
+		res.ContainersRemoved, res.ReclaimedBytes, err = r.cleanupContainers(ctx, opts.DryRun)
+		if err != nil {
+			return nil, fmt.Errorf("cleanup containers: %w", err)
+		}
+	}
+	if opts.Images {
+		var reclaimed int64
+		res.ImagesRemoved, reclaimed, err = r.cleanupImages(ctx, opts.DryRun)
+		if err != nil {
+			return nil, fmt.Errorf("cleanup images: %w", err)
+		}
+		res.ReclaimedBytes += reclaimed
+	}
+	if opts.Volumes {
+		var reclaimed int64
+		res.VolumesRemoved, reclaimed, err = r.cleanupVolumes(ctx, opts.DryRun)
+		if err != nil {
+			return nil, fmt.Errorf("cleanup volumes: %w", err)
+		}
+		res.ReclaimedBytes += reclaimed
+	}
+	if opts.Networks {
+		var reclaimed int64
+		res.NetworksRemoved, reclaimed, err = r.cleanupNetworks(ctx, opts.DryRun)
+		if err != nil {
+			return nil, fmt.Errorf("cleanup networks: %w", err)
+		}
+		res.ReclaimedBytes += reclaimed
+	}
+	return res, nil
+}
+
+func (r *dockerRuntime) cleanupContainers(ctx context.Context, dryRun bool) (int, int64, error) {
+	if dryRun {
+		out, err := runDockerOutput(ctx, containerDryListArgs()...)
+		if err != nil {
+			return 0, 0, err
+		}
+		count := 0
+		for _, line := range splitLines(out) {
+			var e dockerPS
+			if json.Unmarshal([]byte(line), &e) == nil && !strings.Contains(e.Labels, labelKey+"=") {
+				count++
+			}
+		}
+		return count, 0, nil
+	}
+	out, err := runDockerOutput(ctx, pruneContainersArgs()...)
+	if err != nil {
+		return 0, 0, err
+	}
+	n, b := parsePruneOutput(out)
+	return n, b, nil
+}
+
+func (r *dockerRuntime) cleanupImages(ctx context.Context, dryRun bool) (int, int64, error) {
+	if dryRun {
+		out, err := runDockerOutput(ctx, imageDryListArgs()...)
+		if err != nil {
+			return 0, 0, err
+		}
+		return countNonEmptyLines(out), 0, nil
+	}
+	out, err := runDockerOutput(ctx, pruneImagesArgs()...)
+	if err != nil {
+		return 0, 0, err
+	}
+	n, b := parsePruneOutput(out)
+	return n, b, nil
+}
+
+func (r *dockerRuntime) cleanupVolumes(ctx context.Context, dryRun bool) (int, int64, error) {
+	if dryRun {
+		out, err := runDockerOutput(ctx, volumeDryListArgs()...)
+		if err != nil {
+			return 0, 0, err
+		}
+		return countNonEmptyLines(out), 0, nil
+	}
+	out, err := runDockerOutput(ctx, pruneVolumesArgs()...)
+	if err != nil {
+		return 0, 0, err
+	}
+	n, b := parsePruneOutput(out)
+	return n, b, nil
+}
+
+func (r *dockerRuntime) cleanupNetworks(ctx context.Context, dryRun bool) (int, int64, error) {
+	if dryRun {
+		out, err := runDockerOutput(ctx, networkDryListArgs()...)
+		if err != nil {
+			return 0, 0, err
+		}
+		return countNonEmptyLines(out), 0, nil
+	}
+	out, err := runDockerOutput(ctx, pruneNetworksArgs()...)
+	if err != nil {
+		return 0, 0, err
+	}
+	n, b := parsePruneOutput(out)
+	return n, b, nil
 }
 
 func pruneContainersArgs() []string {
