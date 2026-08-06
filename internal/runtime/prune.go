@@ -1,7 +1,11 @@
 package runtime
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"log"
+	"os/exec"
 	"strings"
 )
 
@@ -179,4 +183,123 @@ func selectUnusedImages(images, inUse []string) []string {
 		unused = append(unused, img)
 	}
 	return unused
+}
+
+// Prune runs the cleanup for each enabled category in a stable order.
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneReport, error) {
+	var report PruneReport
+	for _, cat := range pruneOrder(opts) {
+		switch cat {
+		case "containers":
+			removed, space, err := r.runPrune(ctx, pruneContainerArgs())
+			if err != nil {
+				return report, err
+			}
+			report.ContainersRemoved = removed
+			report.SpaceReclaimed = append(report.SpaceReclaimed, categorySpace("containers", space))
+		case "images":
+			removed, space, err := r.pruneImages(ctx)
+			if err != nil {
+				return report, err
+			}
+			report.ImagesRemoved = removed
+			report.SpaceReclaimed = append(report.SpaceReclaimed, categorySpace("images", space))
+		case "volumes":
+			removed, space, err := r.runPrune(ctx, pruneVolumeArgs())
+			if err != nil {
+				return report, err
+			}
+			report.VolumesRemoved = removed
+			report.SpaceReclaimed = append(report.SpaceReclaimed, categorySpace("volumes", space))
+		case "networks":
+			removed, space, err := r.runPrune(ctx, pruneNetworkArgs())
+			if err != nil {
+				return report, err
+			}
+			report.NetworksRemoved = removed
+			report.SpaceReclaimed = append(report.SpaceReclaimed, categorySpace("networks", space))
+		}
+	}
+	return report, nil
+}
+
+func categorySpace(cat, space string) string {
+	if space == "" {
+		return cat + ": 0B"
+	}
+	return cat + ": " + space
+}
+
+// runPrune runs one docker prune command and parses its output.
+func (r *dockerRuntime) runPrune(ctx context.Context, args []string) (int, string, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, "", fmt.Errorf("docker %s: %w\n%s", args[0], err, string(out))
+	}
+	removed, space := parsePruneOutput(string(out))
+	return removed, space, nil
+}
+
+// pruneImages removes dangling images, then unused tagged images outside the
+// tengiz-apps repository that are not referenced by any container.
+func (r *dockerRuntime) pruneImages(ctx context.Context) (int, string, error) {
+	removed, space, err := r.runPrune(ctx, pruneDanglingImagesArgs())
+	if err != nil {
+		return 0, "", err
+	}
+	images, err := r.listTaggedImages(ctx)
+	if err != nil {
+		return 0, "", err
+	}
+	inUse, err := r.listInUseImages(ctx)
+	if err != nil {
+		return 0, "", err
+	}
+	for _, img := range selectUnusedImages(images, inUse) {
+		if err := r.RemoveImage(ctx, img); err != nil {
+			log.Printf("[runtime] cleanup: failed to remove image %s: %v", img, err)
+			continue
+		}
+		removed++
+	}
+	return removed, space, nil
+}
+
+func (r *dockerRuntime) listTaggedImages(ctx context.Context) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "docker", listImagesArgs()...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker images: %w\n%s", err, string(out))
+	}
+	return nonEmptyLines(string(out)), nil
+}
+
+func (r *dockerRuntime) listInUseImages(ctx context.Context) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "docker", listInUseImagesArgs()...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps: %w\n%s", err, string(out))
+	}
+	return nonEmptyLines(string(out)), nil
+}
+
+func nonEmptyLines(s string) []string {
+	var lines []string
+	for _, line := range strings.Split(strings.TrimSpace(s), "\n") {
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+// DiskUsage reports reclaimable space per category via `docker system df`.
+func (r *dockerRuntime) DiskUsage(ctx context.Context) (DiskReport, error) {
+	cmd := exec.CommandContext(ctx, "docker", systemDFArgs()...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return DiskReport{}, fmt.Errorf("docker system df: %w\n%s", err, string(out))
+	}
+	return parseSystemDF(string(out))
 }

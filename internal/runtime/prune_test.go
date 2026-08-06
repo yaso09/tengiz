@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"reflect"
 	"testing"
 )
@@ -186,5 +187,46 @@ func TestSelectUnusedImages(t *testing.T) {
 func TestSelectUnusedImagesEmpty(t *testing.T) {
 	if got := selectUnusedImages(nil, nil); len(got) != 0 {
 		t.Fatalf("selectUnusedImages(nil, nil) = %v, want empty", got)
+	}
+}
+func TestStubPrune(t *testing.T) {
+	m := NewStub()
+	report, err := m.Prune(context.Background(), PruneOptions{Containers: true, Images: true})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if report.ContainersRemoved != 0 || report.ImagesRemoved != 0 || len(report.SpaceReclaimed) != 0 {
+		t.Fatalf("expected empty report, got %+v", report)
+	}
+}
+
+func TestStubDiskUsage(t *testing.T) {
+	m := NewStub()
+	report, err := m.DiskUsage(context.Background())
+	if err != nil {
+		t.Fatalf("DiskUsage() error = %v", err)
+	}
+	if report.Images != "" || report.Containers != "" || report.Volumes != "" || report.BuildCache != "" {
+		t.Fatalf("expected empty report, got %+v", report)
+	}
+}
+
+func TestCategorySpace(t *testing.T) {
+	if got := categorySpace("containers", "3.2MB"); got != "containers: 3.2MB" {
+		t.Errorf("categorySpace() = %q, want %q", got, "containers: 3.2MB")
+	}
+	if got := categorySpace("images", ""); got != "images: 0B" {
+		t.Errorf("categorySpace() empty = %q, want %q", got, "images: 0B")
+	}
+}
+
+func TestNonEmptyLines(t *testing.T) {
+	got := nonEmptyLines("a\n\nb\n")
+	want := []string{"a", "b"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("nonEmptyLines() = %v, want %v", got, want)
+	}
+	if got := nonEmptyLines(""); len(got) != 0 {
+		t.Fatalf("nonEmptyLines(\"\") = %v, want empty", got)
 	}
 }
