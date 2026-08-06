@@ -123,3 +123,24 @@ func TestCountNonEmptyLines(t *testing.T) {
 		t.Errorf("countNonEmptyLines(empty) = %d, want 0", got)
 	}
 }
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	res, err := m.Cleanup(context.Background(), CleanupOptions{Containers: true})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if res == nil {
+		t.Fatal("Cleanup() returned nil result")
+	}
+	if res.ContainersRemoved != 0 || res.ImagesRemoved != 0 || res.VolumesRemoved != 0 || res.NetworksRemoved != 0 || res.ReclaimedBytes != 0 {
+		t.Errorf("expected zeroed result, got %+v", res)
+	}
+}
+
+func TestStubSatisfiesManager(t *testing.T) {
+	var m Manager = NewStub()
+	if m == nil {
+		t.Fatal("NewStub() does not implement Manager")
+	}
+}

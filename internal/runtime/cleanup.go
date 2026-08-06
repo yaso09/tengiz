@@ -59,6 +59,10 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	return nil
 }
 
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (*CleanupResult, error) {
+	return &CleanupResult{}, nil
+}
+
 func pruneContainersArgs() []string {
 	return []string{"container", "prune", "-f", "--filter", "label!=" + labelKey}
 }
