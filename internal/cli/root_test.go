@@ -98,6 +98,12 @@ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppCon
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRTForDeploy) Prune(ctx context.Context, opts runtime.PruneOptions) (runtime.PruneReport, error) {
+	return runtime.PruneReport{}, nil
+}
+func (m *mockRTForDeploy) DiskUsage(ctx context.Context) (runtime.DiskReport, error) {
+	return runtime.DiskReport{}, nil
+}
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}
@@ -374,5 +380,43 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
 		}
+	}
+}
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not found: %v", err)
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCmdFlags(t *testing.T) {
+	for _, name := range []string{"containers", "images", "volumes", "networks", "dry-run"} {
+		if cleanupCmd.Flags().Lookup(name) == nil {
+			t.Errorf("cleanup command missing --%s flag", name)
+		}
+	}
+}
+
+func TestCleanupOptionsDefaults(t *testing.T) {
+	all := cleanupOptions(false, false, false, false)
+	if !all.Containers || !all.Images || !all.Volumes || !all.Networks {
+		t.Errorf("no flags should enable all categories, got %+v", all)
+	}
+	imgs := cleanupOptions(false, true, false, false)
+	if imgs.Containers || !imgs.Images || imgs.Volumes || imgs.Networks {
+		t.Errorf("--images should enable only images, got %+v", imgs)
+	}
+}
+
+func TestOrDash(t *testing.T) {
+	if got := orDash(""); got != "-" {
+		t.Errorf("orDash(\"\") = %q, want %q", got, "-")
+	}
+	if got := orDash("1.5GB"); got != "1.5GB" {
+		t.Errorf("orDash(%q) = %q, want %q", "1.5GB", got, "1.5GB")
 	}
 }

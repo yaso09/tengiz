@@ -73,6 +73,12 @@ func init() {
 	notificationCmd.AddCommand(notificationSetChannelCmd)
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
+	cleanupCmd.Flags().Bool("containers", false, "remove stopped containers not managed by Tengiz")
+	cleanupCmd.Flags().Bool("images", false, "remove unused images not in tengiz-apps/*")
+	cleanupCmd.Flags().Bool("volumes", false, "remove unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "remove unused networks")
+	cleanupCmd.Flags().Bool("dry-run", false, "report reclaimable space without removing anything")
+	rootCmd.AddCommand(cleanupCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -1159,6 +1165,82 @@ Examples:
 
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources to free disk space",
+	Long: `Remove unused Docker containers, images, volumes, and networks.
+
+Tengiz-managed resources are always protected: containers with the
+tengiz-app label and images in the tengiz-apps/* repository are never
+removed, even when stopped or unused.
+
+Use --containers, --images, --volumes, or --networks to prune a specific
+category. With no category flag, all four categories are pruned.
+
+Use --dry-run to report how much space could be reclaimed without
+removing anything.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		networks, _ := cmd.Flags().GetBool("networks")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		if dryRun {
+			usage, err := rt.DiskUsage(cmd.Context())
+			if err != nil {
+				return err
+			}
+			fmt.Println("[tengiz] dry run — nothing removed. Reclaimable space:")
+			fmt.Printf("  images:     %s\n", orDash(usage.Images))
+			fmt.Printf("  containers: %s\n", orDash(usage.Containers))
+			fmt.Printf("  volumes:    %s\n", orDash(usage.Volumes))
+			fmt.Printf("  build:      %s\n", orDash(usage.BuildCache))
+			return nil
+		}
+
+		report, err := rt.Prune(cmd.Context(), cleanupOptions(containers, images, volumes, networks))
+		if err != nil {
+			return err
+		}
+		fmt.Println("[tengiz] cleanup complete")
+		fmt.Printf("  containers removed: %d\n", report.ContainersRemoved)
+		fmt.Printf("  images removed:     %d\n", report.ImagesRemoved)
+		fmt.Printf("  volumes removed:    %d\n", report.VolumesRemoved)
+		fmt.Printf("  networks removed:   %d\n", report.NetworksRemoved)
+		for _, line := range report.SpaceReclaimed {
+			fmt.Printf("  reclaimed %s\n", line)
+		}
+		return nil
+	},
+}
+
+// cleanupOptions returns the requested categories, or all categories when
+// none are explicitly requested.
+func cleanupOptions(containers, images, volumes, networks bool) runtime.PruneOptions {
+	if containers || images || volumes || networks {
+		return runtime.PruneOptions{
+			Containers: containers,
+			Images:     images,
+			Volumes:    volumes,
+			Networks:   networks,
+		}
+	}
+	return runtime.PruneOptions{Containers: true, Images: true, Volumes: true, Networks: true}
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 var gitCmd = &cobra.Command{
