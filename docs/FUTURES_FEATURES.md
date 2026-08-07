@@ -1820,3 +1820,57 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Backups aren't exposed as static files. After creating the tar, CapRover moves it into `/captain/temp/downloads/{namespace}/caprover-backup-<timestamp>-ip-<leaderIP>-host-<hostname>.tar` (hostname sanitized to `[A-Za-z0-9._-]`), mints a one-time `downloadToken` via the authenticator, and schedules automatic deletion after 2 hours.
 - **Why add to Tengiz:** Downloading a Tengiz backup should not require direct filesystem access to `~/.tengiz/`. A `tengiz backup download` flow that mints a short-lived signed token (HMAC with expiry, stored in the backup record), streams the tar through the proxy/admin API, and auto-deletes the archive after N hours provides secure DR retrieval and prevents unbounded disk growth from stale backups. Low effort on top of the backup feature.
 - **Detected:** 2026-08-07
+
+## Uncommitted Changes Warning & Dirty Version Tagging
+- **Source:** Kamal
+- **Description:** Kamal detects uncommitted git changes at build/deploy time (`Kamal::Git.uncommitted_changes`). If present, the image version is suffixed with `_uncommitted_<hex>` so a dirty build is never mistaken for a clean commit, and the CLI warns "Building with uncommitted changes" listing the dirty files. `build dev` additionally warns about uncommitted/untracked files present in the dev image.
+- **Why add to Tengiz:** Deploys from a dirty working tree silently mask bugs (deployed binary ≠ committed code). Tengiz's version is currently just the git SHA; appending `_uncommitted_<hex>` when `git status` is non-empty (via the existing `gitdeploy`/version plumbing) plus a warning makes every deployed version auditable. Low effort, high safety value.
+- **Detected:** 2026-08-07
+
+## Healthcheck Barrier for Role Boot Ordering
+- **Source:** Kamal
+- **Description:** When multiple roles (web/worker) deploy together, only the primary role's first host boots immediately. Its boot waits for a healthy HTTP check, then opens a distributed "barrier" (`Healthcheck::Barrier`) that releases the other roles' hosts to boot; if the primary container becomes unhealthy the barrier is closed and secondary roles never boot. A `queuer` variant makes extra hosts wait for the currently-running deploy instead of failing.
+- **Why add to Tengiz:** Tengiz's `gitdeploy`/zero-downtime deploys boot web then rely on health checks, but there's no ordering primitive for accessory/role services (e.g. don't boot a worker container until the web container passed readiness, since workers may need migrations to have run). A barrier channel in the deploy orchestrator gates role boot order on the primary's health — small, high-value addition to the runtime manager.
+- **Detected:** 2026-08-07
+
+## Per-Host Environment Tags (env.tags)
+- **Source:** Kamal
+- **Description:** Hosts can be tagged (`172.1.0.2: experiment1`) and env vars can be scoped per tag via `env.tags.<tag>`. Each role computes its env per host by merging base env + specialized env + the env of every tag that host carries. Enables canary/experiment rollouts where specific hosts get different env without a separate destination config.
+- **Why add to Tengiz:** Tengiz's Multi-Environment Desteği (feature line 548) is destination-based (whole env swap). Host tags let a subset of servers run with different flags (e.g. one host with `FEATURE_FLAG=new` during a canary) on the same deployment — natural fit once role/multi-server support lands. Maps to `AppConfig` per-host env overlay.
+- **Detected:** 2026-08-07
+
+## Proxy Boot Configuration Management (boot_config)
+- **Source:** Kamal
+- **Description:** `kamal proxy boot_config set/get/reset` manages the kamal-proxy container's own boot parameters: image/registry/repository/image_version, publish ports (http/https), bind IPs, log max size, metrics port, debug, and arbitrary docker options. Settings are persisted to files on the host (`options`, `image`, `image_version`, `run_command`) and re-applied on proxy reboot. Requires min proxy version.
+- **Why add to Tengiz:** Tengiz's embedded reverse proxy has fixed ports/bind behavior. A `tengiz proxy config` (or runtime-managed `boot_config`) that persists which IPs/ports the proxy listens on, log rotation size, and image version gives operators control without code changes — mirrors the recorded Advanced Proxy Configuration (#76) but at the proxy-process level rather than per-app route level.
+- **Detected:** 2026-08-07
+
+## Buildx Cloud Builder (Docker Build Cloud)
+- **Source:** Kamal
+- **Description:** Kamal supports `driver: cloud <docker-org>/<builder-name>` (BuildKit/Docker Build Cloud). It creates the cloud buildx builder (`docker buildx create --driver cloud`), inspects it to detect local vs remote arches, and removes it afterwards — builds run on Docker's hosted cloud instead of the local machine or an SSH remote builder.
+- **Why add to Tengiz:** The recorded Remote Docker Builder (#34) forwards builds to a self-hosted box; Docker Build Cloud is the zero-ops alternative — builds happen on Docker's managed infrastructure, offloading weak VPS/local hosts. Adds a `builder.driver: cloud` variant next to nixpacks/docker with tiny effort on top of the existing buildx layer.
+- **Detected:** 2026-08-07
+
+## Secret Key Aliasing (KEY:VAULT_KEY)
+- **Source:** Kamal
+- **Description:** In env config, secrets can alias an env var to a differently-named secret: `secret: [DATABASE_URL:APP_DB_URL]`. `Kamal::Configuration::Env#extract_alias` splits on `:` so the container env var is `DATABASE_URL` but the value is fetched from secret key `APP_DB_URL`.
+- **Why add to Tengiz:** Tengiz's secret storage keys apps to arbitrary names; aliasing decouples the runtime env var name from the stored secret name (rename a var without rewriting secrets, or share one secret under two env names). Tiny parser change in `secrets.ResolveInterpolations`/`config set` + a test.
+- **Detected:** 2026-08-07
+
+## Secrets Fetch/Extract CLI + Expanded Vault Adapters
+- **Source:** Kamal
+- **Description:** Kamal has adapters for one_password, aws_secrets_manager, bitwarden, bitwarden_secrets_manager, doppler, enpass, gcp_secret_manager, last_pass, passbolt, plus `test`. `kamal secrets fetch --adapter=one_password --account ...` reads secrets from the external vault into stdout for scripting, and `kamal secrets extract` pulls a single secret out of a secrets file.
+- **Why add to Tengiz:** Tengiz's Secrets Management (#32) supports local/vault/doppler providers for stored secrets but has no ad-hoc "pull a value from an external vault now" CLI. A `tengiz secrets fetch --provider=one_password` (reusing the recorded Provider interface) enables CI pipelines and shell scripts to grab credentials directly, plus the extract helper for parsing. Medium effort, strong DX.
+- **Detected:** 2026-08-07
+
+## Inline Command Substitution in Secrets Files
+- **Source:** Kamal
+- **Description:** Kamal's dotenv secrets loader performs `$(...)` shell-command substitution on secret values (`InlineCommandSubstitution`), so a secrets file can contain `VALUE=$(kamal secrets fetch --adapter=... name)`. Enables dynamic secrets without a stored value.
+- **Why add to Tengiz:** Tengiz encrypts secrets at rest but has no runtime-expansion source. Supporting `$(...)` substitution when loading env (already have `ResolveInterpolations` for `[[secret.X]]`) lets users source values from external commands or files at deploy time. Small parser addition, big flexibility.
+- **Detected:** 2026-08-07
+
+## Local Registry with Automatic SSH Port Forwarding
+- **Source:** Kamal
+- **Description:** Kamal can run a self-hosted registry (`registry:3`) locally on `127.0.0.1:<local_port>:5000` via `registry.local` config. During `build pull` on remote hosts it auto-forwards the local registry port over SSH (`PortForwarding`) so remote hosts can pull from the local registry, then tears the forward down.
+- **Why add to Tengiz:** The recorded Self-Hosted Registry (#153) focuses on running the registry; Kamal's SSH port-forwarding makes a *local* registry usable by remote/host docker daemons without exposing the port publicly. Relevant once remote deployment (#73) is used with a private registry. Moderate effort, niche but distinct.
+- **Detected:** 2026-08-07
