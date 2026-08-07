@@ -377,3 +377,21 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+	if dry := cmd.Flags().Lookup("dry-run"); dry == nil {
+		t.Error("cleanup missing --dry-run flag")
+	} else if dry.Shorthand != "n" {
+		t.Errorf("--dry-run shorthand = %q, want \"n\"", dry.Shorthand)
+	}
+	if vol := cmd.Flags().Lookup("volumes"); vol == nil {
+		t.Error("cleanup missing --volumes flag")
+	}
+}

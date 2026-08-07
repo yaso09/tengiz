@@ -65,6 +65,9 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().BoolP("dry-run", "n", false, "show what would be removed without removing anything")
+	cleanupCmd.Flags().Bool("volumes", false, "also remove unused volumes (destructive, data loss)")
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
@@ -1157,6 +1160,41 @@ Examples:
 			return fmt.Errorf("run: %w", err)
 		}
 
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources",
+	Long: `Removes Docker resources no longer used by the platform:
+
+Containers: stopped containers without the tengiz-app label (Tengiz-managed containers are always protected).
+Images: dangling (untagged) images only — rollback images (tengiz-apps/*) and in-use images are kept.
+Networks: unused networks.
+Build cache: unused Docker build cache.
+
+Use --volumes to also remove unused volumes (DESTRUCTIVE: data stored in those volumes is lost permanently).
+Use --dry-run to preview what would be removed without removing anything.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		rep, err := rt.Cleanup(cmd.Context(), runtime.CleanupOptions{
+			DryRun:  dryRun,
+			Volumes: volumes,
+		})
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+
+		runtime.PrintCleanupReport(cmd.OutOrStdout(), rep, dryRun)
 		return nil
 	},
 }
