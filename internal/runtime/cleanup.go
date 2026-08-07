@@ -57,3 +57,75 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	}
 	return nil
 }
+
+// CleanupOptions controls which Docker resources a Cleanup call prunes.
+type CleanupOptions struct {
+	Containers bool
+	Images     bool
+	Volumes    bool
+	Networks   bool
+	BuildCache bool
+	Force      bool
+}
+
+// CleanupResult reports what a Cleanup call pruned.
+type CleanupResult struct {
+	Categories []string
+	Reclaimed  string
+}
+
+// cleanupCommands returns the docker prune argv vectors for each enabled
+// category. Tengiz-managed containers are labeled tengiz-app, so the
+// "label!=tengiz-app" filter guarantees a cleanup never deletes a managed app.
+func cleanupCommands(opts CleanupOptions) [][]string {
+	var cmds [][]string
+	if opts.Containers {
+		cmds = append(cmds, []string{"container", "prune", "-f", "--filter", "label!=tengiz-app"})
+	}
+	if opts.Images {
+		cmds = append(cmds, []string{"image", "prune", "-af"})
+	}
+	if opts.BuildCache {
+		cmds = append(cmds, []string{"builder", "prune", "-f"})
+	}
+	if opts.Volumes {
+		cmds = append(cmds, []string{"volume", "prune", "-f", "--filter", "label!=tengiz-app"})
+	}
+	if opts.Networks {
+		cmds = append(cmds, []string{"network", "prune", "-f", "--filter", "label!=tengiz-app"})
+	}
+	return cmds
+}
+
+// parseReclaimed extracts the human-readable "Total reclaimed space" line
+// from a docker prune output, or "" if none is present.
+func parseReclaimed(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(strings.ToLower(trimmed), "reclaimed") {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
+	var result CleanupResult
+	var reclaimed []string
+	for _, args := range cleanupCommands(opts) {
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		out, err := cmd.CombinedOutput()
+		category := args[0]
+		if err != nil {
+			result.Categories = append(result.Categories, category+" (failed)")
+			log.Printf("[runtime] cleanup failed: docker %s: %v", strings.Join(args, " "), err)
+			continue
+		}
+		result.Categories = append(result.Categories, category)
+		if got := parseReclaimed(string(out)); got != "" {
+			reclaimed = append(reclaimed, got)
+		}
+	}
+	result.Reclaimed = strings.Join(reclaimed, ", ")
+	return result, nil
+}
