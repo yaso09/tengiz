@@ -65,6 +65,14 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers with the tengiz-app label")
+	cleanupCmd.Flags().Bool("images", false, "prune dangling images (add --all-images for all unused)")
+	cleanupCmd.Flags().Bool("all-images", false, "prune all unused images (implies --images)")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune build cache")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be pruned without removing anything")
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
@@ -598,6 +606,103 @@ var psCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Clean up docker resources to reclaim disk space",
+	Long: `Prunes stopped containers, dangling/all unused images, unused networks,
+volumes, and the build cache to reclaim disk space.
+
+With no category flags, this prunes tengiz-managed stopped containers,
+dangling images, unused networks, and the build cache (all safe by default).
+Use --volumes to also remove unused volumes and --all-images to remove all
+unused images. Use --dry-run to preview without pruning.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+		opts := resolveCleanupOpts(cmd)
+
+		before, err := rt.DiskUsage(ctx)
+		if err != nil {
+			fmt.Printf("[tengiz] warning: could not read disk usage: %v\n", err)
+		}
+		fmt.Println("[tengiz] disk usage before:")
+		printCleanupUsage(before)
+
+		res, err := rt.Prune(ctx, opts)
+		if err != nil {
+			return err
+		}
+
+		if opts.DryRun {
+			fmt.Println("[tengiz] dry-run: nothing was pruned.")
+			return nil
+		}
+
+		fmt.Printf("[tengiz] removed: %d containers, %d images, %d networks, %d volumes, %d build-cache objects\n",
+			res.ContainersRemoved, res.ImagesRemoved, res.NetworksRemoved, res.VolumesRemoved, res.BuildCacheRemoved)
+		if res.SpaceReclaimed != "" {
+			fmt.Printf("[tengiz] reclaimed %s\n", res.SpaceReclaimed)
+		}
+
+		after, err := rt.DiskUsage(ctx)
+		if err != nil {
+			fmt.Printf("[warn] could not read disk usage: %v\n", err)
+		}
+		fmt.Println("[tengiz] disk usage after:")
+		printCleanupUsage(after)
+		return nil
+	},
+}
+
+func resolveCleanupOpts(cmd *cobra.Command) runtime.PruneOptions {
+	get := func(name string) bool {
+		v, _ := cmd.Flags().GetBool(name)
+		return v
+	}
+	containers := get("containers")
+	images := get("images")
+	allImages := get("all-images")
+	volumes := get("volumes")
+	networks := get("networks")
+	buildCache := get("build-cache")
+	dryRun := get("dry-run")
+
+	if !containers && !images && !allImages && !volumes && !networks && !buildCache {
+		containers = true
+		images = true
+		networks = true
+		buildCache = true
+	}
+
+	return runtime.PruneOptions{
+		Containers: containers,
+		Images:     images || allImages,
+		AllImages:  allImages,
+		Volumes:    volumes,
+		Networks:   networks,
+		BuildCache: buildCache,
+		DryRun:     dryRun,
+	}
+}
+
+func printCleanupUsage(du runtime.DiskUsage) {
+	fmt.Printf("  images: %s\n", orDash(du.Images))
+	fmt.Printf("  containers: %s\n", orDash(du.Containers))
+	fmt.Printf("  volumes: %s\n", orDash(du.Volumes))
+	fmt.Printf("  build cache: %s\n", orDash(du.BuildCache))
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 var stopCmd = &cobra.Command{
