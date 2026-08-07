@@ -1664,3 +1664,69 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Coolify's global search builds a cached index of every resource (apps, services, DBs, servers, projects, environments) with a denormalized `search_text` (name, FQDNs, UUIDs, PR ids), cached per team, and supports "new X" create-mode commands (e.g. `new postgresql`). Match priority: name > type > description.
 - **Why add to Tengiz:** As the app registry grows (dozens of apps, deployments, domains, volumes, secrets), `tengiz ps` and tab-completion stop being enough. A `tengiz search <query>` command over the `~/.tengiz/` JSON store (apps, ports, domains, volumes, deploy history, secret keys) with result-type filtering gives operators a quick navigation/jump interface and powers a future web UI's cmd+K. Low effort (in-memory index over the store), high UX value.
 - **Detected:** 2026-08-07
+
+## Config File Mounts (Inline Content File Mounts)
+- **Source:** Dokploy
+- **Description:** Mounts can be typed `bind`, `volume`, or `file`. A `file` mount takes inline `content` plus a `filePath` and writes that content into a file inside the container at `mountPath` (e.g. injecting an `nginx.conf`, `.npmrc`, or application config without committing it to the repo). `createFileMount` writes the file from base64 content before the container starts; updates rewrite the file.
+- **Why add to Tengiz:** Tengiz's volume commands handle host/volume mounts but have no way to inject a config *file* with inline content. This covers the very common "this app needs a config file I don't want in my image" case (auth configs, proxy configs, runtime settings) and pairs with the recorded Patches feature (#22) which does the same at build time. Implementation: extend `AppConfig` with a `fileMounts` list and write files into the container during runtime start. Low-medium effort.
+- **Detected:** 2026-08-07
+
+## Isolated Compose Deployments (Suffix Randomization)
+- **Source:** Dokploy
+- **Description:** When `randomize` is enabled, a compose project's service names, volumes, networks, configs, and secrets all get a random hex `suffix` appended (`generateRandomHash`, `addSuffixToAllServiceNames/Volumes/Networks/Configs/Secrets`) before deployment, so two deployments of the same compose file never collide. `isolatedDeployment` + `isolatedDeploymentsVolume` give each deployment (incl. previews) its own network and volume namespace.
+- **Why add to Tengiz:** Compose support in Tengiz is a stretch goal (#24/#30), but when multiple tenants or preview deployments run the same compose file on one host, name collisions are the #1 failure. Suffix randomization before `docker compose up` is a cheap, proven fix. Implementation: parse the compose file, append a random suffix to resource names in memory, deploy. Low effort once compose support exists.
+- **Detected:** 2026-08-07
+
+## Docker Command Serialization (dockerSafeExec)
+- **Source:** Dokploy
+- **Description:** `dockerSafeExec` wraps every docker CLI invocation in a shell loop that polls `ps aux` and blocks until no other `docker ...` process is running (recheck every 10s) before executing. This prevents the classic "another docker command is already running" / error response from daemon contention when cleanup, builds, and deploys race on the same host.
+- **Why add to Tengiz:** Tengiz already calls the `docker` CLI via `os/exec`, and concurrent `tengiz deploy` + `tengiz cleanup` + rollback will hit daemon contention on shared hosts. The existing Concurrency Control (#101) is a per-app file mutex; this complements it by serializing actual docker CLI calls host-wide. Implementation: a small `execDockerSafe()` wrapper in `runtime` that gates on an atomic busy-check. Low effort, immediate reliability win.
+- **Detected:** 2026-08-07
+
+## Docker Network Import & Sync
+- **Source:** Dokploy
+- **Description:** `findNetworksToSync` lists the host's real Docker networks and diffs them against the platform's network records, returning `importable` (new external networks with their driver, internal flag, attachable flag, and IPAM subnets) and `missing` (recorded networks that no longer exist). `importDockerNetworks` then creates records for the chosen ones, preserving IPAM config.
+- **Why add to Tengiz:** The recorded Docker Network & Volume CRUD (#102) manages networks Tengiz creates itself. Import/sync closes the gap for networks created outside Tengiz (e.g. by a compose file or manually) so the platform's inventory matches reality. Implementation: `tengiz network sync` runs `docker network ls` + `inspect` and reconciles `~/.tengiz/ports.json`-style state. Low effort.
+- **Detected:** 2026-08-07
+
+## Server-Level Scheduled Tasks (Host Cron)
+- **Source:** Dokploy
+- **Description:** Schedules have a `scheduleType` of `application`, `compose`, `server`, or `dokploy-server`. The `server`/`dokploy-server` types run the scheduled command directly on the Docker host (via `execAsyncRemote`) as root instead of inside a container, with a 60s timeout and structured logging — for host maintenance, cleanup, and monitoring scripts.
+- **Why add to Tengiz:** The recorded Scheduled Tasks / Cron Jobs (#74) runs commands inside containers via `docker exec`. Host-level scheduling covers ops scripts (log rotation, `docker system prune`, metric scraping) that can't run in a container. Implementation: extend the cron runner to tag a job as `--host` and execute with `os/exec` on the local machine (or SSH for remote). Low effort on top of #74.
+- **Detected:** 2026-08-07
+
+## Server CPU/Memory Threshold Notifications
+- **Source:** Dokploy
+- **Description:** A `server-threshold` alert type monitors host CPU and Memory usage; when a threshold is crossed it fans out to every configured notification channel (Discord, Slack, Telegram, Email, etc.) with the metric value, threshold, server name, and timestamp. Event type is toggled per-channel in the notification config.
+- **Why add to Tengiz:** Tengiz's notification system already has Discord/Slack/Email backends and per-event configuration. Adding a `cpu`/`memory` event fired by the existing health/monitoring loop (see Server Monitoring #73) turns the platform into a self-alerting host watchdog. Implementation: sample `/proc/meminfo` and `/proc/stat` in a background ticker and reuse the `notify.Manager`. Low effort.
+- **Detected:** 2026-08-07
+
+## Preview Deployment PR Comments
+- **Source:** Dokploy
+- **Description:** `createPreviewDeploymentComment` posts a GitHub PR comment containing the preview deployment URL (with an "initializing" state) as soon as a preview is created, and later updates that same comment with the live state and URL — so reviewers always see the preview link at the top of the PR. Also includes a security-protection message when a PR from an untrusted author is blocked from deploying.
+- **Why add to Tengiz:** Tengiz's preview lifecycle (webhook-driven create/update/cleanup) currently has no surface in the PR itself — reviewers must hunt for the URL. Auto-commenting the preview link (mirroring Vercel/Netlify) is the canonical UX. Implementation: in `preview.Manager.Create`, call the GitHub API to comment and store `pullRequestCommentId`; update on deploy finish and delete on PR close. Low effort, high developer-experience value.
+- **Detected:** 2026-08-07
+
+## Preview Deployment Configuration (Limit / Wildcard / HTTPS / Port / Path)
+- **Source:** Dokploy
+- **Description:** Preview deployments are tunable per app: `previewLimit` (default 3, max concurrent PR previews, oldest pruned), `previewWildcard` (custom wildcard base for PR subdomains), `previewHttps` (TLS on preview domains), `previewPort` (default 3000), `previewPath` (default `/`), and `previewCertificateType` (letsencrypt/none/custom) — giving teams control over how PR environments are exposed and retained.
+- **Why add to Tengiz:** Tengiz previews use fixed naming and no retention cap. A hard `previewLimit` prevents PR spam from exhausting ports (9000-9999) and disk, while wildcard/HTTPS/port options match how staging works. Implementation: fields on the preview config + eviction of oldest previews past the limit. Low effort, protects the port budget.
+- **Detected:** 2026-08-07
+
+## Zip / Drag-and-Drop Deploy (sourceType "drop")
+- **Source:** Dokploy
+- **Description:** Applications can be created with `sourceType: "drop"` where the user uploads a zip/tar archive; `unzipDrop` extracts it (local or via SFTP to a remote server) into the build directory using `adm-zip`, then deploys normally. `dropBuildPath` lets the archive contain a nested project folder.
+- **Why add to Tengiz:** Tengiz currently deploys only from a local directory or git. Drag-and-drop zip deploy gives non-git users (designers, prototyping, legacy projects) a path in, and is trivial to add: `tengiz deploy --from-zip app.zip` extracts into a temp dir then reuses the existing builder. Low effort, expands the onboarding funnel.
+- **Detected:** 2026-08-07
+
+## Input Validation Hardening (Branch & Hostname Regexes)
+- **Source:** Dokploy
+- **Description:** User-supplied git branch names and hostnames are validated against strict regexes before use: `VALID_BRANCH_REGEX = /^[a-zA-Z0-9._\-/#]+$/` rejects shell metacharacters that enable command injection; `VALID_HOSTNAME_REGEX` enforces RFC 1123 labels and explicitly rejects underscores because Let's Encrypt refuses to issue certificates for them, with a clear error message.
+- **Why add to Tengiz:** Tengiz interpolates app names, branches, and domains into shell commands (`docker run`, `git clone`, `curl`) throughout `runtime` and `gitdeploy`. Centralizing validation of these inputs at the config/CLI boundary is cheap insurance against injection via `tengiz deploy --branch` or domain add. Implementation: shared `validation` package used by CLI flags and proxy route keys. Low effort, security hardening.
+- **Detected:** 2026-08-07
+
+## Deployment Cancel on Startup
+- **Source:** Dokploy
+- **Description:** On server boot, `initCancelDeployments` marks every deployment stuck in `running` state as `cancelled` and resets the affected apps/composes so they don't stay permanently "deploying" after a crash or restart.
+- **Why add to Tengiz:** If `tengiz` crashes mid-deploy, the stored deployment stays `running` forever and blocks subsequent deploys or shows false state in `tengiz ps`. Resetting stale running deployments at startup is a tiny recovery safeguard. Implementation: on startup, scan the deployment store and flip stale `running` entries to `cancelled`. Trivial effort.
+- **Detected:** 2026-08-07
