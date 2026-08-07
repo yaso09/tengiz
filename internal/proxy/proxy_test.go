@@ -32,6 +32,8 @@ func (m *mockRuntime) Restart(ctx context.Context, name string) error { return n
 func (m *mockRuntime) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
 func (m *mockRuntime) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRuntime) Prune(ctx context.Context, opts runtime.PruneOptions) (runtime.PruneResult, error) { return runtime.PruneResult{}, nil }
+func (m *mockRuntime) DiskUsage(ctx context.Context) (runtime.DiskUsage, error) { return runtime.DiskUsage{}, nil }
 func (m *mockRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestExtractApp(t *testing.T) {
