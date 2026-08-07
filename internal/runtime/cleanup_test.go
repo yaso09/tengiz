@@ -119,3 +119,9 @@ func TestIsTengizManaged(t *testing.T) {
 		}
 	}
 }
+
+type cleanupManager interface {
+	Cleanup(context.Context, CleanupOptions) (CleanupReport, error)
+}
+
+var _ cleanupManager = (*dockerRuntime)(nil)

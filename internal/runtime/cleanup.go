@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os/exec"
@@ -78,8 +79,90 @@ func isTengizManaged(labels string) bool {
 	return false
 }
 
+func runDocker(ctx context.Context, args []string) error {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker %s: %w\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return nil
+}
+
+func runDockerOutput(ctx context.Context, args []string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker %s: %w\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return string(out), nil
+}
+
 func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupReport, error) {
-	return CleanupReport{}, nil
+	var rep CleanupReport
+
+	containerOut, err := runDockerOutput(ctx, exitedContainersArgs())
+	if err != nil {
+		return rep, fmt.Errorf("list containers: %w", err)
+	}
+	var foreign []string
+	for _, line := range strings.Split(strings.TrimSpace(containerOut), "\n") {
+		if line == "" {
+			continue
+		}
+		var entry dockerPS
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if entry.ID == "" || isTengizManaged(entry.Labels) {
+			continue
+		}
+		foreign = append(foreign, entry.ID)
+	}
+	rep.Containers = foreign
+	if !opts.DryRun && len(rep.Containers) > 0 {
+		if err := runDocker(ctx, removeContainersArgs(rep.Containers)); err != nil {
+			log.Printf("[runtime] cleanup: remove containers: %v", err)
+		}
+	}
+
+	imageOut, err := runDockerOutput(ctx, danglingImagesArgs())
+	if err != nil {
+		return rep, fmt.Errorf("list images: %w", err)
+	}
+	rep.Images = parseIDList(imageOut)
+	if !opts.DryRun && len(rep.Images) > 0 {
+		if err := runDocker(ctx, removeImagesArgs(rep.Images)); err != nil {
+			log.Printf("[runtime] cleanup: remove images: %v", err)
+		}
+	}
+
+	if !opts.DryRun {
+		if err := runDocker(ctx, []string{"network", "prune", "-f"}); err != nil {
+			log.Printf("[runtime] cleanup: prune networks: %v", err)
+		} else {
+			rep.Networks = true
+		}
+		if err := runDocker(ctx, []string{"builder", "prune", "-f"}); err != nil {
+			log.Printf("[runtime] cleanup: prune build cache: %v", err)
+		} else {
+			rep.BuildCache = true
+		}
+	}
+
+	if opts.Volumes {
+		volOut, err := runDockerOutput(ctx, danglingVolumesArgs())
+		if err != nil {
+			return rep, fmt.Errorf("list volumes: %w", err)
+		}
+		rep.Volumes = parseIDList(volOut)
+		if !opts.DryRun && len(rep.Volumes) > 0 {
+			if err := runDocker(ctx, removeVolumesArgs(rep.Volumes)); err != nil {
+				log.Printf("[runtime] cleanup: remove volumes: %v", err)
+			}
+		}
+	}
+
+	return rep, nil
 }
 
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
