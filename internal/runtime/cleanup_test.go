@@ -18,3 +18,17 @@ func TestStubKeepLastNImages(t *testing.T) {
 		t.Fatalf("KeepLastNImages() error = %v", err)
 	}
 }
+
+func TestStubCleanupReturnsEmptyReport(t *testing.T) {
+	m := NewStub()
+	rep, err := m.Cleanup(context.Background(), CleanupOptions{})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if len(rep.Containers) != 0 || len(rep.Images) != 0 || len(rep.Volumes) != 0 {
+		t.Fatalf("expected empty report, got %+v", rep)
+	}
+	if rep.Networks || rep.BuildCache {
+		t.Fatalf("expected no prune flags, got %+v", rep)
+	}
+}
