@@ -149,6 +149,22 @@ List all deployed applications and their status.
 
 Output: `NAME`, `STATE` (running/stopped), `PORT`, `ENVIRONMENT`, `HEALTH`.
 
+### `tengiz cleanup`
+
+Prune Docker resources to reclaim disk space. Shows disk usage before and after pruning.
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Prune stopped containers with the `tengiz-app` label |
+| `--images` | Prune dangling images |
+| `--all-images` | Prune all unused images (implies `--images`) |
+| `--volumes` | Prune unused volumes |
+| `--networks` | Prune unused networks |
+| `--build-cache` | Prune build cache |
+| `--dry-run` | Show what would be pruned without removing anything |
+
+With no category flags, prunes tengiz-managed stopped containers, dangling images, unused networks, and the build cache (all safe by default).
+
 ### `tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] <app>`
 
 Show application logs.
