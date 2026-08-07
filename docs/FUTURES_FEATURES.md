@@ -1730,3 +1730,39 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** On server boot, `initCancelDeployments` marks every deployment stuck in `running` state as `cancelled` and resets the affected apps/composes so they don't stay permanently "deploying" after a crash or restart.
 - **Why add to Tengiz:** If `tengiz` crashes mid-deploy, the stored deployment stays `running` forever and blocks subsequent deploys or shows false state in `tengiz ps`. Resetting stale running deployments at startup is a tiny recovery safeguard. Implementation: on startup, scan the deployment store and flip stale `running` entries to `cancelled`. Trivial effort.
 - **Detected:** 2026-08-07
+
+## Init Process Injection (PID 1 / tini)
+- **Source:** Dokku
+- **Description:** Per-app `init-process` scheduler property adds Docker's `--init` flag when running a container, injecting `tini` as PID 1. tini forwards OS signals (SIGTERM for graceful shutdown, SIGINT, SIGWINCH) to the child process and reaps orphaned zombies so they don't accumulate. Enabled per-app via `dokku scheduler-docker-local:set <app> init-process true`.
+- **Why add to Tengiz:** Tengiz's scale-to-zero idle timer (#4) calls `runtime.Stop()` and the proxy cold-starts containers on demand; a container whose app ignores PID 1 signals won't shut down cleanly, and zombie processes accumulate after repeated cold-starts. `--init` fixes signal delivery and zombie reaping at zero app-code cost. Implementation: `runtime.Manager` passes `--init` when the app sets `deploy.init_process: true` in `.tengiz.yaml`. Trivial effort, big reliability win for the stop/start lifecycle.
+- **Detected:** 2026-08-07
+
+## Deferred Restart on Config Change (--no-restart)
+- **Source:** Dokku
+- **Description:** `dokku config:set <app> KEY=value --no-restart` updates stored environment variables WITHOUT restarting the app. Multiple config commands can be batched with `--no-restart`, then a single explicit `dokku ps:restart <app>` applies them all at once. `--encoded` variant accepts base64 values (for newlines/special chars); `config:import --no-restart` batches entire env files.
+- **Why add to Tengiz:** Each `tengiz config set` today restarts the container, so rotating N secrets triggers N downtimes. With `--no-restart`, an operator can set 5 vars then restart once. Critical for multi-key secret rotation (matches `tengiz secret set` flow) and for scripted provisioning. Implementation: `config set/unset` gain a `--no-restart` flag that skips the restart step; `tengiz restart <app>` already exists to apply. Low effort, operational quality.
+- **Detected:** 2026-08-07
+
+## Liveness/Readiness/Startup Healthcheck Phases
+- **Source:** Dokku
+- **Description:** app.json healthchecks support three phase types (K8s-style): `startup` (runs first, prevents premature readiness failures on slow boot, then disabled), `liveness` (kills/restarts container if it becomes unresponsive), `readiness` (gates traffic; container is removed from proxy rotation until ready). Distinguishing phases means a slow-booting app isn't killed during startup, and readiness can be gated independently of liveness. Each phase has its own httpGet path/port/attempts/wait/timeout.
+- **Why add to Tengiz:** Tengiz's zero-downtime deploy (#1) and Dockerfile-derived healthchecks (#28) only have a single readiness concept. A Go app boots in 100ms but a Next.js app may take 30s; without a startup phase, the readiness check fails during slow boot and kills the container. Separate phases let the proxy keep routing while liveness restarts a hung app. Implementation: `health` package gains phase-aware config; proxy cold-start + deploy readiness use the readiness phase. Medium effort.
+- **Detected:** 2026-08-07
+
+## Multi-Network Attachment with DNS Network Aliases
+- **Source:** Dokku
+- **Description:** Beyond a single primary network, apps can attach to ADDITIONAL networks via `network:set <app> attach-post-create <net1,net2>` and `attach-post-deploy <net1,net2>` (attachment after container create, and after deploy respectively). Attached containers get stable DNS aliases `<app>.<proctype>` and `<app>.<proctype>.<tld>` (custom tld via `network:set <app> tld`), enabling inter-app service discovery across shared networks.
+- **Why add to Tengiz:** The recorded Custom Docker Network (#30) only supports one `--network` on run. A tengiz web app + a postgres container on a shared network currently can't reference each other by stable DNS names. `attach-post-deploy` lets an app join a shared network (e.g. for a DB) while keeping its primary network. Implementation: `runtime.CreateFromImage` gains extra attach networks + `--alias` flags; `network set <app> attach-* <nets>` command persists to `AppEntry`. Medium effort.
+- **Detected:** 2026-08-07
+
+## Cron Concurrency Policy & Maintenance Mode
+- **Source:** Dokku
+- **Description:** Each cron task has a concurrency policy: `allow` (parallel runs OK), `forbid` (skip if already running), or `replace` (kill running and restart). Tasks can also be suspended/resumed without deletion (`cron:suspend <task>`) for maintenance, and run in `--detached` mode. `cron:list` shows next run times.
+- **Why add to Tengiz:** The recorded Scheduled Tasks (#74) lets users define cron jobs, but overlapping runs of a long job (e.g. a backup) silently stack up, and there's no way to pause a job without deleting it. `forbid`/`replace` prevents duplicate runs; suspend lets an operator hold jobs during maintenance. Implementation: `cron` store gains a `concurrency` field checked at schedule time (via a running-lock file) and a `suspended` flag. Low effort on top of #74.
+- **Detected:** 2026-08-07
+
+## Runtime Architecture Compatibility Forcing (--platform)
+- **Source:** Dokku
+- **Description:** When deploying an amd64 image on a non-amd64 host, the scheduler auto-detects the mismatch and runs the container with `--platform=linux/amd64` (emulation via QEMU/binfmt), with a `platform` property to force a specific value and a `disable` flag to opt out per app.
+- **Why add to Tengiz:** The recorded Multi-Arch Builds (#69) handles building for multiple archs, but doesn't cover running a foreign-arch image already in a registry. A dev pushes an amd64 image, then deploys it on an arm64 server and gets "exec format error". Auto-adding `--platform=linux/amd64` (with per-app override) makes deploys just work. Implementation: `runtime` inspects `docker image inspect` architecture vs `uname -m` and appends `--platform` when they differ. Low effort, avoids a common failure mode.
+- **Detected:** 2026-08-07
