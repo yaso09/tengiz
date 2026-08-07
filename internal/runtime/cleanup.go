@@ -22,6 +22,62 @@ type CleanupReport struct {
 	BuildCache bool
 }
 
+func exitedContainersArgs() []string {
+	return []string{"ps", "-a", "--filter", "status=exited", "--format", "{{json .}}"}
+}
+
+func danglingImagesArgs() []string {
+	return []string{"images", "-q", "--filter", "dangling=true"}
+}
+
+func danglingVolumesArgs() []string {
+	return []string{"volume", "ls", "-q", "--filter", "dangling=true"}
+}
+
+func removeContainersArgs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	args := []string{"rm", "-f"}
+	return append(args, ids...)
+}
+
+func removeImagesArgs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	args := []string{"rmi", "-f"}
+	return append(args, ids...)
+}
+
+func removeVolumesArgs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	args := []string{"volume", "rm"}
+	return append(args, ids...)
+}
+
+func parseIDList(out string) []string {
+	var ids []string
+	for _, id := range strings.Fields(out) {
+		if strings.TrimSpace(id) != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func isTengizManaged(labels string) bool {
+	for _, part := range strings.Split(labels, ",") {
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) == 2 && kv[0] == labelKey {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupReport, error) {
 	return CleanupReport{}, nil
 }
