@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"os"
+	"path"
 	"strings"
 	"testing"
 )
@@ -168,5 +170,50 @@ func TestParseDiskUsage(t *testing.T) {
 	du := parseDiskUsage(out)
 	if du.Images != "1.5GB" || du.Containers != "82MB" || du.Volumes != "5GB" || du.BuildCache != "0B" {
 		t.Fatalf("parseDiskUsage() got %+v", du)
+	}
+}
+
+func writeFakeDocker(t *testing.T) string {
+	t.Helper()
+	binDir := t.TempDir()
+	script := path.Join(binDir, "docker")
+	const body = `#!/bin/sh
+printf 'Total reclaimed space: 2MB\n'
+exit 0
+`
+	if err := os.WriteFile(script, []byte(body), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return binDir
+}
+
+func TestDockerPruneInvokesArgs(t *testing.T) {
+	t.Setenv("PATH", writeFakeDocker(t))
+	r := &dockerRuntime{}
+	res, err := r.Prune(context.Background(), PruneOptions{
+		Containers: true,
+		Images:     true,
+		Networks:   true,
+		Volumes:    true,
+		BuildCache: true,
+	})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	// 5 categories => 5 docker invocations, each reporting 2MB reclaimed.
+	if res.SpaceReclaimed != "10MB" {
+		t.Fatalf("SpaceReclaimed = %q, want %q", res.SpaceReclaimed, "10MB")
+	}
+}
+
+func TestDockerPruneDryRunSkipsExec(t *testing.T) {
+	t.Setenv("PATH", writeFakeDocker(t))
+	r := &dockerRuntime{}
+	res, err := r.Prune(context.Background(), PruneOptions{Containers: true, DryRun: true})
+	if err != nil {
+		t.Fatalf("Prune(dry-run) error = %v", err)
+	}
+	if res.SpaceReclaimed != "" {
+		t.Fatalf("dry-run must not reclaim anything, got %q", res.SpaceReclaimed)
 	}
 }

@@ -150,11 +150,46 @@ func parseDiskUsage(output string) DiskUsage {
 }
 
 func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
-	return PruneResult{}, nil
+	var res PruneResult
+	if opts.DryRun {
+		return res, nil
+	}
+	var reclaimed []string
+	for _, pc := range buildPruneCommands(opts) {
+		cmd := exec.CommandContext(ctx, "docker", pc.args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return res, fmt.Errorf("docker %s: %w\n%s", strings.Join(pc.args, " "), err, string(out))
+		}
+		output := string(out)
+		switch pc.category {
+		case "containers":
+			res.ContainersRemoved = parsePrunedCount(output)
+		case "images":
+			res.ImagesRemoved = parsePrunedCount(output)
+		case "networks":
+			res.NetworksRemoved = parsePrunedCount(output)
+		case "volumes":
+			res.VolumesRemoved = parsePrunedCount(output)
+		case "buildcache":
+			res.BuildCacheRemoved = parsePrunedCount(output)
+		}
+		if rs := parseReclaimedSpace(output); rs != "" {
+			reclaimed = append(reclaimed, rs)
+		}
+	}
+	res.SpaceReclaimed = sumHumanSizes(reclaimed)
+	return res, nil
 }
 
 func (r *dockerRuntime) DiskUsage(ctx context.Context) (DiskUsage, error) {
-	return DiskUsage{}, nil
+	args := buildDiskUsageArgs()
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return DiskUsage{}, fmt.Errorf("docker %s: %w", strings.Join(args, " "), err)
+	}
+	return parseDiskUsage(string(out)), nil
 }
 
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
