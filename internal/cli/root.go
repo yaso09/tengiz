@@ -65,6 +65,13 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("all", false, "prune containers, images, and build cache (default scope)")
+	cleanupCmd.Flags().Bool("containers", false, "prune exited containers not managed by Tengiz")
+	cleanupCmd.Flags().Bool("images", false, "prune dangling images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes (opt-in)")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune Docker build cache")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without removing anything")
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
@@ -1089,6 +1096,41 @@ Use --tail N to show only the last N lines of the latest build log.`,
 	},
 }
 
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources to reclaim disk space",
+	Long: `Prunes orphan Docker resources while permanently protecting everything Tengiz
+manages (containers labeled tengiz-app are never removed).
+
+Default: prunes exited non-Tengiz containers, dangling images, and the build cache.
+Pass a category flag (--containers, --images, --build-cache) to prune only that
+category. --volumes explicitly opts into volume pruning (off by default, not part
+of --all). Use --dry-run to preview what would be removed without removing anything.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts := resolvePruneFlags(cmd)
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+		res, err := rt.Prune(cmd.Context(), opts)
+		if err != nil {
+			return err
+		}
+
+		tag := ""
+		if res.DryRun {
+			tag = "[dry-run] "
+		}
+		fmt.Printf("%scontainers removed: %d\n", tag, res.ContainersRemoved)
+		fmt.Printf("%simages removed: %d\n", tag, res.ImagesRemoved)
+		fmt.Printf("%svolumes removed: %d\n", tag, res.VolumesRemoved)
+		if res.BuildCacheReclaimed > 0 {
+			fmt.Printf("build cache reclaimed: %s\n", formatBytes(res.BuildCacheReclaimed))
+		}
+		return nil
+	},
+}
+
 var runCmd = &cobra.Command{
 	Use:   "run <app> [--] <command> [args...]",
 	Short: "Run a one-off command in a temporary container",
@@ -1763,6 +1805,42 @@ func maskSecret(s string) string {
 		return "****"
 	}
 	return s[:1] + "**" + s[len(s)-1:]
+}
+
+func resolvePruneFlags(cmd *cobra.Command) runtime.PruneOptions {
+	all, _ := cmd.Flags().GetBool("all")
+	containers, _ := cmd.Flags().GetBool("containers")
+	images, _ := cmd.Flags().GetBool("images")
+	volumes, _ := cmd.Flags().GetBool("volumes")
+	buildCache, _ := cmd.Flags().GetBool("build-cache")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+	explicit := containers || images || volumes || buildCache
+	if all || !explicit {
+		containers, images, buildCache = true, true, true
+	}
+
+	return runtime.PruneOptions{
+		Containers: containers,
+		Images:     images,
+		Volumes:    volumes,
+		BuildCache: buildCache,
+		DryRun:     dryRun,
+	}
+}
+
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div := int64(unit)
+	exp := 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f%cB", float64(b)/float64(div), "kMGTPE"[exp])
 }
 
 func getwd() string {
