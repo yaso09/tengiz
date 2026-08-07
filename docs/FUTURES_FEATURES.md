@@ -1580,3 +1580,87 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Each datastore collection can be configured with a memory type: `Heap` (fast, volatile — data lost on canister upgrade) or `Stable` (persistent across upgrades, slightly slower). This lets developers make performance/cost trade-offs per collection: cache/session data goes in Heap for speed, user profiles go in Stable for durability. Collections default to Heap for maximum performance. The memory type affects both read/write latency and upgrade behavior — Stable collections survive platform upgrades, Heap collections are re-initialized.
 - **Why add to Tengiz:** Tengiz's planned Built-in NoSQL Datastore (#1) needs a similar performance/storage trade-off. Some data is ephemeral (sessions, cache, rate limit counters) — stored in-memory for speed and automatically reset on restart. Other data is persistent (user profiles, settings, content) — written to SQLite or disk-backed storage for durability. A `db.<collection>.memory: ephemeral | persistent` setting in `.tengiz.yaml` lets developers choose: ephemeral collections use Go maps (fast, lost on container restart), persistent collections use embedded SQLite tables (durable, survives restarts). This is particularly important for scale-to-zero — ephemeral collections naturally reset on cold start (good for session data that should force re-login), persistent collections survive scale-to-zero cycles (good for app state). Implementation: two store backends (`MemoryStore` and `SQLiteStore`) implementing the same `DocStore` interface, selected per-collection at deploy time. Low-medium effort, fits Tengiz's embedded database philosophy. Complements the NoSQL Datastore with production-grade configurability.
 - **Detected:** 2026-07-17
+
+## Multi-Provider Cloud Server Provisioning (DigitalOcean / Hetzner / Vultr)
+- **Source:** Coolify
+- **Description:** Coolify provisions real VMs directly from cloud providers. Each provider service (`HetznerService`, `DigitalOceanService`, `VultrService`) wraps the provider REST API behind a common interface with 429-aware retry/backoff (reads `RateLimit-Reset`/`Retry-After`, caps wait at 60s). Provisioning flow: upload SSH key (MD5 fingerprint dedup, reuse if already present) → create server with user-data → persist server record with a placeholder IP → poll `waitForPublicIp()` until the VM reports a public IPv4/IPv6 → backfill the real IP via a conditional UPDATE so a stale value can never clobber a real one. Extras: optional cloud-init scripts (`#cloud-config` YAML or `#!bash` script passed as `user_data`), provider-side state reconciliation (a 404 from the provider marks the server deleted; validation refuses stopped/suspended VMs), and crash cleanup of untracked resources (`deleteUntrackedDroplet`) so failed provisioning runs don't leave billable orphan VMs.
+- **Why add to Tengiz:** Today Tengiz requires an already-running Docker host. Cloud provisioning turns `tengiz server add --provider hetzner --token ...` into a one-command path from bare metal to a deployed app — the single biggest onboarding improvement for a self-hosted Vercel alternative. Complements the recorded Server Bootstrap (#31) and SSH Remote Deployment (#73). Implementation: a `CloudProvider` interface with three Go HTTP clients (retry + rate-limit handling); `runtime` stays unchanged because docker is invoked over SSH after provisioning. SSH key fingerprint dedup and placeholder-IP backfill map directly to the existing `~/.tengiz/` JSON store. High effort (three provider APIs, ~200 lines each) — start with Hetzner alone.
+- **Detected:** 2026-08-07
+
+## SSH Multiplexing for Efficient Remote Docker Exec
+- **Source:** Coolify
+- **Description:** For remote servers, Coolify keeps a persistent SSH master connection per server (`ssh -fN -o ControlMaster=auto -o ControlPath=<socket> -o ControlPersist=<time>`), pipes commands through `ssh ... bash -se`, health-checks the mux socket (`ssh -O check`) before reuse, cleans up expired connections, and supports `ProxyCommand='cloudflared access ssh --hostname %h'` for Cloudflare-tunneled hosts.
+- **Why add to Tengiz:** Tengiz's runtime is exec-based and will eventually run `docker` over SSH on remote nodes (SSH Tabanlı Remote Deployment #73). Opening a fresh SSH connection per `docker ps`/`docker run`/`docker logs` call is slow and flaky. Go's `x/crypto/ssh` multiplexes natively over one persistent `ssh.Client` per host, which removes per-call handshake latency and makes multi-server lifecycle operations (Parallel Bulk Operations #55) practical. This is the transport foundation for the whole multi-server story and for the cloud-provisioned servers above. Low-medium effort.
+- **Detected:** 2026-08-07
+
+## Crash-Loop Detection with Auto-Stop (Max Restart Count)
+- **Source:** Coolify
+- **Description:** Coolify diffs each container's `RestartCount` against the previously stored value. When a crash is detected it records `last_restart_type = 'crash'`; once restarts reach the app's `max_restart_count` it dispatches `StopApplication` and notifies the team — preventing an app that crash-loops on boot from spinning forever and burning CPU/disk/log volume.
+- **Why add to Tengiz:** Scale-to-zero means Tengiz restarts cold containers on traffic; a broken image that crashes on start would otherwise enter an infinite restart/health-check loop (Container Health Check + Auto Restart, implemented). Tengiz should surface `crash-looping` in `tengiz ps` and stop the container at a per-app `max_restart_count` (default ~10) with a notification (Bildirim Sistemi, implemented). Implementation: parse `docker inspect` `.RestartCount`/`.State.Health.Status`, persist the last value in the app entry, diff on each health-check cycle. Low effort, prevents a real production failure mode. Complements Container Restart Policy Management (#44).
+- **Detected:** 2026-08-07
+
+## Volume Backups with Crash-Safe Container Stop/Recovery
+- **Source:** Coolify
+- **Description:** Beyond database dumps, Coolify backs up Docker named volumes and host directories as `tar.gz` archives using an ephemeral helper container: `docker run --rm -v <source>:/volume:ro <helper-image> tar -czf - -C /volume .`. When consistency requires it (`stop_during_backup`), it writes all running containers that use the volume to a state file, stops them, archives, then restarts them. A recovery job (20 retries, 60s backoff) re-reads the state file after any crash and restarts any container still stopped — idempotent and crash-safe. Partial S3 uploads are cleaned up by the recovery job so the bucket never keeps corrupt half-uploads.
+- **Why add to Tengiz:** The recorded Automated Database Backups (#101) covers `pg_dump`-style dumps, but file-level volume backups are needed for apps that store data as files (uploads, SQLite, media). `tengiz backup create volume <app>` produces a portable archive restorable via `tengiz backup restore`. The stop-during-backup crash-recovery state file is a clean, idempotent pattern that fits Tengiz's file-based `~/.tengiz/` state. Complements S3-Compatible Backup Storage (#95).
+- **Detected:** 2026-08-07
+
+## Volume Cloning (Same-Server & Cross-Server)
+- **Source:** Coolify
+- **Description:** `VolumeCloneJob` clones a Docker volume to a new one: same-server via `docker volume create <tgt>` then `cp -a /source/. /target/` inside an Alpine container; cross-server via tar → `scp` → untar into a new volume, with cleanup of clone dirs in a `finally` block.
+- **Why add to Tengiz:** Combined with SSH-based multi-server (#73) and SSH multiplexing (above), volume cloning gives Tengiz app migration: `tengiz app migrate <app> --to server2` moves data plus config. It is also the engine for cheap point-in-time copies (clone a volume before a risky deploy). Implementation reuses the volume-backup tar helper and the SSH transport. Low-medium effort on top of the backup/SSH features.
+- **Detected:** 2026-08-07
+
+## Three-Dimensional Backup Retention (Count / Days / Storage Size)
+- **Source:** Coolify
+- **Description:** Each backup schedule keeps independent retention for local and S3 copies, with three simultaneous dimensions: keep-last-N (`retention_amount`), delete-older-than-N-days (`retention_days`), and keep-newest-within-N-GB (`retention_max_storage`). Old archives are physically removed locally (`rm -f`) or via S3 delete, empty backup folders are pruned, and execution records whose copies are all gone are deleted.
+- **Why add to Tengiz:** The recorded backup features use simple "keep last N" retention. Real deployments need "keep 10 daily, nothing older than 30 days, and never more than 5 GB" at the same time. A single `retention: {count, days, max_storage_gb}` block in `.tengiz.yaml`, evaluated by a weekly cleanup job (reusing the Docker housekeeping scheduler), prevents silent disk exhaustion — the #1 issue on single-server hosts. Low effort, high production value.
+- **Detected:** 2026-08-07
+
+## Deployment Queue with Commit Dedup, Concurrency Caps & Promotion
+- **Source:** Coolify
+- **Description:** Deployments are first-class queue rows with status `queued → in_progress → finished/failed/cancelled`. Before enqueueing, Coolify dedupes by `(application_id, commit, pull_request_id, image_tag)` — an already queued/in-progress deploy for the same commit short-circuits to "skipped" unless force-rebuilt or rolled back. A per-server `deployment_queue_limit` (default 25) returns HTTP 429 with `Retry-After: 60` when exceeded, and a server-level `concurrent_builds` cap gates dispatch (production and PR deployments for one app may run concurrently). When a deploy finishes, `queue_next_deployment()` scans queued rows (oldest first) and promotes any that are now runnable. Cancel kills the build container (`docker rm -f`).
+- **Why add to Tengiz:** The recorded Deploy Lock (#15) and Build Queue with Deduplication (#103) prevent collisions but don't provide a real queue. A file-backed queue with per-server concurrency limits, commit dedup, and automatic promotion is what makes webhook-driven push-to-deploy safe under load (push floods, many PRs at once). Reuses the existing `~/.tengiz/` JSON store; `tengiz deployments` lists the queue, `tengiz deploy --cancel` kills a build. Medium effort, high robustness value for multi-developer teams.
+- **Detected:** 2026-08-07
+
+## Deployment Log Secret Redaction
+- **Source:** Coolify
+- **Description:** Deployment log rows are a JSON array of `{command, output, type, timestamp}` entries, and `redactSensitiveInfo()` scrubs the values of env vars and secrets (plus PII) from log output before storage. Secrets marked `is_shown_once` are never re-displayed after creation.
+- **Why add to Tengiz:** `tengiz build-logs` (implemented) captures raw build output — which routinely leaks `NPM_TOKEN`, DB passwords, and API keys when a build echoes its environment. A redaction pass over captured output (regex replacement of known secret values with `***`, applied at write time) plus a `--show-secrets` escape hatch prevents credential leakage in shared build logs and in future notification/webhook payloads. Low effort, high security value. Complements Secrets Management and Build Logs (both implemented).
+- **Detected:** 2026-08-07
+
+## Dockerfile HEALTHCHECK Auto-Detection
+- **Source:** Coolify
+- **Description:** Coolify scans the user's Dockerfile for `HEALTHCHECK` directives, regex-extracts `--interval`, `--timeout`, `--start-period`, `--retries`, and back-fills the app's health-check configuration (marking `custom_healthcheck_found`). If HEALTHCHECK is later removed from the Dockerfile, it resets to defaults (interval 5s, timeout 5s, retries 10, start period 5s).
+- **Why add to Tengiz:** Tengiz's health checks (implemented) and zero-downtime deploy (#28) rely on health-check config, but users must currently configure it manually. Deriving it from the Dockerfile gives correct defaults with zero config — and if the Dockerfile's HEALTHCHECK changes between deploys, Tengiz can auto-update the health-check config, making readiness detection (Readiness Delay #126) accurate for custom images. Low effort (regex parse at build time).
+- **Detected:** 2026-08-07
+
+## Build-Time / Runtime / Preview Environment Variable Scoping
+- **Source:** Coolify
+- **Description:** Each env var carries `is_buildtime`, `is_runtime`, and `is_preview` flags and defaults to both build+run time. Buildpack-control vars (`NIXPACKS_*`, `RAILPACK_*`) are excluded from the runtime environment. Crucially, creating a non-preview var auto-creates an identical `is_preview=true` copy, so PR deployments inherit every new variable without manual duplication.
+- **Why add to Tengiz:** Tengiz's env management (`tengiz config set`) applies one flat set to all deployments. Distinguishing build-time from runtime vars (e.g. `NEXT_PUBLIC_*` must be present at build, `DATABASE_URL` only at runtime) matches the intent of the recorded Build Arguments from Env (#14), and preview auto-mirroring eliminates the classic "PR deployed without the new env var" bug. Implementation: flags on `AppConfig.Env` values plus filtering at deploy/run time. Low-medium effort.
+- **Detected:** 2026-08-07
+
+## Configuration Hash Change Detection (Skip Redundant Deploys)
+- **Source:** Coolify
+- **Description:** Coolify maintains a `config_hash` (md5 over all config fields plus sorted env vars) and, when a deployment is triggered, checks whether the running configuration actually changed. Unchanged config short-circuits the redeploy; changed config is diffed field-by-field via a structured snapshot (sensitive values masked with HMAC-SHA256) that reports per-section impact (build vs redeploy).
+- **Why add to Tengiz:** A webhook push that doesn't change the app's build inputs shouldn't trigger a full rebuild. Detecting "config unchanged → skip build, reuse image" pairs with the recorded Image Digest Change Detection (#90) and Build Queue dedup (#103) to save build time and registry bandwidth. For Tengiz this is a hash of the merged `.tengiz.yaml` plus env vars stored on the last deployment. Low effort, immediate CI cost savings.
+- **Detected:** 2026-08-07
+
+## Scoped Shared Environment Variables (Team / Project / Environment / Server)
+- **Source:** Coolify
+- **Description:** `SharedEnvironmentVariable` scopes shared vars to four levels — team, project, environment, server — with `{{scope.key}}` interpolation resolved at deploy time (e.g. `{{project.DATABASE_URL}}`). A "dev" bulk editor parses and edits dotenv format, values marked `is_shown_once` become locked secrets, and members see `key=(Hidden, only admins can view)`.
+- **Why add to Tengiz:** The recorded Variable Resource (#53) defines global variables once and references them across apps. Coolify's model adds hierarchy (environment-specific overrides, team-wide vs project-wide) and dotenv bulk editing — `tengiz env import`/`tengiz env export` with scope awareness. Reuses the existing `[[secret.NAME]]` interpolation machinery in `secrets`. Low-medium effort, eliminates env-var copy-paste across apps and environments.
+- **Detected:** 2026-08-07
+
+## Database Restore with SQL Command-Injection Defense
+- **Source:** Coolify
+- **Description:** Coolify's restore supports three sources (uploaded file, server path, S3) and, before restoring PostgreSQL dumps, decompresses and scans them for `COPY ... PROGRAM`, `\!` shell escapes, and `\o|`/`\g|` pipe redirects — aborting if found, which blocks malicious SQL-backup command injection. Restore runs a base64-encoded script inside the DB container.
+- **Why add to Tengiz:** Once Tengiz has managed databases (#63) and database backups/restore (#101), restoring untrusted backup files becomes a security boundary. Scanning `pg_dump`/`mysqldump` output for shell-escape patterns before piping it to `psql`/`mysql` prevents "import this file" → "arbitrary command execution on the DB host". Low effort (regex scan in the restore path), important hardening. Complements the recorded Database Backup Import/Upload (#130).
+- **Detected:** 2026-08-07
+
+## Global Search / Command Palette (tengiz search)
+- **Source:** Coolify
+- **Description:** Coolify's global search builds a cached index of every resource (apps, services, DBs, servers, projects, environments) with a denormalized `search_text` (name, FQDNs, UUIDs, PR ids), cached per team, and supports "new X" create-mode commands (e.g. `new postgresql`). Match priority: name > type > description.
+- **Why add to Tengiz:** As the app registry grows (dozens of apps, deployments, domains, volumes, secrets), `tengiz ps` and tab-completion stop being enough. A `tengiz search <query>` command over the `~/.tengiz/` JSON store (apps, ports, domains, volumes, deploy history, secret keys) with result-type filtering gives operators a quick navigation/jump interface and powers a future web UI's cmd+K. Low effort (in-memory index over the store), high UX value.
+- **Detected:** 2026-08-07
