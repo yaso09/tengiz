@@ -549,7 +549,7 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Source:** Kamal
 - **Description:** Kamal `-d staging` ile farklı ortamları destekler. `config/deploy.staging.yml` base config ile merge edilir. `require_destination` ile deploy için ortam zorunlu kılınabilir.
 - **Why add to Tengiz:** Development/staging/production ayrımı olmadan gerçek bir platform kurulamaz. `tengiz deploy -e staging` gibi bir flag ile farklı `.tengiz.staging.yaml` dosyası merge edilebilir.
-- **Status:** ✅ Implemented (2026-07-17)
+- **Status:** ✅ Implemented (2026-08-07)
 - **Detected:** 2026-07-14
 
 ## Gelişmiş Docker Build (Multi-Arch, Cache)
