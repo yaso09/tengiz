@@ -235,6 +235,26 @@ Rollback to the previous deployment. The previous active container is started on
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup`
+
+Runs Docker housekeeping to reclaim disk space on the host. By default, prunes all four categories: unused containers, images, volumes, and build cache. It never removes containers carrying the `tengiz-app` label (your deployed apps are always safe).
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Prune unused containers only (never Tengiz-managed apps) |
+| `--images` | Prune unused images only |
+| `--volumes` | Prune unused volumes only |
+| `--build-cache` | Prune Docker build cache only |
+| `--dry-run` | Show what would be removed without deleting anything |
+
+Examples:
+
+```
+tengiz cleanup               # prune everything reclaimable
+tengiz cleanup --images      # prune unused/dangling images only
+tengiz cleanup --dry-run     # preview without deleting
+```
+
 ### `tengiz domain`
 
 Manage custom domains for applications.
@@ -573,6 +593,7 @@ When `webhook.secret` is set, the server verifies the payload signature on every
 | `tengiz git disconnect` | Remove the SSH deploy key |
 | `tengiz webhook [-p <port>] [--config <path>]` | Start the webhook server with optional config |
 | `tengiz init --git-repo URL` | Create config with git repo |
+| `tengiz cleanup [--containers] [--images] [--volumes] [--build-cache] [--dry-run]` | Reclaim Docker disk space (never removes Tengiz-managed containers) |
 
 ## Architecture
 

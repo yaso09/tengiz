@@ -247,6 +247,26 @@ func TestStubRun(t *testing.T) {
 	}
 }
 
+func TestStubCleanupImplementsInterface(t *testing.T) {
+	var m Manager = NewStub()
+	if m == nil {
+		t.Fatal("NewStub() must implement Manager")
+	}
+	result, err := m.Cleanup(context.Background(), CleanupOptions{
+		Containers: true,
+		Images:     true,
+		Volumes:    true,
+		BuildCache: true,
+	})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	total := result.ContainersRemoved + result.ImagesRemoved + result.VolumesRemoved + result.BuildCacheReclaimed
+	if total != 0 {
+		t.Errorf("stub Cleanup should report zero removals, got %+v", result)
+	}
+}
+
 func TestStubRunInteractive(t *testing.T) {
 	m := NewStub()
 	cfg := &types.AppConfig{Name: "testapp", Env: map[string]string{"FOO": "bar"}}

@@ -73,6 +73,7 @@ func init() {
 	notificationCmd.AddCommand(notificationSetChannelCmd)
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -86,6 +87,11 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("containers", false, "prune unused containers (unmanaged by Tengiz)")
+	cleanupCmd.Flags().Bool("images", false, "prune unused Docker images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused Docker volumes")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune Docker build cache")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without deleting")
 }
 
 var rootCmd = &cobra.Command{
@@ -1011,6 +1017,64 @@ var rollbackCmd = &cobra.Command{
 		})
 
 		fmt.Printf("[tengiz] rolled back %s to deployment %s (port %d)\n", appName, prevDep.ID, newPort)
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker containers, images, volumes, and build cache",
+	Long: `Runs Docker housekeeping to reclaim disk space on the host.
+
+By default, cleans up all four categories. Use --containers, --images,
+--volumes, or --build-cache to restrict to a single category.
+
+Containers managed by Tengiz (those carrying the tengiz-app label) are
+never removed. Use --dry-run to see what would be removed without
+deleting anything.
+
+Examples:
+  tengiz cleanup                 # prune everything reclaimable
+  tengiz cleanup --images        # prune unused/dangling images only
+  tengiz cleanup --dry-run       # show what would be removed, delete nothing`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		buildCache, _ := cmd.Flags().GetBool("build-cache")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		opts := runtime.CleanupOptions{
+			Containers: containers,
+			Images:     images,
+			Volumes:    volumes,
+			BuildCache: buildCache,
+			DryRun:     dryRun,
+		}
+
+		res, err := rt.Cleanup(cmd.Context(), opts)
+		if err != nil {
+			return err
+		}
+
+		if dryRun {
+			fmt.Println("[tengiz] dry run: no resources removed")
+			return nil
+		}
+
+		removed := res.ContainersRemoved + res.ImagesRemoved + res.VolumesRemoved
+		if removed == 0 && res.BuildCacheReclaimed == 0 {
+			fmt.Println("Nothing to clean.")
+			return nil
+		}
+
+		fmt.Printf("[tengiz] removed %d containers, %d images, %d volumes, %d build-cache items\n",
+			res.ContainersRemoved, res.ImagesRemoved, res.VolumesRemoved, res.BuildCacheReclaimed)
 		return nil
 	},
 }
