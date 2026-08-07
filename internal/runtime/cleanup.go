@@ -108,3 +108,24 @@ func parseReclaimed(output string) string {
 	}
 	return ""
 }
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
+	var result CleanupResult
+	var reclaimed []string
+	for _, args := range cleanupCommands(opts) {
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		out, err := cmd.CombinedOutput()
+		category := args[0]
+		if err != nil {
+			result.Categories = append(result.Categories, category+" (failed)")
+			log.Printf("[runtime] cleanup failed: docker %s: %v", strings.Join(args, " "), err)
+			continue
+		}
+		result.Categories = append(result.Categories, category)
+		if got := parseReclaimed(string(out)); got != "" {
+			reclaimed = append(reclaimed, got)
+		}
+	}
+	result.Reclaimed = strings.Join(reclaimed, ", ")
+	return result, nil
+}

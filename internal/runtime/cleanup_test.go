@@ -76,3 +76,14 @@ func TestParseReclaimedEmpty(t *testing.T) {
 		t.Fatalf("expected empty string, got %q", got)
 	}
 }
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	res, err := m.Cleanup(context.Background(), CleanupOptions{Containers: true, Images: true})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if len(res.Categories) == 0 {
+		t.Fatal("expected non-empty categories from stub Cleanup")
+	}
+}
