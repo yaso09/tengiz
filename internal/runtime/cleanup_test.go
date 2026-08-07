@@ -1,9 +1,11 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -125,3 +127,40 @@ type cleanupManager interface {
 }
 
 var _ cleanupManager = (*dockerRuntime)(nil)
+
+func TestPrintCleanupReport(t *testing.T) {
+	var buf bytes.Buffer
+	PrintCleanupReport(&buf, CleanupReport{
+		Containers: []string{"c1"},
+		Images:     []string{"img1", "img2"},
+		Volumes:    []string{"vol1"},
+		Networks:   true,
+		BuildCache: true,
+	}, false)
+
+	out := buf.String()
+	for _, want := range []string{
+		"containers: 1 removed",
+		"images: 2 removed",
+		"volumes: 1 removed",
+		"networks: pruned",
+		"build cache: cleared",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestPrintCleanupReportDryRun(t *testing.T) {
+	var buf bytes.Buffer
+	PrintCleanupReport(&buf, CleanupReport{Containers: []string{"c1"}}, true)
+
+	out := buf.String()
+	if !strings.Contains(out, "containers: 1 would remove") {
+		t.Errorf("dry-run output missing 'would remove', got:\n%s", out)
+	}
+	if !strings.Contains(out, "skipped") {
+		t.Errorf("dry-run output missing networks/build-cache note, got:\n%s", out)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os/exec"
 	"sort"
@@ -163,6 +164,27 @@ func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (Clean
 	}
 
 	return rep, nil
+}
+
+func PrintCleanupReport(w io.Writer, rep CleanupReport, dryRun bool) {
+	verb := "removed"
+	if dryRun {
+		verb = "would remove"
+	}
+	fmt.Fprintf(w, "containers: %d %s\n", len(rep.Containers), verb)
+	fmt.Fprintf(w, "images: %d %s\n", len(rep.Images), verb)
+	if len(rep.Volumes) > 0 {
+		fmt.Fprintf(w, "volumes: %d %s\n", len(rep.Volumes), verb)
+	}
+	if rep.Networks {
+		fmt.Fprintln(w, "networks: pruned")
+	}
+	if rep.BuildCache {
+		fmt.Fprintln(w, "build cache: cleared")
+	}
+	if dryRun {
+		fmt.Fprintln(w, "networks/build cache: skipped (prune supports no dry-run)")
+	}
 }
 
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
