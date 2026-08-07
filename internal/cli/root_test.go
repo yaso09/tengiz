@@ -97,6 +97,7 @@ func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *ty
 func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) Prune(ctx context.Context, opts runtime.PruneOptions) (runtime.PruneResult, error) { return runtime.PruneResult{}, nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
@@ -373,6 +374,74 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	for name, found := range expected {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
+		}
+	}
+}
+
+func TestResolvePruneFlags(t *testing.T) {
+	newCmd := func(args ...string) *cobra.Command {
+		cmd := &cobra.Command{}
+		cmd.Flags().Bool("all", false, "")
+		cmd.Flags().Bool("containers", false, "")
+		cmd.Flags().Bool("images", false, "")
+		cmd.Flags().Bool("volumes", false, "")
+		cmd.Flags().Bool("build-cache", false, "")
+		cmd.Flags().Bool("dry-run", false, "")
+		if err := cmd.Flags().Parse(args); err != nil {
+			t.Fatalf("parse %v: %v", args, err)
+		}
+		return cmd
+	}
+
+	opts := resolvePruneFlags(newCmd())
+	if !opts.Images || !opts.Containers || !opts.BuildCache || opts.Volumes || opts.DryRun {
+		t.Errorf("default resolution wrong: %+v", opts)
+	}
+
+	opts = resolvePruneFlags(newCmd("--volumes"))
+	if !opts.Volumes || opts.Images || opts.Containers || opts.BuildCache {
+		t.Errorf("explicit volumes resolution wrong: %+v", opts)
+	}
+
+	opts = resolvePruneFlags(newCmd("--all"))
+	if !opts.Images || !opts.Containers || !opts.BuildCache || opts.Volumes {
+		t.Errorf("--all resolution wrong: %+v", opts)
+	}
+
+	opts = resolvePruneFlags(newCmd("--dry-run"))
+	if !opts.DryRun || !opts.Images || !opts.Containers {
+		t.Errorf("dry-run resolution wrong: %+v", opts)
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	cases := map[int64]string{
+		0:          "0 B",
+		500:        "500 B",
+		1500:       "1.5kB",
+		2500:       "2.4kB",
+		1048576:    "1.0MB",
+		1250000:    "1.2MB",
+		2500000000: "2.3GB",
+	}
+	for in, want := range cases {
+		if got := formatBytes(in); got != want {
+			t.Errorf("formatBytes(%d) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCleanupCmdRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not registered: %v", err)
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatalf("expected cleanup command, got %v", cmd)
+	}
+	for _, flag := range []string{"all", "containers", "images", "volumes", "build-cache", "dry-run"} {
+		if cmd.Flags().Lookup(flag) == nil {
+			t.Errorf("cleanup missing --%s flag", flag)
 		}
 	}
 }

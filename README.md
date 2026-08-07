@@ -18,6 +18,7 @@
 - **Multi-environment** — Isolate dev/staging/production with `--env` flag, env-scoped config overrides, and separate state files.
 - **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
+- **Docker housekeeping** — `tengiz cleanup` prunes orphan containers, dangling images, volumes, and build cache while never touching Tengiz-managed resources (via the `tengiz-app` label). Supports `--dry-run`, per-category flags, and opt-in `--volumes`.
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
@@ -234,6 +235,15 @@ Rollback to the previous deployment. The previous active container is started on
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name (required) |
+
+### `tengiz cleanup [--all|--containers|--images|--volumes|--build-cache] [--dry-run]`
+
+Safely prune unused Docker resources to reclaim disk space. Tengiz-managed resources (containers labeled `tengiz-app`) are never removed.
+
+- Default: prunes exited non-Tengiz containers, dangling images, and the build cache.
+- Pass a category flag (`--containers`, `--images`, `--build-cache`) to prune only that category.
+- `--volumes` explicitly opts into volume pruning (off by default, not part of `--all`).
+- `--dry-run` previews what would be removed without removing anything.
 
 ### `tengiz domain`
 
