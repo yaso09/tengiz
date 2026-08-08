@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -144,4 +146,89 @@ func appSet(apps []string) map[string]bool {
 		seen[a] = true
 	}
 	return seen
+}
+
+// runPruneCommand executes `docker <args...>` and wraps any error with output.
+func runPruneCommand(ctx context.Context, args ...string) error {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker %s: %w\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return nil
+}
+
+// listAppImages returns all Tengiz-built image tags (so it is filterable).
+func (r *dockerRuntime) listAppImages(ctx context.Context) []string {
+	out, err := exec.CommandContext(ctx, "docker", "images",
+		"--filter", "reference=tengiz-apps/*",
+		"--format", "{{.Repository}}:{{.Tag}}",
+	).CombinedOutput()
+	if err != nil {
+		return nil
+	}
+	var images []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			images = append(images, line)
+		}
+	}
+	sort.Strings(images)
+	return images
+}
+
+// Prune performs housekeeping. The `apps` slice names apps still managed in this
+// env; any tengiz-apps image for a removed app whose tag belongs to opts.Env is
+// removed. Containers labeled tengiz-app are never touched.
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions, apps []string) (PruneResult, error) {
+	if opts.Keep <= 0 {
+		opts.Keep = 5
+	}
+	res := PruneResult{DryRun: opts.DryRun, Plan: PrunePlan(opts)}
+	res.SystemBefore = r.systemDF(ctx)
+
+	if opts.DryRun {
+		return res, nil
+	}
+
+	if categoryEnabled(opts, "Containers") {
+		if err := runPruneCommand(ctx, "container", "prune", "-f", "--filter", "label!="+labelKey); err != nil {
+			return res, fmt.Errorf("containers: %w", err)
+		}
+	}
+	if categoryEnabled(opts, "Networks") {
+		if err := runPruneCommand(ctx, "network", "prune", "-f"); err != nil {
+			return res, fmt.Errorf("networks: %w", err)
+		}
+	}
+	if categoryEnabled(opts, "Volumes") {
+		if err := runPruneCommand(ctx, "volume", "prune", "-f"); err != nil {
+			return res, fmt.Errorf("volumes: %w", err)
+		}
+	}
+	if categoryEnabled(opts, "BuildCache") {
+		if err := runPruneCommand(ctx, "builder", "prune", "-f"); err != nil {
+			log.Printf("[runtime] build cache prune skipped: %v", err)
+		}
+	}
+	if categoryEnabled(opts, "Images") {
+		if err := runPruneCommand(ctx, "image", "prune", "-f"); err != nil {
+			return res, fmt.Errorf("images: %w", err)
+		}
+		for _, img := range findOrphanTengizImages(r.listAppImages(ctx), appSet(apps), opts.Env) {
+			if err := r.RemoveImage(ctx, img); err != nil {
+				log.Printf("[runtime] failed to remove orphan image %s: %v", img, err)
+				continue
+			}
+			res.Orphans = append(res.Orphans, img)
+		}
+		for _, app := range apps {
+			if err := r.KeepLastNImages(ctx, app, opts.Keep); err != nil {
+				log.Printf("[runtime] failed to retain images for %s: %v", app, err)
+			}
+		}
+	}
+
+	res.SystemAfter = r.systemDF(ctx)
+	return res, nil
 }

@@ -87,6 +87,18 @@ func TestAppSet(t *testing.T) {
 	}
 }
 
+func TestStubPruneImplementsManager(t *testing.T) {
+	var _ Manager = NewStub()
+	m := NewStub()
+	res, err := m.Prune(testCtx(), PruneOptions{Keep: 3}, []string{"app"})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if res.DryRun || len(res.Plan) != 0 || len(res.Orphans) != 0 {
+		t.Fatalf("stub Prune() = %+v, want zero-valued", res)
+	}
+}
+
 func TestStubPruneReturnsEmptyResult(t *testing.T) {
 	m := NewStub()
 	res, err := m.Prune(testCtx(), PruneOptions{All: true, Keep: 5}, []string{"testapp"})
