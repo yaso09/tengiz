@@ -73,6 +73,8 @@ func init() {
 	notificationCmd.AddCommand(notificationSetChannelCmd)
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
+	addCleanupFlags(cleanupCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -933,6 +935,81 @@ var volumeListCmd = &cobra.Command{
 				ro = " (read-only)"
 			}
 			fmt.Printf("  %s:%s%s\n", v.HostPath, v.ContainerPath, ro)
+		}
+		return nil
+	},
+}
+
+func addCleanupFlags(cmd *cobra.Command) {
+	cmd.Flags().Bool("containers", false, "prune stopped containers not managed by Tengiz")
+	cmd.Flags().Bool("images", false, "prune unused images not built by Tengiz")
+	cmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cmd.Flags().Bool("networks", false, "prune unused networks")
+	cmd.Flags().Bool("build-cache", false, "prune build cache")
+	cmd.Flags().Bool("all", false, "prune all categories including volumes")
+	cmd.Flags().Bool("dry-run", false, "print the docker commands without running them")
+}
+
+func cleanupOptions(cmd *cobra.Command) runtime.PruneOptions {
+	getBool := func(name string) bool {
+		v, _ := cmd.Flags().GetBool(name)
+		return v
+	}
+
+	if getBool("all") {
+		return runtime.PruneOptions{
+			Containers: true,
+			Images:     true,
+			Volumes:    true,
+			Networks:   true,
+			BuildCache: true,
+		}
+	}
+
+	opts := runtime.PruneOptions{
+		Containers: getBool("containers"),
+		Images:     getBool("images"),
+		Volumes:    getBool("volumes"),
+		Networks:   getBool("networks"),
+		BuildCache: getBool("build-cache"),
+	}
+
+	if !opts.Containers && !opts.Images && !opts.Volumes && !opts.Networks && !opts.BuildCache {
+		opts.Containers = true
+		opts.Images = true
+		opts.Networks = true
+		opts.BuildCache = true
+	}
+	return opts
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources to free disk space",
+	Long:  "Prunes unused containers, images, volumes, networks, and build cache while preserving resources managed by Tengiz (containers labeled tengiz-app, images tagged tengiz-apps/*).",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts := cleanupOptions(cmd)
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		if dryRun {
+			for _, line := range runtime.PrunePlan(opts) {
+				fmt.Println(line)
+			}
+			return nil
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return err
+		}
+		result, err := rt.Prune(cmd.Context(), opts)
+		if err != nil {
+			return err
+		}
+		if result.Reclaimed != "" {
+			fmt.Printf("[tengiz] cleanup complete, reclaimed: %s\n", result.Reclaimed)
+		} else {
+			fmt.Println("[tengiz] cleanup complete.")
 		}
 		return nil
 	},
