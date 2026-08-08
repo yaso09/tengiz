@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -107,4 +108,40 @@ func (r *dockerRuntime) systemDF(ctx context.Context) []DFEntry {
 		return nil
 	}
 	return parseSystemDFOutput(string(out))
+}
+
+// findOrphanTengizImages returns tengiz-apps images whose app no longer exists
+// and whose tag prefixes the given env. Tags that do not belong to env are never
+// touched, so one env's cleanup cannot delete another env's images. The literal
+// "latest" tag (used only outside the builder naming) is also skipped.
+func findOrphanTengizImages(images []string, known map[string]bool, env string) []string {
+	if env == "" {
+		env = "production"
+	}
+	envPrefix := env + "-"
+	var orphans []string
+	for _, img := range images {
+		idx := strings.LastIndex(img, ":")
+		if idx < 0 {
+			continue
+		}
+		repo, tag := img[:idx], img[idx+1:]
+		app := strings.TrimPrefix(repo, "tengiz-apps/")
+		if app == "" || repo == app || tag == "latest" {
+			continue
+		}
+		if !known[app] && strings.HasPrefix(tag, envPrefix) {
+			orphans = append(orphans, img)
+		}
+	}
+	sort.Strings(orphans)
+	return orphans
+}
+
+func appSet(apps []string) map[string]bool {
+	seen := make(map[string]bool, len(apps))
+	for _, a := range apps {
+		seen[a] = true
+	}
+	return seen
 }

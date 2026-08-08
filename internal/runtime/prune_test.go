@@ -54,6 +54,39 @@ func TestPrunePlan(t *testing.T) {
 	}
 }
 
+func TestFindOrphanTengizImages(t *testing.T) {
+	images := []string{
+		"tengiz-apps/webapp:production-1712",
+		"tengiz-apps/webapp:development-1715",
+		"tengiz-apps/removedapp:production-999",
+		"tengiz-apps/old:staging-1",
+	}
+	known := map[string]bool{"webapp": true}
+	orphans := findOrphanTengizImages(images, known, "production")
+	want := []string{"tengiz-apps/removedapp:production-999"}
+	if !reflect.DeepEqual(orphans, want) {
+		t.Fatalf("orphans = %v, want %v", orphans, want)
+	}
+}
+
+func TestFindOrphanTengizImagesKeepsOtherEnvs(t *testing.T) {
+	orphans := findOrphanTengizImages(
+		[]string{"tengiz-apps/webapp:development-latest"},
+		map[string]bool{},
+		"production",
+	)
+	if len(orphans) != 0 {
+		t.Fatalf("production cleanup touched a development image: %v", orphans)
+	}
+}
+
+func TestAppSet(t *testing.T) {
+	got := appSet([]string{"a", "b", "a"})
+	if len(got) != 2 || !got["a"] || !got["b"] {
+		t.Fatalf("appSet = %v", got)
+	}
+}
+
 func TestStubPruneReturnsEmptyResult(t *testing.T) {
 	m := NewStub()
 	res, err := m.Prune(testCtx(), PruneOptions{All: true, Keep: 5}, []string{"testapp"})
