@@ -235,6 +235,29 @@ Rollback to the previous deployment. The previous active container is started on
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup`
+
+Prune unused Docker resources from the host daemon: leftover stopped versioned (blue/green) containers, dangling images, unused named volumes, unused custom networks, and build-cache entries. Running Tengiz containers are never touched.
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Remove stopped leftover versioned containers (`tengiz-deployment` label) |
+| `--images` | Remove dangling images only (per-app retention already handled at deploy) |
+| `--volumes` | Remove unused named volumes |
+| `--networks` | Remove unused custom networks |
+| `--build-cache` | Remove build cache entries |
+| `--all` | Prune all of the above |
+| `--dry-run` | Print the exact commands without executing them |
+| `--every <duration>` | Repeat cleanup periodically (e.g. `30m`, `1h`) until interrupted |
+
+At least one target flag (or `--all`) is required.
+
+Examples:
+
+    tengiz cleanup --all
+    tengiz cleanup --containers --dry-run
+    tengiz cleanup --images --every 6h
+
 ### `tengiz domain`
 
 Manage custom domains for applications.
