@@ -2,6 +2,9 @@ package runtime
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -107,5 +110,113 @@ func TestStubCleanup(t *testing.T) {
 	}
 	if res == nil || res.ContainersRemoved != 0 || res.ImagesRemoved != 0 {
 		t.Errorf("stub Cleanup result = %+v, want zeroed result", res)
+	}
+}
+
+const fakeDockerScript = `#!/usr/bin/env bash
+case "$1" in
+  container)
+    echo "Deleted Containers:"
+    echo "abcdef1234567890"
+    echo "Total reclaimed space: 5.3kB"
+    ;;
+  image)
+    echo "Deleted Images:"
+    echo "untagged: tengiz-apps/myapp:old"
+    echo "deleted: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    echo "Total reclaimed space: 1.2MB"
+    ;;
+  volume)
+    echo "Deleted Volumes:"
+    echo "myapp-volume"
+    echo "Total reclaimed space: 12B"
+    ;;
+  network)
+    echo "Deleted Networks:"
+    echo "my-custom-net"
+    echo "Total reclaimed space: 0B"
+    ;;
+  builder)
+    echo "Total cache space: 4.2kB"
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+exit 0
+`
+
+const failingDockerScript = `#!/usr/bin/env bash
+echo "volume prune exploded" >&2
+exit 1
+`
+
+func withFakeDocker(t *testing.T, script string) *dockerRuntime {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "docker")
+	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return &dockerRuntime{}
+}
+
+func TestDockerCleanupAllTargets(t *testing.T) {
+	rt := withFakeDocker(t, fakeDockerScript)
+
+	res, err := rt.Cleanup(context.Background(), CleanupOptions{
+		Containers: true,
+		Images:     true,
+		Volumes:    true,
+		Networks:   true,
+		BuildCache: true,
+	})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+
+	if res.ContainersRemoved != 1 {
+		t.Errorf("ContainersRemoved = %d, want 1", res.ContainersRemoved)
+	}
+	if res.ImagesRemoved != 1 {
+		t.Errorf("ImagesRemoved = %d, want 1", res.ImagesRemoved)
+	}
+	if res.VolumesRemoved != 1 {
+		t.Errorf("VolumesRemoved = %d, want 1", res.VolumesRemoved)
+	}
+	if res.NetworksRemoved != 1 {
+		t.Errorf("NetworksRemoved = %d, want 1", res.NetworksRemoved)
+	}
+	if res.BuildCacheRemoved != 0 {
+		t.Errorf("BuildCacheRemoved = %d, want 0", res.BuildCacheRemoved)
+	}
+}
+
+func TestDockerCleanupNoTargetsRunsNothing(t *testing.T) {
+	rt := withFakeDocker(t, fakeDockerScript)
+
+	res, err := rt.Cleanup(context.Background(), CleanupOptions{})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if res.ContainersRemoved != 0 || res.ImagesRemoved != 0 ||
+		res.VolumesRemoved != 0 || res.NetworksRemoved != 0 || res.BuildCacheRemoved != 0 {
+		t.Errorf("unexpected removals with no targets: %+v", res)
+	}
+}
+
+func TestDockerCleanupPruneError(t *testing.T) {
+	rt := withFakeDocker(t, failingDockerScript)
+
+	res, err := rt.Cleanup(context.Background(), CleanupOptions{Containers: true})
+	if err == nil {
+		t.Fatalf("expected error, got result %+v", res)
+	}
+	if !strings.Contains(err.Error(), "volume prune exploded") {
+		t.Errorf("error = %q, want to include fake docker stderr", err)
+	}
+	if res.ContainersRemoved != 0 {
+		t.Errorf("ContainersRemoved = %d, want 0 (partial results returned on error)", res.ContainersRemoved)
 	}
 }
