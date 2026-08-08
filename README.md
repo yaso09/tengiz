@@ -203,6 +203,28 @@ tengiz run myapp -- rails console
 tengiz run -i myapp -- bash
 ```
 
+### `tengiz cleanup`
+
+Prune unused Docker resources to reclaim disk space. Label-based pruning keeps
+Tengiz-managed containers and rollback images intact.
+
+```
+tengiz cleanup                 # containers + dangling images + build cache
+tengiz cleanup --volumes       # also prune unused named volumes
+tengiz cleanup --networks      # also prune unused custom networks
+tengiz cleanup --all           # prune everything including volumes/networks
+tengiz cleanup --dry-run       # show what would be freed without pruning
+```
+
+Options:
+- `--containers` (default true) — prune unused containers not labeled by Tengiz
+- `--images` (default true) — prune dangling images only (keeps rollback images)
+- `--cache` (default true) — prune Docker build cache
+- `--volumes` — prune unused named volumes (data loss risk)
+- `--networks` — prune unused custom networks
+- `--all` — enable all categories
+- `--dry-run` — print `docker system prune --dry-run` output without pruning
+
 ### `tengiz start <app>`
 
 Cold-start a stopped container.
@@ -573,6 +595,7 @@ When `webhook.secret` is set, the server verifies the payload signature on every
 | `tengiz git disconnect` | Remove the SSH deploy key |
 | `tengiz webhook [-p <port>] [--config <path>]` | Start the webhook server with optional config |
 | `tengiz init --git-repo URL` | Create config with git repo |
+| `tengiz cleanup` | Prune unused Docker containers/images/volumes/networks and build cache |
 
 ## Architecture
 

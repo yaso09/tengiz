@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -101,5 +102,19 @@ func TestCleanupOptionsFromFlagsDisable(t *testing.T) {
 	}
 	if !opts.Images {
 		t.Error("Images should remain enabled")
+	}
+}
+
+func TestCleanupHelpListsFlags(t *testing.T) {
+	rootCmd.SetArgs([]string{"cleanup", "--help"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("cleanup --help failed: %v", err)
+	}
+	for _, flag := range []string{"--dry-run", "--volumes", "--networks", "--all"} {
+		// flags are registered on the command — verify presence after Execute
+		if cleanupCmd.Flags().Lookup(strings.TrimPrefix(flag, "--")) == nil {
+			t.Errorf("cleanup missing flag %q", flag)
+		}
 	}
 }
