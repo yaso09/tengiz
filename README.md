@@ -18,6 +18,7 @@
 - **Multi-environment** — Isolate dev/staging/production with `--env` flag, env-scoped config overrides, and separate state files.
 - **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
+- **Docker housekeeping** — `tengiz cleanup` prunes unused containers, images, networks, and build cache (with optional volumes) in one command while protecting Tengiz-managed apps via labels.
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
@@ -234,6 +235,29 @@ Rollback to the previous deployment. The previous active container is started on
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name (required) |
+
+### `tengiz cleanup`
+
+Remove unused Docker resources to free disk space on the host. Tengiz-managed containers (labeled `tengiz-app`) are always protected, and tagged deploy images are never touched.
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Show what would be removed without removing anything |
+| `--containers` | Prune stopped containers not managed by Tengiz |
+| `--images` | Prune dangling images |
+| `--networks` | Prune unused Docker networks |
+| `--build-cache` | Prune Docker build cache |
+| `--volumes` | Prune unused Docker volumes |
+| `--all` | Prune all categories, including volumes |
+
+With no category flags, defaults to containers, images, networks, and build cache — equivalent to `docker system prune`. Volumes are only pruned with `--volumes` or `--all` because they may hold data.
+
+Examples:
+```
+tengiz cleanup            # prune containers, images, networks, build cache
+tengiz cleanup --dry-run  # preview what would be removed
+tengiz cleanup --all      # also prune unused Docker volumes
+```
 
 ### `tengiz domain`
 

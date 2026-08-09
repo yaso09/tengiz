@@ -3,9 +3,11 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -98,6 +100,7 @@ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppCon
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRTForDeploy) Prune(ctx context.Context, opts runtime.PruneOptions) ([]runtime.PruneResult, error) { return nil, nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}
@@ -374,5 +377,111 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
 		}
+	}
+}
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not found: %v", err)
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupHelpListsFlags(t *testing.T) {
+	rootCmd.SetArgs([]string{"cleanup", "--help"})
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := rootCmd.Execute()
+
+	w.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+
+	if err != nil {
+		t.Fatalf("cleanup --help failed: %v", err)
+	}
+
+	helpText := buf.String()
+	for _, flag := range []string{"--dry-run", "--containers", "--images", "--volumes", "--networks", "--build-cache", "--all"} {
+		if !strings.Contains(helpText, flag) {
+			t.Errorf("help text missing flag %q", flag)
+		}
+	}
+}
+
+func TestCleanupPlan(t *testing.T) {
+	tests := []struct {
+		name                                            string
+		dryRun, containers, images, volumes, networks, buildCache, all bool
+		want                                            runtime.PruneOptions
+	}{
+		{
+			name: "no flags defaults to safe set",
+			want: runtime.PruneOptions{Containers: true, Images: true, Networks: true, BuildCache: true},
+		},
+		{
+			name:    "explicit single category",
+			volumes: true,
+			want:    runtime.PruneOptions{Volumes: true},
+		},
+		{
+			name: "all enables everything",
+			all:  true,
+			want: runtime.PruneOptions{Containers: true, Images: true, Volumes: true, Networks: true, BuildCache: true},
+		},
+		{
+			name:    "dry run preserved and defaults applied",
+			dryRun:  true,
+			want:    runtime.PruneOptions{Containers: true, Images: true, Networks: true, BuildCache: true, DryRun: true},
+		},
+		{
+			name:       "all overrides dry run flag",
+			dryRun:     true,
+			all:        true,
+			want:       runtime.PruneOptions{Containers: true, Images: true, Volumes: true, Networks: true, BuildCache: true, DryRun: true},
+		},
+	}
+	for _, tc := range tests {
+		got := cleanupPlan(tc.dryRun, tc.containers, tc.images, tc.volumes, tc.networks, tc.buildCache, tc.all)
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: cleanupPlan() = %+v, want %+v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestPrintCleanupResults(t *testing.T) {
+	var buf bytes.Buffer
+	printCleanupResults(&buf, []runtime.PruneResult{
+		{Category: runtime.PruneContainers, DryRun: true, Args: []string{"container", "prune", "-f", "--filter", "label!=tengiz-app"}},
+		{Category: runtime.PruneImages, DryRun: true, Args: []string{"image", "prune", "-f"}},
+	}, true)
+	out := buf.String()
+	if !strings.Contains(out, "would run: docker container prune -f --filter label!=tengiz-app") {
+		t.Errorf("dry-run output missing container command, got: %s", out)
+	}
+	if !strings.Contains(out, "nothing was removed (dry run)") {
+		t.Errorf("dry-run output missing summary, got: %s", out)
+	}
+
+	buf.Reset()
+	printCleanupResults(&buf, []runtime.PruneResult{
+		{Category: runtime.PruneVolumes, Reclaimed: "1.2GB"},
+		{Category: runtime.PruneNetworks, Err: errors.New("docker network prune: exit status 1")},
+	}, false)
+	out = buf.String()
+	if !strings.Contains(out, "reclaimed 1.2GB") {
+		t.Errorf("output missing reclaimed size, got: %s", out)
+	}
+	if !strings.Contains(out, "docker network prune: exit status 1") {
+		t.Errorf("output missing per-category error, got: %s", out)
+	}
+	if !strings.Contains(out, "cleanup complete") {
+		t.Errorf("output missing summary, got: %s", out)
 	}
 }
