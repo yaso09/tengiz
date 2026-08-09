@@ -64,6 +64,12 @@ func init() {
 	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("dry-run", false, "preview what would be removed without removing")
+	cleanupCmd.Flags().Bool("containers", false, "clean stopped non-Tengiz containers")
+	cleanupCmd.Flags().Bool("images", false, "clean unused non-Tengiz images")
+	cleanupCmd.Flags().Bool("volumes", false, "clean unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "clean unused networks")
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
@@ -1084,6 +1090,73 @@ Use --tail N to show only the last N lines of the latest build log.`,
 		fmt.Printf("Build logs for %s:\n", appName)
 		for _, id := range ids {
 			fmt.Printf("  %s\n", id)
+		}
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Clean up unused Docker resources",
+	Long: `Clean up unused Docker resources.
+
+Prunes stopped containers, unused images, unused volumes, and unused networks.
+Containers managed by Tengiz (labeled tengiz-app) and images built by Tengiz
+(tengiz-apps/*) are always protected.
+
+By default all categories are cleaned. Use --containers, --images, --volumes,
+or --networks to limit cleanup to specific categories. Use --dry-run to preview
+what would be removed without removing anything.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		networks, _ := cmd.Flags().GetBool("networks")
+
+		if !containers && !images && !volumes && !networks {
+			containers, images, volumes, networks = true, true, true, true
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		opts := runtime.CleanupOptions{
+			DryRun:     dryRun,
+			Containers: containers,
+			Images:     images,
+			Volumes:    volumes,
+			Networks:   networks,
+		}
+
+		result, err := rt.Cleanup(cmd.Context(), opts)
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+
+		verb := "removed"
+		if dryRun {
+			verb = "would remove"
+		}
+		if len(result.ContainersRemoved) > 0 {
+			fmt.Printf("[tengiz] %s containers: %s\n", verb, strings.Join(result.ContainersRemoved, ", "))
+		}
+		if len(result.ImagesRemoved) > 0 {
+			fmt.Printf("[tengiz] %s images: %s\n", verb, strings.Join(result.ImagesRemoved, ", "))
+		}
+		if len(result.VolumesRemoved) > 0 {
+			fmt.Printf("[tengiz] %s volumes: %s\n", verb, strings.Join(result.VolumesRemoved, ", "))
+		}
+		if len(result.NetworksRemoved) > 0 {
+			fmt.Printf("[tengiz] %s networks: %s\n", verb, strings.Join(result.NetworksRemoved, ", "))
+		}
+		total := len(result.ContainersRemoved) + len(result.ImagesRemoved) +
+			len(result.VolumesRemoved) + len(result.NetworksRemoved)
+		if total == 0 {
+			fmt.Println("[tengiz] nothing to clean")
 		}
 		return nil
 	},
