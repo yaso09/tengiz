@@ -573,6 +573,19 @@ When `webhook.secret` is set, the server verifies the payload signature on every
 | `tengiz git disconnect` | Remove the SSH deploy key |
 | `tengiz webhook [-p <port>] [--config <path>]` | Start the webhook server with optional config |
 | `tengiz init --git-repo URL` | Create config with git repo |
+| `tengiz cleanup [--dry-run] [--volumes]` | Prune unused Docker resources (stopped containers, dangling images, networks, build cache) |
+
+## Disk Housekeeping
+
+Deployments and scale-to-zero leave behind stopped containers, dangling images, and build cache. Run `tengiz cleanup` to reclaim disk space:
+
+```bash
+tengiz cleanup               # show disk usage, then prune containers/images/networks/build cache
+tengiz cleanup --dry-run     # only show reclaimable space, prune nothing
+tengiz cleanup --volumes     # also prune unused named volumes (dangerous — may delete data)
+```
+
+Tengiz-managed containers and networks are always protected via the `tengiz-app` label and are never removed. Image pruning only removes dangling images; tagged rollback images are preserved.
 
 ## Architecture
 

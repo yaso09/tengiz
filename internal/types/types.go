@@ -184,3 +184,41 @@ type AppEntry struct {
 	GitBranch        string            `json:"git_branch,omitempty"`
 	GitProvider      string            `json:"git_provider,omitempty"`
 }
+
+type PruneCategory string
+
+const (
+	PruneContainers PruneCategory = "containers"
+	PruneImages     PruneCategory = "images"
+	PruneNetworks   PruneCategory = "networks"
+	PruneVolumes    PruneCategory = "volumes"
+	PruneBuildCache PruneCategory = "build-cache"
+)
+
+type PruneOptions struct {
+	Categories     []PruneCategory
+	IncludeVolumes bool
+}
+
+type PruneResult struct {
+	Deleted   int    `json:"deleted"`
+	Reclaimed string `json:"reclaimed"`
+}
+
+type PruneReport struct {
+	Categories     map[PruneCategory]PruneResult `json:"categories"`
+	TotalReclaimed string                        `json:"total_reclaimed"`
+}
+
+type DockerDiskEntry struct {
+	Type        string `json:"Type"`
+	TotalCount  int64  `json:"TotalCount"`
+	Active      int64  `json:"Active"`
+	Size        string `json:"Size"`
+	Reclaimable string `json:"Reclaimable"`
+}
+
+type DockerDiskUsage struct {
+	Entries          []DockerDiskEntry `json:"entries"`
+	TotalReclaimable string            `json:"total_reclaimable"`
+}
