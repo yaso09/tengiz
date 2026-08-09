@@ -1,0 +1,223 @@
+BASE: 061c493
+HEAD: b07c677
+=== COMMITS ===
+b07c677 test(runtime): restore stub tests removed during cleanup task
+a287b82 feat(runtime): add Cleanup method to Manager interface
+=== STAT ===
+ internal/cli/root_test.go        |  3 +++
+ internal/idle/idle_test.go       |  3 +++
+ internal/proxy/proxy_test.go     |  3 +++
+ internal/runtime/cleanup.go      | 19 +++++++++++++++++++
+ internal/runtime/cleanup_test.go | 15 +++++++++++++++
+ internal/runtime/runtime.go      |  5 +++++
+ 6 files changed, 48 insertions(+)
+=== DIFF ===
+diff --git a/internal/cli/root_test.go b/internal/cli/root_test.go
+index dbb66a9..830f6a8 100644
+--- a/internal/cli/root_test.go
++++ b/internal/cli/root_test.go
+@@ -90,20 +90,23 @@ func (m *mockRTForDeploy) Remove(ctx context.Context, name string) error { m.rem
+ func (m *mockRTForDeploy) RemoveBySuffix(ctx context.Context, name string, suffix string) error { m.removed.Add(1); return nil }
+ func (m *mockRTForDeploy) IsActive(ctx context.Context, name string) (bool, error) { return true, nil }
+ func (m *mockRTForDeploy) GetContainerPort(ctx context.Context, name string, suffix string) (int, error) { return 0, nil }
+ func (m *mockRTForDeploy) List(ctx context.Context) ([]types.AppStatus, error) { return nil, nil }
+ func (m *mockRTForDeploy) Logs(ctx context.Context, name string, opts runtime.LogOptions) (io.ReadCloser, error) { return nil, nil }
+ func (m *mockRTForDeploy) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
+ func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
+ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
+ func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
+ func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
++func (m *mockRTForDeploy) Cleanup(ctx context.Context, opts runtime.CleanupOptions) (runtime.CleanupResult, error) {
++	return runtime.CleanupResult{}, nil
++}
+ func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+ 
+ func TestMockRTForDeployImplementsManager(t *testing.T) {
+ 	var m runtime.Manager = &mockRTForDeploy{}
+ 	if m == nil {
+ 		t.Fatal("mockRTForDeploy does not implement Manager")
+ 	}
+ }
+ 
+ func TestDeployZeroDowntimeCreatesVersionedContainer(t *testing.T) {
+diff --git a/internal/idle/idle_test.go b/internal/idle/idle_test.go
+index fa21c9e..daccfe3 100644
+--- a/internal/idle/idle_test.go
++++ b/internal/idle/idle_test.go
+@@ -24,20 +24,23 @@ func (m *mockRuntime) IsActive(ctx context.Context, name string) (bool, error) {
+ func (m *mockRuntime) List(ctx context.Context) ([]types.AppStatus, error) { return nil, nil }
+ func (m *mockRuntime) Logs(ctx context.Context, name string, opts runtime.LogOptions) (io.ReadCloser, error) { return nil, nil }
+ func (m *mockRuntime) CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error { return nil }
+ func (m *mockRuntime) RemoveBySuffix(ctx context.Context, name string, suffix string) error { return nil }
+ func (m *mockRuntime) GetContainerPort(ctx context.Context, name string, suffix string) (int, error) { return 0, nil }
+ func (m *mockRuntime) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
+ func (m *mockRuntime) Restart(ctx context.Context, name string) error { return nil }
+ func (m *mockRuntime) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
+ func (m *mockRuntime) RemoveImage(ctx context.Context, imageTag string) error { return nil }
+ func (m *mockRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
++func (m *mockRuntime) Cleanup(ctx context.Context, opts runtime.CleanupOptions) (runtime.CleanupResult, error) {
++	return runtime.CleanupResult{}, nil
++}
+ func (m *mockRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+ 
+ func TestResetExtendsTimer(t *testing.T) {
+ 	mock := &mockRuntime{}
+ 	mgr := New(mock, 50*time.Millisecond)
+ 
+ 	mgr.Reset("testapp")
+ 	time.Sleep(30 * time.Millisecond)
+ 	mgr.Reset("testapp") // reset before expiry
+ 	time.Sleep(30 * time.Millisecond)
+diff --git a/internal/proxy/proxy_test.go b/internal/proxy/proxy_test.go
+index 25b9dbe..4128f8d 100644
+--- a/internal/proxy/proxy_test.go
++++ b/internal/proxy/proxy_test.go
+@@ -25,20 +25,23 @@ func (m *mockRuntime) IsActive(ctx context.Context, name string) (bool, error) {
+ func (m *mockRuntime) List(ctx context.Context) ([]types.AppStatus, error) { return nil, nil }
+ func (m *mockRuntime) Logs(ctx context.Context, name string, opts runtime.LogOptions) (io.ReadCloser, error) { return nil, nil }
+ func (m *mockRuntime) CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error { return nil }
+ func (m *mockRuntime) RemoveBySuffix(ctx context.Context, name string, suffix string) error { return nil }
+ func (m *mockRuntime) GetContainerPort(ctx context.Context, name string, suffix string) (int, error) { return 0, nil }
+ func (m *mockRuntime) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
+ func (m *mockRuntime) Restart(ctx context.Context, name string) error { return nil }
+ func (m *mockRuntime) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
+ func (m *mockRuntime) RemoveImage(ctx context.Context, imageTag string) error { return nil }
+ func (m *mockRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
++func (m *mockRuntime) Cleanup(ctx context.Context, opts runtime.CleanupOptions) (runtime.CleanupResult, error) {
++	return runtime.CleanupResult{}, nil
++}
+ func (m *mockRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+ 
+ func TestExtractApp(t *testing.T) {
+ 	p := New(nil, 8080)
+ 	tests := []struct {
+ 		host string
+ 		want string
+ 	}{
+ 		{"myapp.tengiz.local", "myapp"},
+ 		{"myapp.tengiz.local:8080", "myapp"},
+diff --git a/internal/runtime/cleanup.go b/internal/runtime/cleanup.go
+index 422e072..ab5055d 100644
+--- a/internal/runtime/cleanup.go
++++ b/internal/runtime/cleanup.go
+@@ -2,20 +2,39 @@ package runtime
+ 
+ import (
+ 	"context"
+ 	"fmt"
+ 	"log"
+ 	"os/exec"
+ 	"sort"
+ 	"strings"
+ )
+ 
++type CleanupOptions struct {
++	DryRun     bool
++	Containers bool
++	Images     bool
++	Volumes    bool
++	Networks   bool
++}
++
++type CleanupResult struct {
++	ContainersRemoved []string
++	ImagesRemoved     []string
++	VolumesRemoved    []string
++	NetworksRemoved   []string
++}
++
++func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
++	return CleanupResult{}, nil
++}
++
+ func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
+ 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
+ 	out, err := cmd.CombinedOutput()
+ 	if err != nil {
+ 		return fmt.Errorf("docker rmi: %w\n%s", err, string(out))
+ 	}
+ 	return nil
+ }
+ 
+ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error {
+diff --git a/internal/runtime/cleanup_test.go b/internal/runtime/cleanup_test.go
+index d7030e3..76f5137 100644
+--- a/internal/runtime/cleanup_test.go
++++ b/internal/runtime/cleanup_test.go
+@@ -1,17 +1,32 @@
+ package runtime
+ 
+ import (
+ 	"context"
++	"reflect"
+ 	"testing"
+ )
+ 
++func TestStubCleanup(t *testing.T) {
++	m := NewStub()
++	res, err := m.Cleanup(context.Background(), CleanupOptions{
++		Containers: true, Images: true, Volumes: true, Networks: true,
++	})
++	if err != nil {
++		t.Fatalf("Cleanup() error = %v", err)
++	}
++	empty := CleanupResult{}
++	if !reflect.DeepEqual(res, empty) {
++		t.Fatalf("stub Cleanup should return empty result, got %+v", res)
++	}
++}
++
+ func TestStubRemoveImage(t *testing.T) {
+ 	m := NewStub()
+ 	if err := m.RemoveImage(context.Background(), "tengiz-apps/testapp:v1"); err != nil {
+ 		t.Fatalf("RemoveImage() error = %v", err)
+ 	}
+ }
+ 
+ func TestStubKeepLastNImages(t *testing.T) {
+ 	m := NewStub()
+ 	if err := m.KeepLastNImages(context.Background(), "testapp", 5); err != nil {
+diff --git a/internal/runtime/runtime.go b/internal/runtime/runtime.go
+index dc8597f..8d86361 100644
+--- a/internal/runtime/runtime.go
++++ b/internal/runtime/runtime.go
+@@ -27,20 +27,21 @@ type RunOptions struct {
+ 	Interactive bool
+ 	ExtraEnv    map[string]string
+ }
+ 
+ type Manager interface {
+ 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
+ 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
+ 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
+ 	RemoveImage(ctx context.Context, imageTag string) error
+ 	KeepLastNImages(ctx context.Context, appName string, n int) error
++	Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error)
+ 	Start(ctx context.Context, name string) error
+ 	Stop(ctx context.Context, name string) error
+ 	Restart(ctx context.Context, name string) error
+ 	Remove(ctx context.Context, name string) error
+ 	RemoveBySuffix(ctx context.Context, name string, suffix string) error
+ 	IsActive(ctx context.Context, name string) (bool, error)
+ 	GetContainerPort(ctx context.Context, name string, suffix string) (int, error)
+ 	List(ctx context.Context) ([]types.AppStatus, error)
+ 	Logs(ctx context.Context, name string, opts LogOptions) (io.ReadCloser, error)
+ 	WaitForReady(ctx context.Context, name string, internalPort int) error
+@@ -111,13 +112,17 @@ func (m *stubManager) WaitForHealth(ctx context.Context, name string, hc *types.
+ }
+ 
+ func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
+ 	return nil
+ }
+ 
+ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
+ 	return nil
+ }
+ 
++func (m *stubManager) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
++	return CleanupResult{}, nil
++}
++
+ func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
+ 	return nil
+ }

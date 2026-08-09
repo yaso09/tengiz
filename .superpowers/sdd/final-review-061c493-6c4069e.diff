@@ -1,0 +1,867 @@
+BASE: 061c493
+HEAD: 6c4069e
+=== COMMITS ===
+6c4069e docs: document tengiz cleanup command
+dade73b feat(cli): add tengiz cleanup command
+9e0f57a feat(runtime): orchestrate category cleanup in Cleanup
+9957f47 feat(runtime): add volume and network cleanup
+ede8e79 feat(runtime): add unused image cleanup protecting tengiz-apps images
+eb0f66f feat(runtime): add label-protected stopped container cleanup
+b07c677 test(runtime): restore stub tests removed during cleanup task
+a287b82 feat(runtime): add Cleanup method to Manager interface
+=== STAT ===
+ AGENTS.md                        |   1 +
+ README.md                        |  22 +++
+ internal/cli/root.go             |  73 ++++++++++
+ internal/cli/root_test.go        |  18 +++
+ internal/idle/idle_test.go       |   3 +
+ internal/proxy/proxy_test.go     |   3 +
+ internal/runtime/cleanup.go      | 290 +++++++++++++++++++++++++++++++++++++++
+ internal/runtime/cleanup_test.go | 137 ++++++++++++++++++
+ internal/runtime/runtime.go      |   5 +
+ 9 files changed, 552 insertions(+)
+=== DIFF ===
+diff --git a/AGENTS.md b/AGENTS.md
+index 070c39a..e8ee1f2 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -51,20 +51,21 @@ tengiz secret set <app> <key> <value> → set an encrypted secret
+ tengiz secret get <app> <key>     → get a secret value
+ tengiz secret unset <app> <key>   → remove a secret
+ tengiz secret list <app>          → list secrets (values masked)
+ tengiz secret rotate-key         → rotate encryption key for local store
+ tengiz domain add/remove/list   → custom domains
+ tengiz volume add/remove/list   → persistent storage volumes
+ tengiz preview list <app>       → list preview deployments
+ tengiz preview rm <app> <pr>    → remove a preview deployment
+ tengiz preview deploy <app> <pr> → create/update preview deployment (webhook preferred)
+ tengiz rollback <app>           → rollback to previous deployment
++tengiz cleanup [--dry-run] → prune unused Docker resources (protects tengiz-app labeled containers)
+ tengiz notification enable      → enable notifications
+ tengiz notification disable     → disable notifications
+ tengiz notification config <app> [--events ...] [--all] → configure which events trigger notifications
+ tengiz notification set-channel <type> [--webhook-url ...] [--smtp-server ...] → configure a notification channel
+ tengiz notification show        → show current notification configuration
+ ```
+ 
+ ## Rules
+ 
+ - UI/UX değişikliklerinde README.md ve dokümantasyonu güncelle
+diff --git a/README.md b/README.md
+index 7c1d0a6..4b68987 100644
+--- a/README.md
++++ b/README.md
+@@ -228,20 +228,42 @@ Remove an application completely — stops the container, deletes it, and cleans
+ | `app` | Application name (required) |
+ 
+ ### `tengiz rollback <app>`
+ 
+ Rollback to the previous deployment. The previous active container is started on a new port, the proxy route is updated, and the current container is stopped and removed. Deployment statuses are updated in the deployment history.
+ 
+ | Argument | Description |
+ |----------|-------------|
+ | `app` | Application name (required) |
+ 
++### `tengiz cleanup`
++
++Clean up unused Docker resources to reclaim disk space. Prunes stopped containers, unused images, unused volumes, and unused networks.
++
++Containers managed by Tengiz (labeled `tengiz-app`) and images built by Tengiz (`tengiz-apps/*`) are always protected and never removed.
++
++| Flag | Description |
++|------|-------------|
++| `--dry-run` | Preview what would be removed without removing anything |
++| `--containers` | Clean stopped containers not managed by Tengiz |
++| `--images` | Clean unused images not built by Tengiz |
++| `--volumes` | Clean unused volumes |
++| `--networks` | Clean unused networks |
++
++With no category flag, all four categories are cleaned. Example:
++
++```bash
++tengiz cleanup              # clean all categories
++tengiz cleanup --dry-run    # preview without removing
++tengiz cleanup --containers # only stopped non-Tengiz containers
++```
++
+ ### `tengiz domain`
+ 
+ Manage custom domains for applications.
+ 
+ #### `tengiz domain add <app> <domain>`
+ 
+ Add a custom domain to an application.
+ 
+ | Argument | Description |
+ |----------|-------------|
+diff --git a/internal/cli/root.go b/internal/cli/root.go
+index 9da0ab7..593a44f 100644
+--- a/internal/cli/root.go
++++ b/internal/cli/root.go
+@@ -57,20 +57,26 @@ func init() {
+ 	rootCmd.AddCommand(webhookCmd)
+ 	gitCmd.AddCommand(gitConnectCmd)
+ 	gitCmd.AddCommand(gitDisconnectCmd)
+ 	rootCmd.AddCommand(gitCmd)
+ 	volumeCmd.AddCommand(volumeAddCmd)
+ 	volumeCmd.AddCommand(volumeRemoveCmd)
+ 	volumeCmd.AddCommand(volumeListCmd)
+ 	rootCmd.AddCommand(volumeCmd)
+ 	rootCmd.AddCommand(rollbackCmd)
+ 	rootCmd.AddCommand(buildLogsCmd)
++	rootCmd.AddCommand(cleanupCmd)
++	cleanupCmd.Flags().Bool("dry-run", false, "preview what would be removed without removing")
++	cleanupCmd.Flags().Bool("containers", false, "clean stopped non-Tengiz containers")
++	cleanupCmd.Flags().Bool("images", false, "clean unused non-Tengiz images")
++	cleanupCmd.Flags().Bool("volumes", false, "clean unused volumes")
++	cleanupCmd.Flags().Bool("networks", false, "clean unused networks")
+ 	rootCmd.AddCommand(runCmd)
+ 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
+ 	rootCmd.AddCommand(secretCmd)
+ 	notificationCmd.AddCommand(notificationEnableCmd)
+ 	notificationCmd.AddCommand(notificationDisableCmd)
+ 	notificationCmd.AddCommand(notificationConfigCmd)
+ 	notificationCmd.AddCommand(notificationSetChannelCmd)
+ 	notificationCmd.AddCommand(notificationShowCmd)
+ 	rootCmd.AddCommand(notificationCmd)
+ 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+@@ -1082,20 +1088,87 @@ Use --tail N to show only the last N lines of the latest build log.`,
+ 		}
+ 
+ 		fmt.Printf("Build logs for %s:\n", appName)
+ 		for _, id := range ids {
+ 			fmt.Printf("  %s\n", id)
+ 		}
+ 		return nil
+ 	},
+ }
+ 
++var cleanupCmd = &cobra.Command{
++	Use:   "cleanup",
++	Short: "Clean up unused Docker resources",
++	Long: `Clean up unused Docker resources.
++
++Prunes stopped containers, unused images, unused volumes, and unused networks.
++Containers managed by Tengiz (labeled tengiz-app) and images built by Tengiz
++(tengiz-apps/*) are always protected.
++
++By default all categories are cleaned. Use --containers, --images, --volumes,
++or --networks to limit cleanup to specific categories. Use --dry-run to preview
++what would be removed without removing anything.`,
++	Args: cobra.NoArgs,
++	RunE: func(cmd *cobra.Command, args []string) error {
++		dryRun, _ := cmd.Flags().GetBool("dry-run")
++		containers, _ := cmd.Flags().GetBool("containers")
++		images, _ := cmd.Flags().GetBool("images")
++		volumes, _ := cmd.Flags().GetBool("volumes")
++		networks, _ := cmd.Flags().GetBool("networks")
++
++		if !containers && !images && !volumes && !networks {
++			containers, images, volumes, networks = true, true, true, true
++		}
++
++		rt, err := runtime.NewDocker()
++		if err != nil {
++			return fmt.Errorf("docker: %w", err)
++		}
++
++		opts := runtime.CleanupOptions{
++			DryRun:     dryRun,
++			Containers: containers,
++			Images:     images,
++			Volumes:    volumes,
++			Networks:   networks,
++		}
++
++		result, err := rt.Cleanup(cmd.Context(), opts)
++		if err != nil {
++			return fmt.Errorf("cleanup: %w", err)
++		}
++
++		verb := "removed"
++		if dryRun {
++			verb = "would remove"
++		}
++		if len(result.ContainersRemoved) > 0 {
++			fmt.Printf("[tengiz] %s containers: %s\n", verb, strings.Join(result.ContainersRemoved, ", "))
++		}
++		if len(result.ImagesRemoved) > 0 {
++			fmt.Printf("[tengiz] %s images: %s\n", verb, strings.Join(result.ImagesRemoved, ", "))
++		}
++		if len(result.VolumesRemoved) > 0 {
++			fmt.Printf("[tengiz] %s volumes: %s\n", verb, strings.Join(result.VolumesRemoved, ", "))
++		}
++		if len(result.NetworksRemoved) > 0 {
++			fmt.Printf("[tengiz] %s networks: %s\n", verb, strings.Join(result.NetworksRemoved, ", "))
++		}
++		total := len(result.ContainersRemoved) + len(result.ImagesRemoved) +
++			len(result.VolumesRemoved) + len(result.NetworksRemoved)
++		if total == 0 {
++			fmt.Println("[tengiz] nothing to clean")
++		}
++		return nil
++	},
++}
++
+ var runCmd = &cobra.Command{
+ 	Use:   "run <app> [--] <command> [args...]",
+ 	Short: "Run a one-off command in a temporary container",
+ 	Long: `Run a one-off command inside a temporary container created from the
+ app's deployed image. The container is automatically removed on exit.
+ 
+ Useful for database migrations, console access, and data import tasks.
+ 
+ Examples:
+   tengiz run myapp -- python manage.py migrate
+diff --git a/internal/cli/root_test.go b/internal/cli/root_test.go
+index dbb66a9..d8f7269 100644
+--- a/internal/cli/root_test.go
++++ b/internal/cli/root_test.go
+@@ -90,20 +90,23 @@ func (m *mockRTForDeploy) Remove(ctx context.Context, name string) error { m.rem
+ func (m *mockRTForDeploy) RemoveBySuffix(ctx context.Context, name string, suffix string) error { m.removed.Add(1); return nil }
+ func (m *mockRTForDeploy) IsActive(ctx context.Context, name string) (bool, error) { return true, nil }
+ func (m *mockRTForDeploy) GetContainerPort(ctx context.Context, name string, suffix string) (int, error) { return 0, nil }
+ func (m *mockRTForDeploy) List(ctx context.Context) ([]types.AppStatus, error) { return nil, nil }
+ func (m *mockRTForDeploy) Logs(ctx context.Context, name string, opts runtime.LogOptions) (io.ReadCloser, error) { return nil, nil }
+ func (m *mockRTForDeploy) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
+ func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
+ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
+ func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
+ func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
++func (m *mockRTForDeploy) Cleanup(ctx context.Context, opts runtime.CleanupOptions) (runtime.CleanupResult, error) {
++	return runtime.CleanupResult{}, nil
++}
+ func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+ 
+ func TestMockRTForDeployImplementsManager(t *testing.T) {
+ 	var m runtime.Manager = &mockRTForDeploy{}
+ 	if m == nil {
+ 		t.Fatal("mockRTForDeploy does not implement Manager")
+ 	}
+ }
+ 
+ func TestDeployZeroDowntimeCreatesVersionedContainer(t *testing.T) {
+@@ -350,20 +353,35 @@ func TestLogsCmdFlagParsing(t *testing.T) {
+ 	}
+ 
+ 	helpText := buf.String()
+ 	for _, flag := range []string{"--since", "--until", "--tail", "--grep", "--follow", "-f"} {
+ 		if !strings.Contains(helpText, flag) {
+ 			t.Errorf("help text missing flag %q", flag)
+ 		}
+ 	}
+ }
+ 
++func TestCleanupCmdRegistered(t *testing.T) {
++	cmd, _, err := rootCmd.Find([]string{"cleanup"})
++	if err != nil {
++		t.Fatal("cleanup command not found")
++	}
++	if cmd == nil || cmd.Use != "cleanup" {
++		t.Fatal("cleanup command not registered")
++	}
++	for _, flag := range []string{"dry-run", "containers", "images", "volumes", "networks"} {
++		if cmd.Flags().Lookup(flag) == nil {
++			t.Errorf("cleanup flag %q not found", flag)
++		}
++	}
++}
++
+ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
+ 	configCmd, _, err := rootCmd.Find([]string{"config"})
+ 	if err != nil {
+ 		t.Fatalf("config command not found: %v", err)
+ 	}
+ 
+ 	expected := map[string]bool{"set": false, "get": false, "unset": false, "show": false}
+ 	for _, sub := range configCmd.Commands() {
+ 		if _, ok := expected[sub.Name()]; ok {
+ 			expected[sub.Name()] = true
+diff --git a/internal/idle/idle_test.go b/internal/idle/idle_test.go
+index fa21c9e..daccfe3 100644
+--- a/internal/idle/idle_test.go
++++ b/internal/idle/idle_test.go
+@@ -24,20 +24,23 @@ func (m *mockRuntime) IsActive(ctx context.Context, name string) (bool, error) {
+ func (m *mockRuntime) List(ctx context.Context) ([]types.AppStatus, error) { return nil, nil }
+ func (m *mockRuntime) Logs(ctx context.Context, name string, opts runtime.LogOptions) (io.ReadCloser, error) { return nil, nil }
+ func (m *mockRuntime) CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error { return nil }
+ func (m *mockRuntime) RemoveBySuffix(ctx context.Context, name string, suffix string) error { return nil }
+ func (m *mockRuntime) GetContainerPort(ctx context.Context, name string, suffix string) (int, error) { return 0, nil }
+ func (m *mockRuntime) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
+ func (m *mockRuntime) Restart(ctx context.Context, name string) error { return nil }
+ func (m *mockRuntime) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
+ func (m *mockRuntime) RemoveImage(ctx context.Context, imageTag string) error { return nil }
+ func (m *mockRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
++func (m *mockRuntime) Cleanup(ctx context.Context, opts runtime.CleanupOptions) (runtime.CleanupResult, error) {
++	return runtime.CleanupResult{}, nil
++}
+ func (m *mockRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+ 
+ func TestResetExtendsTimer(t *testing.T) {
+ 	mock := &mockRuntime{}
+ 	mgr := New(mock, 50*time.Millisecond)
+ 
+ 	mgr.Reset("testapp")
+ 	time.Sleep(30 * time.Millisecond)
+ 	mgr.Reset("testapp") // reset before expiry
+ 	time.Sleep(30 * time.Millisecond)
+diff --git a/internal/proxy/proxy_test.go b/internal/proxy/proxy_test.go
+index 25b9dbe..4128f8d 100644
+--- a/internal/proxy/proxy_test.go
++++ b/internal/proxy/proxy_test.go
+@@ -25,20 +25,23 @@ func (m *mockRuntime) IsActive(ctx context.Context, name string) (bool, error) {
+ func (m *mockRuntime) List(ctx context.Context) ([]types.AppStatus, error) { return nil, nil }
+ func (m *mockRuntime) Logs(ctx context.Context, name string, opts runtime.LogOptions) (io.ReadCloser, error) { return nil, nil }
+ func (m *mockRuntime) CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error { return nil }
+ func (m *mockRuntime) RemoveBySuffix(ctx context.Context, name string, suffix string) error { return nil }
+ func (m *mockRuntime) GetContainerPort(ctx context.Context, name string, suffix string) (int, error) { return 0, nil }
+ func (m *mockRuntime) WaitForReady(ctx context.Context, name string, internalPort int) error { return nil }
+ func (m *mockRuntime) Restart(ctx context.Context, name string) error { return nil }
+ func (m *mockRuntime) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
+ func (m *mockRuntime) RemoveImage(ctx context.Context, imageTag string) error { return nil }
+ func (m *mockRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
++func (m *mockRuntime) Cleanup(ctx context.Context, opts runtime.CleanupOptions) (runtime.CleanupResult, error) {
++	return runtime.CleanupResult{}, nil
++}
+ func (m *mockRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+ 
+ func TestExtractApp(t *testing.T) {
+ 	p := New(nil, 8080)
+ 	tests := []struct {
+ 		host string
+ 		want string
+ 	}{
+ 		{"myapp.tengiz.local", "myapp"},
+ 		{"myapp.tengiz.local:8080", "myapp"},
+diff --git a/internal/runtime/cleanup.go b/internal/runtime/cleanup.go
+index 422e072..52cb77f 100644
+--- a/internal/runtime/cleanup.go
++++ b/internal/runtime/cleanup.go
+@@ -2,20 +2,183 @@ package runtime
+ 
+ import (
+ 	"context"
+ 	"fmt"
+ 	"log"
+ 	"os/exec"
+ 	"sort"
+ 	"strings"
+ )
+ 
++type CleanupOptions struct {
++	DryRun     bool
++	Containers bool
++	Images     bool
++	Volumes    bool
++	Networks   bool
++}
++
++type CleanupResult struct {
++	ContainersRemoved []string
++	ImagesRemoved     []string
++	VolumesRemoved    []string
++	NetworksRemoved   []string
++}
++
++func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
++	var result CleanupResult
++	var err error
++
++	if opts.Containers {
++		result.ContainersRemoved, err = r.cleanupContainers(ctx, opts)
++		if err != nil {
++			return result, err
++		}
++	}
++	if opts.Images {
++		result.ImagesRemoved, err = r.cleanupImages(ctx, opts)
++		if err != nil {
++			return result, err
++		}
++	}
++	if opts.Volumes {
++		result.VolumesRemoved, err = r.cleanupVolumes(ctx, opts)
++		if err != nil {
++			return result, err
++		}
++	}
++	if opts.Networks {
++		result.NetworksRemoved, err = r.cleanupNetworks(ctx, opts)
++		if err != nil {
++			return result, err
++		}
++	}
++	return result, nil
++}
++
++func parseNameList(output string) []string {
++	var out []string
++	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
++		if line != "" {
++			out = append(out, line)
++		}
++	}
++	return out
++}
++
++type networkInfo struct {
++	ID     string
++	Name   string
++	Driver string
++}
++
++func parseNetworkList(output string) []networkInfo {
++	var out []networkInfo
++	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
++		if line == "" {
++			continue
++		}
++		parts := strings.SplitN(line, "|", 3)
++		if len(parts) < 3 {
++			continue
++		}
++		out = append(out, networkInfo{ID: parts[0], Name: parts[1], Driver: parts[2]})
++	}
++	return out
++}
++
++var protectedNetworks = map[string]bool{"bridge": true, "host": true, "none": true}
++
++func foreignUnusedNetworks(all []networkInfo, inUse []string) []networkInfo {
++	used := make(map[string]bool, len(inUse))
++	for _, n := range inUse {
++		used[n] = true
++	}
++	var out []networkInfo
++	for _, n := range all {
++		if protectedNetworks[n.Name] || used[n.Name] {
++			continue
++		}
++		out = append(out, n)
++	}
++	return out
++}
++
++type containerInfo struct {
++	ID     string
++	Name   string
++	Status string
++	Labels string
++}
++
++func parseContainerList(output string) []containerInfo {
++	lines := strings.Split(strings.TrimSpace(output), "\n")
++	var list []containerInfo
++	for _, line := range lines {
++		if line == "" {
++			continue
++		}
++		parts := strings.SplitN(line, "|", 4)
++		if len(parts) < 4 {
++			continue
++		}
++		list = append(list, containerInfo{
++			ID:     parts[0],
++			Name:   parts[1],
++			Status: parts[2],
++			Labels: parts[3],
++		})
++	}
++	return list
++}
++
++func stoppedForeignContainers(list []containerInfo) []containerInfo {
++	var out []containerInfo
++	for _, c := range list {
++		if strings.Contains(c.Labels, labelKey+"=") {
++			continue
++		}
++		if !isStoppedStatus(c.Status) {
++			continue
++		}
++		out = append(out, c)
++	}
++	return out
++}
++
++func isStoppedStatus(status string) bool {
++	return strings.HasPrefix(status, "Exited") ||
++		status == "Created" ||
++		status == "Dead"
++}
++
++func (r *dockerRuntime) cleanupContainers(ctx context.Context, opts CleanupOptions) ([]string, error) {
++	cmd := exec.CommandContext(ctx, "docker", "ps", "-a",
++		"--format", "{{.ID}}|{{.Names}}|{{.Status}}|{{.Labels}}")
++	out, err := cmd.CombinedOutput()
++	if err != nil {
++		return nil, fmt.Errorf("docker ps: %w\n%s", err, string(out))
++	}
++	var removed []string
++	for _, c := range stoppedForeignContainers(parseContainerList(string(out))) {
++		removed = append(removed, c.Name)
++		if opts.DryRun {
++			continue
++		}
++		rm := exec.CommandContext(ctx, "docker", "rm", "-f", c.ID)
++		if rerrOut, rerr := rm.CombinedOutput(); rerr != nil {
++			log.Printf("[runtime] cleanup: remove container %s: %v\n%s", c.Name, rerr, string(rerrOut))
++		}
++	}
++	return removed, nil
++}
++
+ func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
+ 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
+ 	out, err := cmd.CombinedOutput()
+ 	if err != nil {
+ 		return fmt.Errorf("docker rmi: %w\n%s", err, string(out))
+ 	}
+ 	return nil
+ }
+ 
+ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error {
+@@ -50,10 +213,137 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
+ 		tag := parts[0]
+ 		if strings.HasSuffix(tag, ":latest") {
+ 			continue
+ 		}
+ 		if err := r.RemoveImage(ctx, tag); err != nil {
+ 			log.Printf("[runtime] failed to remove old image %s: %v", tag, err)
+ 		}
+ 	}
+ 	return nil
+ }
++
++type imageInfo struct {
++	ID  string
++	Ref string
++}
++
++func parseImageList(output string) []imageInfo {
++	lines := strings.Split(strings.TrimSpace(output), "\n")
++	var list []imageInfo
++	for _, line := range lines {
++		if line == "" {
++			continue
++		}
++		parts := strings.SplitN(line, "|", 2)
++		if len(parts) < 2 {
++			continue
++		}
++		list = append(list, imageInfo{ID: parts[0], Ref: parts[1]})
++	}
++	return list
++}
++
++func unusedForeignImages(all []imageInfo, inUse []string) []imageInfo {
++	used := make(map[string]bool, len(inUse))
++	for _, ref := range inUse {
++		used[ref] = true
++	}
++	var out []imageInfo
++	for _, img := range all {
++		if strings.HasPrefix(img.Ref, "tengiz-apps/") {
++			continue
++		}
++		if used[img.Ref] || used[img.ID] {
++			continue
++		}
++		out = append(out, img)
++	}
++	return out
++}
++
++func (r *dockerRuntime) cleanupImages(ctx context.Context, opts CleanupOptions) ([]string, error) {
++	allCmd := exec.CommandContext(ctx, "docker", "images",
++		"--format", "{{.ID}}|{{.Repository}}:{{.Tag}}")
++	allOut, err := allCmd.CombinedOutput()
++	if err != nil {
++		return nil, fmt.Errorf("docker images: %w\n%s", err, string(allOut))
++	}
++
++	psCmd := exec.CommandContext(ctx, "docker", "ps", "-a",
++		"--format", "{{.Image}}")
++	psOut, err := psCmd.CombinedOutput()
++	if err != nil {
++		return nil, fmt.Errorf("docker ps (images): %w\n%s", err, string(psOut))
++	}
++	var inUse []string
++	for _, line := range strings.Split(strings.TrimSpace(string(psOut)), "\n") {
++		if line != "" {
++			inUse = append(inUse, line)
++		}
++	}
++
++	var removed []string
++	for _, img := range unusedForeignImages(parseImageList(string(allOut)), inUse) {
++		removed = append(removed, img.Ref)
++		if opts.DryRun {
++			continue
++		}
++		if err := r.RemoveImage(ctx, img.ID); err != nil {
++			log.Printf("[runtime] cleanup: remove image %s: %v", img.ID, err)
++		}
++	}
++	return removed, nil
++}
++
++func (r *dockerRuntime) cleanupVolumes(ctx context.Context, opts CleanupOptions) ([]string, error) {
++	cmd := exec.CommandContext(ctx, "docker", "volume", "ls",
++		"-f", "dangling=true", "--format", "{{.Name}}")
++	out, err := cmd.CombinedOutput()
++	if err != nil {
++		return nil, fmt.Errorf("docker volume ls: %w\n%s", err, string(out))
++	}
++	var removed []string
++	for _, name := range parseNameList(string(out)) {
++		removed = append(removed, name)
++		if opts.DryRun {
++			continue
++		}
++		rm := exec.CommandContext(ctx, "docker", "volume", "rm", "-f", name)
++		if rerrOut, rerr := rm.CombinedOutput(); rerr != nil {
++			log.Printf("[runtime] cleanup: remove volume %s: %v\n%s", name, rerr, string(rerrOut))
++		}
++	}
++	return removed, nil
++}
++
++func (r *dockerRuntime) cleanupNetworks(ctx context.Context, opts CleanupOptions) ([]string, error) {
++	ls := exec.CommandContext(ctx, "docker", "network", "ls",
++		"--format", "{{.ID}}|{{.Name}}|{{.Driver}}")
++	out, err := ls.CombinedOutput()
++	if err != nil {
++		return nil, fmt.Errorf("docker network ls: %w\n%s", err, string(out))
++	}
++	all := parseNetworkList(string(out))
++
++	var inUse []string
++	for _, n := range all {
++		cnt := exec.CommandContext(ctx, "docker", "network", "inspect",
++			"--format", "{{len .Containers}}", n.ID)
++		cntOut, cntErr := cnt.CombinedOutput()
++		if cntErr == nil && strings.TrimSpace(string(cntOut)) != "0" {
++			inUse = append(inUse, n.Name)
++		}
++	}
++
++	var removed []string
++	for _, n := range foreignUnusedNetworks(all, inUse) {
++		removed = append(removed, n.Name)
++		if opts.DryRun {
++			continue
++		}
++		rm := exec.CommandContext(ctx, "docker", "network", "rm", n.ID)
++		if rerrOut, rerr := rm.CombinedOutput(); rerr != nil {
++			log.Printf("[runtime] cleanup: remove network %s: %v\n%s", n.Name, rerr, string(rerrOut))
++		}
++	}
++	return removed, nil
++}
+diff --git a/internal/runtime/cleanup_test.go b/internal/runtime/cleanup_test.go
+index d7030e3..9054e5e 100644
+--- a/internal/runtime/cleanup_test.go
++++ b/internal/runtime/cleanup_test.go
+@@ -1,20 +1,157 @@
+ package runtime
+ 
+ import (
+ 	"context"
++	"reflect"
+ 	"testing"
+ )
+ 
++func TestStubCleanup(t *testing.T) {
++	m := NewStub()
++	res, err := m.Cleanup(context.Background(), CleanupOptions{
++		Containers: true, Images: true, Volumes: true, Networks: true,
++	})
++	if err != nil {
++		t.Fatalf("Cleanup() error = %v", err)
++	}
++	empty := CleanupResult{}
++	if !reflect.DeepEqual(res, empty) {
++		t.Fatalf("stub Cleanup should return empty result, got %+v", res)
++	}
++}
++
+ func TestStubRemoveImage(t *testing.T) {
+ 	m := NewStub()
+ 	if err := m.RemoveImage(context.Background(), "tengiz-apps/testapp:v1"); err != nil {
+ 		t.Fatalf("RemoveImage() error = %v", err)
+ 	}
+ }
+ 
+ func TestStubKeepLastNImages(t *testing.T) {
+ 	m := NewStub()
+ 	if err := m.KeepLastNImages(context.Background(), "testapp", 5); err != nil {
+ 		t.Fatalf("KeepLastNImages() error = %v", err)
+ 	}
+ }
++
++func TestCleanupOptionsDefaults(t *testing.T) {
++	opts := CleanupOptions{}
++	if opts.DryRun || opts.Containers || opts.Images || opts.Volumes || opts.Networks {
++		t.Fatalf("zero-value CleanupOptions must be all-false, got %+v", opts)
++	}
++}
++
++func TestParseContainerList(t *testing.T) {
++	output := "abc123|web-app|Exited (0) 2 days ago|tengiz-app=myapp,tengiz-env=production\n" +
++		"def456|helper|Created|\n" +
++		"ghi789|runner|Up 10 seconds|tengiz-app=other\n" +
++		"jkl012|stale|Exited (137) Less than a second ago|"
++	list := parseContainerList(output)
++	if len(list) != 4 {
++		t.Fatalf("expected 4 entries, got %d: %+v", len(list), list)
++	}
++	if list[0].Name != "web-app" {
++		t.Errorf("entry[0].Name = %q, want %q", list[0].Name, "web-app")
++	}
++	if list[0].Labels != "tengiz-app=myapp,tengiz-env=production" {
++		t.Errorf("entry[0].Labels = %q", list[0].Labels)
++	}
++}
++
++func TestParseImageList(t *testing.T) {
++	output := "abc123|tengiz-apps/myapp:production-latest\n" +
++		"def456|nginx:latest\n" +
++		"ghi789|<none>:<none>\n" +
++		"jkl012|redis:7"
++	list := parseImageList(output)
++	if len(list) != 4 {
++		t.Fatalf("expected 4 entries, got %d: %+v", len(list), list)
++	}
++	if list[0].ID != "abc123" || list[0].Ref != "tengiz-apps/myapp:production-latest" {
++		t.Errorf("entry[0] = %+v", list[0])
++	}
++}
++
++func TestUnusedForeignImages(t *testing.T) {
++	all := []imageInfo{
++		{ID: "a", Ref: "tengiz-apps/myapp:production-latest"}, // protected repo
++		{ID: "b", Ref: "nginx:latest"},                        // used
++		{ID: "c", Ref: "redis:7"},                             // unused foreign
++		{ID: "d", Ref: "<none>:<none>"},                       // dangling, unused
++	}
++	got := unusedForeignImages(all, []string{"nginx:latest", "someid"})
++	want := []string{"c", "d"}
++	if len(got) != len(want) {
++		t.Fatalf("got %d, want %d: %+v", len(got), len(want), got)
++	}
++	for i, id := range got {
++		if id.ID != want[i] {
++			t.Errorf("got[%d] = %q, want %q", i, id.ID, want[i])
++		}
++	}
++}
++
++func TestStoppedForeignContainers(t *testing.T) {
++	list := []containerInfo{
++		{ID: "a", Name: "web", Status: "Exited (0) 1 hour ago", Labels: "tengiz-app=myapp"},
++		{ID: "b", Name: "stale", Status: "Exited (137) 2 hours ago", Labels: ""},
++		{ID: "c", Name: "created", Status: "Created", Labels: ""},
++		{ID: "d", Name: "running", Status: "Up 1 hour", Labels: ""},
++		{ID: "e", Name: "dead", Status: "Dead", Labels: ""},
++		{ID: "f", Name: "restarting", Status: "Restarting (1) 5 seconds ago", Labels: ""},
++	}
++	got := stoppedForeignContainers(list)
++	want := []string{"stale", "created", "dead"}
++	if len(got) != len(want) {
++		t.Fatalf("got %d entries, want %d: %+v", len(got), len(want), got)
++	}
++	for i, c := range got {
++		if c.Name != want[i] {
++			t.Errorf("got[%d].Name = %q, want %q", i, c.Name, want[i])
++		}
++	}
++}
++
++func TestParseNameList(t *testing.T) {
++	got := parseNameList("vol-a\nvol-b\n\nvol-c")
++	want := []string{"vol-a", "vol-b", "vol-c"}
++	if len(got) != len(want) {
++		t.Fatalf("got %v, want %v", got, want)
++	}
++	for i := range want {
++		if got[i] != want[i] {
++			t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
++		}
++	}
++}
++
++func TestParseNetworkList(t *testing.T) {
++	output := "1|bridge|bridge\n2|ffnet|bridge\n3|host|host\n4|none|null"
++	got := parseNetworkList(output)
++	if len(got) != 4 {
++		t.Fatalf("expected 4 entries, got %d: %+v", len(got), got)
++	}
++	if got[1].Name != "ffnet" || got[1].Driver != "bridge" {
++		t.Errorf("got[1] = %+v", got[1])
++	}
++}
++
++func TestForeignUnusedNetworks(t *testing.T) {
++	all := []networkInfo{
++		{ID: "1", Name: "bridge"},    // protected default
++		{ID: "2", Name: "host"},      // protected default
++		{ID: "3", Name: "none"},      // protected default
++		{ID: "4", Name: "ffnet"},     // unused
++		{ID: "5", Name: "inuse-net"}, // in use
++	}
++	got := foreignUnusedNetworks(all, []string{"inuse-net"})
++	want := []string{"ffnet"}
++	if len(got) != len(want) {
++		t.Fatalf("got %v, want %v", got, want)
++	}
++	for i, n := range got {
++		if n.Name != want[i] {
++			t.Errorf("got[%d] = %q, want %q", i, n.Name, want[i])
++		}
++	}
++}
+diff --git a/internal/runtime/runtime.go b/internal/runtime/runtime.go
+index dc8597f..8d86361 100644
+--- a/internal/runtime/runtime.go
++++ b/internal/runtime/runtime.go
+@@ -27,20 +27,21 @@ type RunOptions struct {
+ 	Interactive bool
+ 	ExtraEnv    map[string]string
+ }
+ 
+ type Manager interface {
+ 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
+ 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
+ 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
+ 	RemoveImage(ctx context.Context, imageTag string) error
+ 	KeepLastNImages(ctx context.Context, appName string, n int) error
++	Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error)
+ 	Start(ctx context.Context, name string) error
+ 	Stop(ctx context.Context, name string) error
+ 	Restart(ctx context.Context, name string) error
+ 	Remove(ctx context.Context, name string) error
+ 	RemoveBySuffix(ctx context.Context, name string, suffix string) error
+ 	IsActive(ctx context.Context, name string) (bool, error)
+ 	GetContainerPort(ctx context.Context, name string, suffix string) (int, error)
+ 	List(ctx context.Context) ([]types.AppStatus, error)
+ 	Logs(ctx context.Context, name string, opts LogOptions) (io.ReadCloser, error)
+ 	WaitForReady(ctx context.Context, name string, internalPort int) error
+@@ -111,13 +112,17 @@ func (m *stubManager) WaitForHealth(ctx context.Context, name string, hc *types.
+ }
+ 
+ func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
+ 	return nil
+ }
+ 
+ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
+ 	return nil
+ }
+ 
++func (m *stubManager) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
++	return CleanupResult{}, nil
++}
++
+ func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
+ 	return nil
+ }

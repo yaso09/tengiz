@@ -1,0 +1,148 @@
+BASE: 6c4069e
+HEAD: eb72576
+=== COMMITS ===
+eb72576 fix(runtime): resolve in-use images by ID in cleanup
+=== STAT ===
+ internal/runtime/cleanup.go      | 40 +++++++++++++++++++++++++++++++++-------
+ internal/runtime/cleanup_test.go | 20 ++++++++++++++++++++
+ 2 files changed, 53 insertions(+), 7 deletions(-)
+=== DIFF ===
+diff --git a/internal/runtime/cleanup.go b/internal/runtime/cleanup.go
+index 52cb77f..5f86c6e 100644
+--- a/internal/runtime/cleanup.go
++++ b/internal/runtime/cleanup.go
+@@ -235,56 +235,82 @@ func parseImageList(output string) []imageInfo {
+ 		}
+ 		parts := strings.SplitN(line, "|", 2)
+ 		if len(parts) < 2 {
+ 			continue
+ 		}
+ 		list = append(list, imageInfo{ID: parts[0], Ref: parts[1]})
+ 	}
+ 	return list
+ }
+ 
++func imageIDInUse(id string, inUse []string) bool {
++	for _, entry := range inUse {
++		full := strings.TrimPrefix(entry, "sha256:")
++		if !isHexID(full) {
++			continue
++		}
++		if strings.HasPrefix(full, id) {
++			return true
++		}
++	}
++	return false
++}
++
++func isHexID(s string) bool {
++	for _, c := range s {
++		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
++			return false
++		}
++	}
++	return len(s) > 0
++}
++
+ func unusedForeignImages(all []imageInfo, inUse []string) []imageInfo {
+ 	used := make(map[string]bool, len(inUse))
+ 	for _, ref := range inUse {
+ 		used[ref] = true
+ 	}
+ 	var out []imageInfo
+ 	for _, img := range all {
+ 		if strings.HasPrefix(img.Ref, "tengiz-apps/") {
+ 			continue
+ 		}
+-		if used[img.Ref] || used[img.ID] {
++		if used[img.Ref] || used[img.ID] || imageIDInUse(img.ID, inUse) {
+ 			continue
+ 		}
+ 		out = append(out, img)
+ 	}
+ 	return out
+ }
+ 
+ func (r *dockerRuntime) cleanupImages(ctx context.Context, opts CleanupOptions) ([]string, error) {
+ 	allCmd := exec.CommandContext(ctx, "docker", "images",
+ 		"--format", "{{.ID}}|{{.Repository}}:{{.Tag}}")
+ 	allOut, err := allCmd.CombinedOutput()
+ 	if err != nil {
+ 		return nil, fmt.Errorf("docker images: %w\n%s", err, string(allOut))
+ 	}
+ 
+-	psCmd := exec.CommandContext(ctx, "docker", "ps", "-a",
+-		"--format", "{{.Image}}")
++	psCmd := exec.CommandContext(ctx, "docker", "ps", "-aq", "--no-trunc")
+ 	psOut, err := psCmd.CombinedOutput()
+ 	if err != nil {
+-		return nil, fmt.Errorf("docker ps (images): %w\n%s", err, string(psOut))
++		return nil, fmt.Errorf("docker ps (containers): %w\n%s", err, string(psOut))
+ 	}
+ 	var inUse []string
+-	for _, line := range strings.Split(strings.TrimSpace(string(psOut)), "\n") {
+-		if line != "" {
+-			inUse = append(inUse, line)
++	for _, cid := range parseNameList(string(psOut)) {
++		insp := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.Image}}", cid)
++		inspOut, inspErr := insp.CombinedOutput()
++		if inspErr != nil {
++			continue
++		}
++		if id := strings.TrimSpace(string(inspOut)); id != "" {
++			inUse = append(inUse, id)
+ 		}
+ 	}
+ 
+ 	var removed []string
+ 	for _, img := range unusedForeignImages(parseImageList(string(allOut)), inUse) {
+ 		removed = append(removed, img.Ref)
+ 		if opts.DryRun {
+ 			continue
+ 		}
+ 		if err := r.RemoveImage(ctx, img.ID); err != nil {
+diff --git a/internal/runtime/cleanup_test.go b/internal/runtime/cleanup_test.go
+index 9054e5e..cd6636b 100644
+--- a/internal/runtime/cleanup_test.go
++++ b/internal/runtime/cleanup_test.go
+@@ -84,20 +84,40 @@ func TestUnusedForeignImages(t *testing.T) {
+ 	if len(got) != len(want) {
+ 		t.Fatalf("got %d, want %d: %+v", len(got), len(want), got)
+ 	}
+ 	for i, id := range got {
+ 		if id.ID != want[i] {
+ 			t.Errorf("got[%d] = %q, want %q", i, id.ID, want[i])
+ 		}
+ 	}
+ }
+ 
++func TestUnusedForeignImagesByImageID(t *testing.T) {
++	all := []imageInfo{
++		{ID: "abc123", Ref: "foo:1"},      // shared image, tag referenced by a container
++		{ID: "abc123", Ref: "foo:latest"}, // same image ID, different tag not referenced
++		{ID: "def456", Ref: "bar:2"},      // unused foreign image
++	}
++	got := unusedForeignImages(all, []string{
++		"sha256:abc123deadbeefcafefeed0123456789abcdef0123456789abcdef012345678",
++	})
++	want := []string{"bar:2"}
++	if len(got) != len(want) {
++		t.Fatalf("got %d, want %d: %+v", len(got), len(want), got)
++	}
++	for i, img := range got {
++		if img.Ref != want[i] {
++			t.Errorf("got[%d].Ref = %q, want %q", i, img.Ref, want[i])
++		}
++	}
++}
++
+ func TestStoppedForeignContainers(t *testing.T) {
+ 	list := []containerInfo{
+ 		{ID: "a", Name: "web", Status: "Exited (0) 1 hour ago", Labels: "tengiz-app=myapp"},
+ 		{ID: "b", Name: "stale", Status: "Exited (137) 2 hours ago", Labels: ""},
+ 		{ID: "c", Name: "created", Status: "Created", Labels: ""},
+ 		{ID: "d", Name: "running", Status: "Up 1 hour", Labels: ""},
+ 		{ID: "e", Name: "dead", Status: "Dead", Labels: ""},
+ 		{ID: "f", Name: "restarting", Status: "Restarting (1) 5 seconds ago", Labels: ""},
+ 	}
+ 	got := stoppedForeignContainers(list)
