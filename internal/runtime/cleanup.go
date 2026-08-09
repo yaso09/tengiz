@@ -145,3 +145,76 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	}
 	return nil
 }
+
+type imageInfo struct {
+	ID  string
+	Ref string
+}
+
+func parseImageList(output string) []imageInfo {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	var list []imageInfo
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		list = append(list, imageInfo{ID: parts[0], Ref: parts[1]})
+	}
+	return list
+}
+
+func unusedForeignImages(all []imageInfo, inUse []string) []imageInfo {
+	used := make(map[string]bool, len(inUse))
+	for _, ref := range inUse {
+		used[ref] = true
+	}
+	var out []imageInfo
+	for _, img := range all {
+		if strings.HasPrefix(img.Ref, "tengiz-apps/") {
+			continue
+		}
+		if used[img.Ref] || used[img.ID] {
+			continue
+		}
+		out = append(out, img)
+	}
+	return out
+}
+
+func (r *dockerRuntime) cleanupImages(ctx context.Context, opts CleanupOptions) ([]string, error) {
+	allCmd := exec.CommandContext(ctx, "docker", "images",
+		"--format", "{{.ID}}|{{.Repository}}:{{.Tag}}")
+	allOut, err := allCmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker images: %w\n%s", err, string(allOut))
+	}
+
+	psCmd := exec.CommandContext(ctx, "docker", "ps", "-a",
+		"--format", "{{.Image}}")
+	psOut, err := psCmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps (images): %w\n%s", err, string(psOut))
+	}
+	var inUse []string
+	for _, line := range strings.Split(strings.TrimSpace(string(psOut)), "\n") {
+		if line != "" {
+			inUse = append(inUse, line)
+		}
+	}
+
+	var removed []string
+	for _, img := range unusedForeignImages(parseImageList(string(allOut)), inUse) {
+		removed = append(removed, img.Ref)
+		if opts.DryRun {
+			continue
+		}
+		if err := r.RemoveImage(ctx, img.ID); err != nil {
+			log.Printf("[runtime] cleanup: remove image %s: %v", img.ID, err)
+		}
+	}
+	return removed, nil
+}

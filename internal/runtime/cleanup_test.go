@@ -51,6 +51,39 @@ func TestParseContainerList(t *testing.T) {
 	}
 }
 
+func TestParseImageList(t *testing.T) {
+	output := "abc123|tengiz-apps/myapp:production-latest\n" +
+		"def456|nginx:latest\n" +
+		"ghi789|<none>:<none>\n" +
+		"jkl012|redis:7"
+	list := parseImageList(output)
+	if len(list) != 4 {
+		t.Fatalf("expected 4 entries, got %d: %+v", len(list), list)
+	}
+	if list[0].ID != "abc123" || list[0].Ref != "tengiz-apps/myapp:production-latest" {
+		t.Errorf("entry[0] = %+v", list[0])
+	}
+}
+
+func TestUnusedForeignImages(t *testing.T) {
+	all := []imageInfo{
+		{ID: "a", Ref: "tengiz-apps/myapp:production-latest"}, // protected repo
+		{ID: "b", Ref: "nginx:latest"},                        // used
+		{ID: "c", Ref: "redis:7"},                             // unused foreign
+		{ID: "d", Ref: "<none>:<none>"},                       // dangling, unused
+	}
+	got := unusedForeignImages(all, []string{"nginx:latest", "someid"})
+	want := []string{"c", "d"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d, want %d: %+v", len(got), len(want), got)
+	}
+	for i, id := range got {
+		if id.ID != want[i] {
+			t.Errorf("got[%d] = %q, want %q", i, id.ID, want[i])
+		}
+	}
+}
+
 func TestStoppedForeignContainers(t *testing.T) {
 	list := []containerInfo{
 		{ID: "a", Name: "web", Status: "Exited (0) 1 hour ago", Labels: "tengiz-app=myapp"},
