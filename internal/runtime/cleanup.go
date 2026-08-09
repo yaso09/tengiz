@@ -178,3 +178,171 @@ func oldImageTags(lines []string, keep int) []string {
 	}
 	return out
 }
+
+func (r *dockerRuntime) runDockerOutput(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker %s: %w\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
+func (r *dockerRuntime) prune(ctx context.Context, args []string) ([]string, error) {
+	out, err := r.runDockerOutput(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	return parsePruneOutput(out), nil
+}
+
+func (r *dockerRuntime) list(ctx context.Context, args []string) ([]string, error) {
+	out, err := r.runDockerOutput(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	var items []string
+	for _, line := range strings.Split(out, "\n") {
+		if s := strings.TrimSpace(line); s != "" {
+			items = append(items, s)
+		}
+	}
+	return items, nil
+}
+
+func (r *dockerRuntime) listPrunableContainers(ctx context.Context) ([]string, error) {
+	out, err := r.runDockerOutput(ctx, listStoppedContainersArgs()...)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 2)
+		name := parts[0]
+		label := ""
+		if len(parts) > 1 {
+			label = parts[1]
+		}
+		if label != "" {
+			continue // tengiz-managed container: protected
+		}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+func (r *dockerRuntime) networkCandidates(ctx context.Context) ([]string, error) {
+	items, err := r.list(ctx, listPrunableNetworksArgs())
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, n := range items {
+		switch n {
+		case "bridge", "host", "none":
+			continue
+		}
+		out = append(out, n)
+	}
+	return out, nil
+}
+
+func (r *dockerRuntime) listOldAppImages(ctx context.Context, appName, env string, keep int) ([]string, error) {
+	if keep <= 0 {
+		return nil, nil
+	}
+	out, err := r.runDockerOutput(ctx, listAppImagesArgs(appName, env)...)
+	if err != nil {
+		return nil, err
+	}
+	var lines []string
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return oldImageTags(lines, keep), nil
+}
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (*CleanupReport, error) {
+	report := &CleanupReport{DryRun: opts.DryRun}
+	if opts.Env == "" {
+		opts.Env = "production"
+	}
+
+	if opts.Containers {
+		var items []string
+		var err error
+		if opts.DryRun {
+			items, err = r.listPrunableContainers(ctx)
+		} else {
+			items, err = r.prune(ctx, pruneContainersArgs())
+		}
+		if err != nil {
+			return report, err
+		}
+		report.Containers = items
+	}
+
+	if opts.Volumes {
+		var items []string
+		var err error
+		if opts.DryRun {
+			items, err = r.list(ctx, listPrunableVolumesArgs())
+		} else {
+			items, err = r.prune(ctx, pruneVolumesArgs())
+		}
+		if err != nil {
+			return report, err
+		}
+		report.Volumes = items
+	}
+
+	if opts.Networks {
+		var items []string
+		var err error
+		if opts.DryRun {
+			items, err = r.networkCandidates(ctx)
+		} else {
+			items, err = r.prune(ctx, pruneNetworksArgs())
+		}
+		if err != nil {
+			return report, err
+		}
+		report.Networks = items
+	}
+
+	if opts.Images {
+		var items []string
+		var err error
+		if opts.DryRun {
+			items, err = r.list(ctx, listDanglingImagesArgs())
+		} else {
+			items, err = r.prune(ctx, pruneImagesArgs())
+		}
+		if err != nil {
+			return report, err
+		}
+		report.Images = items
+
+		for _, app := range opts.AppNames {
+			olds, err := r.listOldAppImages(ctx, app, opts.Env, opts.KeepImages)
+			if err != nil {
+				continue
+			}
+			report.Images = append(report.Images, olds...)
+			if !opts.DryRun {
+				for _, tag := range olds {
+					if err := r.RemoveImage(ctx, tag); err != nil {
+						log.Printf("[runtime] cleanup: failed to remove image %s: %v", tag, err)
+					}
+				}
+			}
+		}
+	}
+
+	return report, nil
+}
