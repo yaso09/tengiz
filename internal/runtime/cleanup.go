@@ -25,7 +25,34 @@ type CleanupResult struct {
 }
 
 func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
-	return CleanupResult{}, nil
+	var result CleanupResult
+	var err error
+
+	if opts.Containers {
+		result.ContainersRemoved, err = r.cleanupContainers(ctx, opts)
+		if err != nil {
+			return result, err
+		}
+	}
+	if opts.Images {
+		result.ImagesRemoved, err = r.cleanupImages(ctx, opts)
+		if err != nil {
+			return result, err
+		}
+	}
+	if opts.Volumes {
+		result.VolumesRemoved, err = r.cleanupVolumes(ctx, opts)
+		if err != nil {
+			return result, err
+		}
+	}
+	if opts.Networks {
+		result.NetworksRemoved, err = r.cleanupNetworks(ctx, opts)
+		if err != nil {
+			return result, err
+		}
+	}
+	return result, nil
 }
 
 func parseNameList(output string) []string {

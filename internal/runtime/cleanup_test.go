@@ -34,6 +34,13 @@ func TestStubKeepLastNImages(t *testing.T) {
 	}
 }
 
+func TestCleanupOptionsDefaults(t *testing.T) {
+	opts := CleanupOptions{}
+	if opts.DryRun || opts.Containers || opts.Images || opts.Volumes || opts.Networks {
+		t.Fatalf("zero-value CleanupOptions must be all-false, got %+v", opts)
+	}
+}
+
 func TestParseContainerList(t *testing.T) {
 	output := "abc123|web-app|Exited (0) 2 days ago|tengiz-app=myapp,tengiz-env=production\n" +
 		"def456|helper|Created|\n" +
