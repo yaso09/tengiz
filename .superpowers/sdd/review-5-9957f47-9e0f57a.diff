@@ -1,0 +1,95 @@
+BASE: 9957f47
+HEAD: 9e0f57a
+=== COMMITS ===
+9e0f57a feat(runtime): orchestrate category cleanup in Cleanup
+=== STAT ===
+ internal/runtime/cleanup.go      | 29 ++++++++++++++++++++++++++++-
+ internal/runtime/cleanup_test.go |  7 +++++++
+ 2 files changed, 35 insertions(+), 1 deletion(-)
+=== DIFF ===
+diff --git a/internal/runtime/cleanup.go b/internal/runtime/cleanup.go
+index d87c9d9..52cb77f 100644
+--- a/internal/runtime/cleanup.go
++++ b/internal/runtime/cleanup.go
+@@ -18,21 +18,48 @@ type CleanupOptions struct {
+ }
+ 
+ type CleanupResult struct {
+ 	ContainersRemoved []string
+ 	ImagesRemoved     []string
+ 	VolumesRemoved    []string
+ 	NetworksRemoved   []string
+ }
+ 
+ func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
+-	return CleanupResult{}, nil
++	var result CleanupResult
++	var err error
++
++	if opts.Containers {
++		result.ContainersRemoved, err = r.cleanupContainers(ctx, opts)
++		if err != nil {
++			return result, err
++		}
++	}
++	if opts.Images {
++		result.ImagesRemoved, err = r.cleanupImages(ctx, opts)
++		if err != nil {
++			return result, err
++		}
++	}
++	if opts.Volumes {
++		result.VolumesRemoved, err = r.cleanupVolumes(ctx, opts)
++		if err != nil {
++			return result, err
++		}
++	}
++	if opts.Networks {
++		result.NetworksRemoved, err = r.cleanupNetworks(ctx, opts)
++		if err != nil {
++			return result, err
++		}
++	}
++	return result, nil
+ }
+ 
+ func parseNameList(output string) []string {
+ 	var out []string
+ 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+ 		if line != "" {
+ 			out = append(out, line)
+ 		}
+ 	}
+ 	return out
+diff --git a/internal/runtime/cleanup_test.go b/internal/runtime/cleanup_test.go
+index 692e738..9054e5e 100644
+--- a/internal/runtime/cleanup_test.go
++++ b/internal/runtime/cleanup_test.go
+@@ -27,20 +27,27 @@ func TestStubRemoveImage(t *testing.T) {
+ 	}
+ }
+ 
+ func TestStubKeepLastNImages(t *testing.T) {
+ 	m := NewStub()
+ 	if err := m.KeepLastNImages(context.Background(), "testapp", 5); err != nil {
+ 		t.Fatalf("KeepLastNImages() error = %v", err)
+ 	}
+ }
+ 
++func TestCleanupOptionsDefaults(t *testing.T) {
++	opts := CleanupOptions{}
++	if opts.DryRun || opts.Containers || opts.Images || opts.Volumes || opts.Networks {
++		t.Fatalf("zero-value CleanupOptions must be all-false, got %+v", opts)
++	}
++}
++
+ func TestParseContainerList(t *testing.T) {
+ 	output := "abc123|web-app|Exited (0) 2 days ago|tengiz-app=myapp,tengiz-env=production\n" +
+ 		"def456|helper|Created|\n" +
+ 		"ghi789|runner|Up 10 seconds|tengiz-app=other\n" +
+ 		"jkl012|stale|Exited (137) Less than a second ago|"
+ 	list := parseContainerList(output)
+ 	if len(list) != 4 {
+ 		t.Fatalf("expected 4 entries, got %d: %+v", len(list), list)
+ 	}
+ 	if list[0].Name != "web-app" {
