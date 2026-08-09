@@ -78,3 +78,48 @@ func TestActiveCategoriesOrderAndFilter(t *testing.T) {
 		}
 	}
 }
+
+func TestStubPrune(t *testing.T) {
+	m := NewStub()
+	results, err := m.Prune(context.Background(), PruneOptions{Containers: true})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected no results from stub, got %v", results)
+	}
+}
+
+func TestPruneDryRun(t *testing.T) {
+	r := &dockerRuntime{}
+	results, err := r.Prune(context.Background(), PruneOptions{Containers: true, Images: true, DryRun: true})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("got %d results, want 2", len(results))
+	}
+	if results[0].Category != PruneContainers || results[1].Category != PruneImages {
+		t.Errorf("categories out of order: %v, %v", results[0].Category, results[1].Category)
+	}
+	if !results[0].DryRun {
+		t.Error("result[0] missing DryRun flag")
+	}
+	if len(results[0].Args) != 5 || results[0].Args[4] != "label!=tengiz-app" {
+		t.Errorf("result[0].Args = %v, want label-filtered container prune args", results[0].Args)
+	}
+	if results[0].Reclaimed != "(dry run)" {
+		t.Errorf("result[0].Reclaimed = %q, want %q", results[0].Reclaimed, "(dry run)")
+	}
+}
+
+func TestPruneNoCategories(t *testing.T) {
+	r := &dockerRuntime{}
+	results, err := r.Prune(context.Background(), PruneOptions{DryRun: true})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results for empty opts, got %d", len(results))
+	}
+}

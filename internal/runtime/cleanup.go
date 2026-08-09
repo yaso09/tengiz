@@ -131,3 +131,26 @@ func parseReclaimed(output string) string {
 	}
 	return ""
 }
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) ([]PruneResult, error) {
+	var results []PruneResult
+	for _, category := range activeCategories(opts) {
+		args := pruneArgs(category)
+		result := PruneResult{Category: category, DryRun: opts.DryRun, Args: args}
+		if opts.DryRun {
+			result.Reclaimed = "(dry run)"
+			results = append(results, result)
+			continue
+		}
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			result.Err = fmt.Errorf("docker %s: %w\n%s", category, err, string(out))
+			results = append(results, result)
+			continue
+		}
+		result.Reclaimed = parseReclaimed(string(out))
+		results = append(results, result)
+	}
+	return results, nil
+}
