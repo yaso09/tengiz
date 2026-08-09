@@ -104,3 +104,47 @@ func TestStoppedForeignContainers(t *testing.T) {
 		}
 	}
 }
+
+func TestParseNameList(t *testing.T) {
+	got := parseNameList("vol-a\nvol-b\n\nvol-c")
+	want := []string{"vol-a", "vol-b", "vol-c"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseNetworkList(t *testing.T) {
+	output := "1|bridge|bridge\n2|ffnet|bridge\n3|host|host\n4|none|null"
+	got := parseNetworkList(output)
+	if len(got) != 4 {
+		t.Fatalf("expected 4 entries, got %d: %+v", len(got), got)
+	}
+	if got[1].Name != "ffnet" || got[1].Driver != "bridge" {
+		t.Errorf("got[1] = %+v", got[1])
+	}
+}
+
+func TestForeignUnusedNetworks(t *testing.T) {
+	all := []networkInfo{
+		{ID: "1", Name: "bridge"},    // protected default
+		{ID: "2", Name: "host"},      // protected default
+		{ID: "3", Name: "none"},      // protected default
+		{ID: "4", Name: "ffnet"},     // unused
+		{ID: "5", Name: "inuse-net"}, // in use
+	}
+	got := foreignUnusedNetworks(all, []string{"inuse-net"})
+	want := []string{"ffnet"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i, n := range got {
+		if n.Name != want[i] {
+			t.Errorf("got[%d] = %q, want %q", i, n.Name, want[i])
+		}
+	}
+}

@@ -28,6 +28,54 @@ func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (Clean
 	return CleanupResult{}, nil
 }
 
+func parseNameList(output string) []string {
+	var out []string
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+type networkInfo struct {
+	ID     string
+	Name   string
+	Driver string
+}
+
+func parseNetworkList(output string) []networkInfo {
+	var out []networkInfo
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		out = append(out, networkInfo{ID: parts[0], Name: parts[1], Driver: parts[2]})
+	}
+	return out
+}
+
+var protectedNetworks = map[string]bool{"bridge": true, "host": true, "none": true}
+
+func foreignUnusedNetworks(all []networkInfo, inUse []string) []networkInfo {
+	used := make(map[string]bool, len(inUse))
+	for _, n := range inUse {
+		used[n] = true
+	}
+	var out []networkInfo
+	for _, n := range all {
+		if protectedNetworks[n.Name] || used[n.Name] {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
 type containerInfo struct {
 	ID     string
 	Name   string
@@ -214,6 +262,60 @@ func (r *dockerRuntime) cleanupImages(ctx context.Context, opts CleanupOptions) 
 		}
 		if err := r.RemoveImage(ctx, img.ID); err != nil {
 			log.Printf("[runtime] cleanup: remove image %s: %v", img.ID, err)
+		}
+	}
+	return removed, nil
+}
+
+func (r *dockerRuntime) cleanupVolumes(ctx context.Context, opts CleanupOptions) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "volume", "ls",
+		"-f", "dangling=true", "--format", "{{.Name}}")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker volume ls: %w\n%s", err, string(out))
+	}
+	var removed []string
+	for _, name := range parseNameList(string(out)) {
+		removed = append(removed, name)
+		if opts.DryRun {
+			continue
+		}
+		rm := exec.CommandContext(ctx, "docker", "volume", "rm", "-f", name)
+		if rerrOut, rerr := rm.CombinedOutput(); rerr != nil {
+			log.Printf("[runtime] cleanup: remove volume %s: %v\n%s", name, rerr, string(rerrOut))
+		}
+	}
+	return removed, nil
+}
+
+func (r *dockerRuntime) cleanupNetworks(ctx context.Context, opts CleanupOptions) ([]string, error) {
+	ls := exec.CommandContext(ctx, "docker", "network", "ls",
+		"--format", "{{.ID}}|{{.Name}}|{{.Driver}}")
+	out, err := ls.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker network ls: %w\n%s", err, string(out))
+	}
+	all := parseNetworkList(string(out))
+
+	var inUse []string
+	for _, n := range all {
+		cnt := exec.CommandContext(ctx, "docker", "network", "inspect",
+			"--format", "{{len .Containers}}", n.ID)
+		cntOut, cntErr := cnt.CombinedOutput()
+		if cntErr == nil && strings.TrimSpace(string(cntOut)) != "0" {
+			inUse = append(inUse, n.Name)
+		}
+	}
+
+	var removed []string
+	for _, n := range foreignUnusedNetworks(all, inUse) {
+		removed = append(removed, n.Name)
+		if opts.DryRun {
+			continue
+		}
+		rm := exec.CommandContext(ctx, "docker", "network", "rm", n.ID)
+		if rerrOut, rerr := rm.CombinedOutput(); rerr != nil {
+			log.Printf("[runtime] cleanup: remove network %s: %v\n%s", n.Name, rerr, string(rerrOut))
 		}
 	}
 	return removed, nil
