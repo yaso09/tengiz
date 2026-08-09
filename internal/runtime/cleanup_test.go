@@ -132,3 +132,27 @@ func TestOldImageTagsSkipsMalformedLines(t *testing.T) {
 		t.Fatalf("oldImageTags() = %v, want [tengiz-apps/myapp:production-1700000001]", got)
 	}
 }
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	report, err := m.Cleanup(context.Background(), CleanupOptions{DryRun: true, Containers: true, KeepImages: 5})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if report == nil {
+		t.Fatal("Cleanup() returned nil report")
+	}
+	if !report.DryRun {
+		t.Fatal("stub Cleanup should echo DryRun in report")
+	}
+	if len(report.Containers) != 0 {
+		t.Fatalf("stub Cleanup Containers = %v, want empty", report.Containers)
+	}
+}
+
+func TestDockerRuntimeImplementsCleanup(t *testing.T) {
+	var m Manager = &dockerRuntime{}
+	if m == nil {
+		t.Fatal("dockerRuntime does not satisfy Manager")
+	}
+}
