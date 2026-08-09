@@ -242,6 +242,28 @@ func parseImageList(output string) []imageInfo {
 	return list
 }
 
+func imageIDInUse(id string, inUse []string) bool {
+	for _, entry := range inUse {
+		full := strings.TrimPrefix(entry, "sha256:")
+		if !isHexID(full) {
+			continue
+		}
+		if strings.HasPrefix(full, id) {
+			return true
+		}
+	}
+	return false
+}
+
+func isHexID(s string) bool {
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
 func unusedForeignImages(all []imageInfo, inUse []string) []imageInfo {
 	used := make(map[string]bool, len(inUse))
 	for _, ref := range inUse {
@@ -252,7 +274,7 @@ func unusedForeignImages(all []imageInfo, inUse []string) []imageInfo {
 		if strings.HasPrefix(img.Ref, "tengiz-apps/") {
 			continue
 		}
-		if used[img.Ref] || used[img.ID] {
+		if used[img.Ref] || used[img.ID] || imageIDInUse(img.ID, inUse) {
 			continue
 		}
 		out = append(out, img)
@@ -268,16 +290,20 @@ func (r *dockerRuntime) cleanupImages(ctx context.Context, opts CleanupOptions) 
 		return nil, fmt.Errorf("docker images: %w\n%s", err, string(allOut))
 	}
 
-	psCmd := exec.CommandContext(ctx, "docker", "ps", "-a",
-		"--format", "{{.Image}}")
+	psCmd := exec.CommandContext(ctx, "docker", "ps", "-aq", "--no-trunc")
 	psOut, err := psCmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("docker ps (images): %w\n%s", err, string(psOut))
+		return nil, fmt.Errorf("docker ps (containers): %w\n%s", err, string(psOut))
 	}
 	var inUse []string
-	for _, line := range strings.Split(strings.TrimSpace(string(psOut)), "\n") {
-		if line != "" {
-			inUse = append(inUse, line)
+	for _, cid := range parseNameList(string(psOut)) {
+		insp := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.Image}}", cid)
+		inspOut, inspErr := insp.CombinedOutput()
+		if inspErr != nil {
+			continue
+		}
+		if id := strings.TrimSpace(string(inspOut)); id != "" {
+			inUse = append(inUse, id)
 		}
 	}
 

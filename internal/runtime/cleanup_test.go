@@ -91,6 +91,26 @@ func TestUnusedForeignImages(t *testing.T) {
 	}
 }
 
+func TestUnusedForeignImagesByImageID(t *testing.T) {
+	all := []imageInfo{
+		{ID: "abc123", Ref: "foo:1"},      // shared image, tag referenced by a container
+		{ID: "abc123", Ref: "foo:latest"}, // same image ID, different tag not referenced
+		{ID: "def456", Ref: "bar:2"},      // unused foreign image
+	}
+	got := unusedForeignImages(all, []string{
+		"sha256:abc123deadbeefcafefeed0123456789abcdef0123456789abcdef012345678",
+	})
+	want := []string{"bar:2"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d, want %d: %+v", len(got), len(want), got)
+	}
+	for i, img := range got {
+		if img.Ref != want[i] {
+			t.Errorf("got[%d].Ref = %q, want %q", i, img.Ref, want[i])
+		}
+	}
+}
+
 func TestStoppedForeignContainers(t *testing.T) {
 	list := []containerInfo{
 		{ID: "a", Name: "web", Status: "Exited (0) 1 hour ago", Labels: "tengiz-app=myapp"},
