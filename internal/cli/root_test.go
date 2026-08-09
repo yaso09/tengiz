@@ -379,3 +379,60 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCmdFlagParsing(t *testing.T) {
+	var got runtime.CleanupOptions
+	originalRunE := cleanupCmd.RunE
+	defer func() { cleanupCmd.RunE = originalRunE }()
+	cleanupCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		keep, _ := cmd.Flags().GetInt("keep")
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		networks, _ := cmd.Flags().GetBool("networks")
+		got = runtime.CleanupOptions{
+			DryRun: dryRun, KeepImages: keep,
+			Containers: containers, Images: images,
+			Volumes: volumes, Networks: networks,
+		}
+		return nil
+	}
+	rootCmd.SetArgs([]string{"cleanup", "--dry-run", "--keep", "10", "--containers", "--networks"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !got.DryRun {
+		t.Error("dry-run = false, want true")
+	}
+	if got.KeepImages != 10 {
+		t.Errorf("keep = %d, want 10", got.KeepImages)
+	}
+	if !got.Containers || got.Images || got.Volumes || !got.Networks {
+		t.Errorf("category flags = %+v, want Containers=true Networks=true Images=false Volumes=false", got)
+	}
+}
+
+func TestCleanupReportFormat(t *testing.T) {
+	report := &runtime.CleanupReport{
+		DryRun:     true,
+		Containers: []string{"build-abc"},
+		Images:     []string{"tengiz-apps/myapp:production-1700000000"},
+	}
+	out := formatCleanupReport(report)
+	for _, want := range []string{"dry-run", "containers: 1", "build-abc", "tengiz-apps/myapp:production-1700000000", "images: 1", "volumes: 0", "networks: 0"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("formatCleanupReport() missing %q in:\n%s", want, out)
+		}
+	}
+}
