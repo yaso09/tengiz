@@ -12,7 +12,7 @@
 
 | Package | Responsibility |
 |---------|---------------|
-| `runtime.Manager` | Interface for container lifecycle. `NewDocker()` = exec-based impl, `NewStub()` = test mock. Also: `CreateFromImage`, `RemoveImage`, `KeepLastNImages` for rollback + image cleanup. `ContainerName(name, env)` helper. |
+| `runtime.Manager` | Interface for container lifecycle. `NewDocker()` = exec-based impl, `NewStub()` = test mock. Also: `CreateFromImage`, `RemoveImage`, `KeepLastNImages` for rollback + image cleanup, `Prune`/`DiskUsage` for housekeeping. `ContainerName(name, env)` helper. |
 | `builder` | Framework detection (`detect.go`) + Dockerfile generation (`builder.go`). Supports: Docker, Next.js, Vite, Go, Node, Python, static. Nixpacks backend (`build.builder: nixpacks`) for hundreds of frameworks (Ruby, Rust, PHP, etc). Env-aware image tags (`{env}-{deploymentID}`). |
 | `proxy` | `httputil.ReverseProxy` with host-based routing (`appname.tengiz.local` → port 9000+) and custom domain support. Cold-starts stopped containers on demand. Env-aware via `NewWithEnv`. |
 | `idle` | Per-app timer. `Reset(name)` extends deadline. On expiry: calls `runtime.Stop()`. Default 5m timeout. Env-aware via `NewWithEnv`. |
@@ -58,6 +58,7 @@ tengiz preview list <app>       → list preview deployments
 tengiz preview rm <app> <pr>    → remove a preview deployment
 tengiz preview deploy <app> <pr> → create/update preview deployment (webhook preferred)
 tengiz rollback <app>           → rollback to previous deployment
+tengiz cleanup [--dry-run] [--volumes] → prune unused Docker resources (labels protect Tengiz containers/networks)
 tengiz notification enable      → enable notifications
 tengiz notification disable     → disable notifications
 tengiz notification config <app> [--events ...] [--all] → configure which events trigger notifications
@@ -86,3 +87,4 @@ tengiz notification show        → show current notification configuration
 - Secrets providers: `local` (default, AES-256-GCM encrypted JSON), `vault` (HashiCorp Vault), `doppler` (Doppler API). Set via `secrets_provider` in `.tengiz.yaml` or `--provider` flag on secret commands.
 - Build-time secrets: pass `--secret id=NAME,src=/path` to Docker build via `SetBuildSecrets()` on the Builder. Configured automatically from app secrets during deploy.
 - Secret interpolation: `[[secret.NAME]]` in env var values is resolved at deploy/run time from stored secrets.
+- `tengiz cleanup` prunes via per-resource `docker ... prune` commands with `--filter label!=tengiz-app` on containers/networks (Tengiz-managed resources always protected). Image prune is dangling-only (no `-a`); volumes only via `--volumes`.
