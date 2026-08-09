@@ -149,6 +149,21 @@ List all deployed applications and their status.
 
 Output: `NAME`, `STATE` (running/stopped), `PORT`, `ENVIRONMENT`, `HEALTH`.
 
+### `tengiz cleanup [--dry-run] [--keep N]`
+
+Prune unused Docker resources to reclaim disk space. Containers, volumes, and networks without the `tengiz-app` label are removed; Tengiz-managed containers and the images they use are never touched. Old app image versions beyond `--keep` are pruned per app per environment.
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Show what would be removed without removing anything |
+| `--keep N` | Keep N most recent image versions per app (default: 5) |
+| `--containers` | Prune stopped containers not managed by Tengiz |
+| `--images` | Prune dangling images and old app image versions |
+| `--volumes` | Prune unused volumes |
+| `--networks` | Prune unused networks |
+
+By default all four categories run. Pass any combination of `--containers` / `--images` / `--volumes` / `--networks` to restrict. Use `tengiz cleanup --env staging --dry-run` to preview cleanup for a specific environment.
+
 ### `tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] <app>`
 
 Show application logs.
@@ -572,6 +587,7 @@ When `webhook.secret` is set, the server verifies the payload signature on every
 | `tengiz git connect` | Generate an SSH deploy key |
 | `tengiz git disconnect` | Remove the SSH deploy key |
 | `tengiz webhook [-p <port>] [--config <path>]` | Start the webhook server with optional config |
+| `tengiz cleanup [--dry-run] [--keep N]` | Prune unused Docker resources (protected Tengiz containers) |
 | `tengiz init --git-repo URL` | Create config with git repo |
 
 ## Architecture
