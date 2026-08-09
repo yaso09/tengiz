@@ -1,0 +1,156 @@
+BASE: b07c677
+HEAD: eb0f66f
+=== COMMITS ===
+eb0f66f feat(runtime): add label-protected stopped container cleanup
+=== STAT ===
+ internal/runtime/cleanup.go      | 69 ++++++++++++++++++++++++++++++++++++++++
+ internal/runtime/cleanup_test.go | 38 ++++++++++++++++++++++
+ 2 files changed, 107 insertions(+)
+=== DIFF ===
+diff --git a/internal/runtime/cleanup.go b/internal/runtime/cleanup.go
+index ab5055d..183ca4c 100644
+--- a/internal/runtime/cleanup.go
++++ b/internal/runtime/cleanup.go
+@@ -21,20 +21,89 @@ type CleanupResult struct {
+ 	ContainersRemoved []string
+ 	ImagesRemoved     []string
+ 	VolumesRemoved    []string
+ 	NetworksRemoved   []string
+ }
+ 
+ func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
+ 	return CleanupResult{}, nil
+ }
+ 
++type containerInfo struct {
++	ID     string
++	Name   string
++	Status string
++	Labels string
++}
++
++func parseContainerList(output string) []containerInfo {
++	lines := strings.Split(strings.TrimSpace(output), "\n")
++	var list []containerInfo
++	for _, line := range lines {
++		if line == "" {
++			continue
++		}
++		parts := strings.SplitN(line, "|", 4)
++		if len(parts) < 4 {
++			continue
++		}
++		list = append(list, containerInfo{
++			ID:     parts[0],
++			Name:   parts[1],
++			Status: parts[2],
++			Labels: parts[3],
++		})
++	}
++	return list
++}
++
++func stoppedForeignContainers(list []containerInfo) []containerInfo {
++	var out []containerInfo
++	for _, c := range list {
++		if strings.Contains(c.Labels, labelKey+"=") {
++			continue
++		}
++		if !isStoppedStatus(c.Status) {
++			continue
++		}
++		out = append(out, c)
++	}
++	return out
++}
++
++func isStoppedStatus(status string) bool {
++	return strings.HasPrefix(status, "Exited") ||
++		status == "Created" ||
++		status == "Dead"
++}
++
++func (r *dockerRuntime) cleanupContainers(ctx context.Context, opts CleanupOptions) ([]string, error) {
++	cmd := exec.CommandContext(ctx, "docker", "ps", "-a",
++		"--format", "{{.ID}}|{{.Names}}|{{.Status}}|{{.Labels}}")
++	out, err := cmd.CombinedOutput()
++	if err != nil {
++		return nil, fmt.Errorf("docker ps: %w\n%s", err, string(out))
++	}
++	var removed []string
++	for _, c := range stoppedForeignContainers(parseContainerList(string(out))) {
++		removed = append(removed, c.Name)
++		if opts.DryRun {
++			continue
++		}
++		rm := exec.CommandContext(ctx, "docker", "rm", "-f", c.ID)
++		if rerrOut, rerr := rm.CombinedOutput(); rerr != nil {
++			log.Printf("[runtime] cleanup: remove container %s: %v\n%s", c.Name, rerr, string(rerrOut))
++		}
++	}
++	return removed, nil
++}
++
+ func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
+ 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
+ 	out, err := cmd.CombinedOutput()
+ 	if err != nil {
+ 		return fmt.Errorf("docker rmi: %w\n%s", err, string(out))
+ 	}
+ 	return nil
+ }
+ 
+ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error {
+diff --git a/internal/runtime/cleanup_test.go b/internal/runtime/cleanup_test.go
+index 76f5137..051fa3b 100644
+--- a/internal/runtime/cleanup_test.go
++++ b/internal/runtime/cleanup_test.go
+@@ -26,10 +26,48 @@ func TestStubRemoveImage(t *testing.T) {
+ 		t.Fatalf("RemoveImage() error = %v", err)
+ 	}
+ }
+ 
+ func TestStubKeepLastNImages(t *testing.T) {
+ 	m := NewStub()
+ 	if err := m.KeepLastNImages(context.Background(), "testapp", 5); err != nil {
+ 		t.Fatalf("KeepLastNImages() error = %v", err)
+ 	}
+ }
++
++func TestParseContainerList(t *testing.T) {
++	output := "abc123|web-app|Exited (0) 2 days ago|tengiz-app=myapp,tengiz-env=production\n" +
++		"def456|helper|Created|\n" +
++		"ghi789|runner|Up 10 seconds|tengiz-app=other\n" +
++		"jkl012|stale|Exited (137) Less than a second ago|"
++	list := parseContainerList(output)
++	if len(list) != 4 {
++		t.Fatalf("expected 4 entries, got %d: %+v", len(list), list)
++	}
++	if list[0].Name != "web-app" {
++		t.Errorf("entry[0].Name = %q, want %q", list[0].Name, "web-app")
++	}
++	if list[0].Labels != "tengiz-app=myapp,tengiz-env=production" {
++		t.Errorf("entry[0].Labels = %q", list[0].Labels)
++	}
++}
++
++func TestStoppedForeignContainers(t *testing.T) {
++	list := []containerInfo{
++		{ID: "a", Name: "web", Status: "Exited (0) 1 hour ago", Labels: "tengiz-app=myapp"},
++		{ID: "b", Name: "stale", Status: "Exited (137) 2 hours ago", Labels: ""},
++		{ID: "c", Name: "created", Status: "Created", Labels: ""},
++		{ID: "d", Name: "running", Status: "Up 1 hour", Labels: ""},
++		{ID: "e", Name: "dead", Status: "Dead", Labels: ""},
++		{ID: "f", Name: "restarting", Status: "Restarting (1) 5 seconds ago", Labels: ""},
++	}
++	got := stoppedForeignContainers(list)
++	want := []string{"stale", "created", "dead"}
++	if len(got) != len(want) {
++		t.Fatalf("got %d entries, want %d: %+v", len(got), len(want), got)
++	}
++	for i, c := range got {
++		if c.Name != want[i] {
++			t.Errorf("got[%d].Name = %q, want %q", i, c.Name, want[i])
++		}
++	}
++}

@@ -1,0 +1,155 @@
+BASE: eb0f66f
+HEAD: ede8e79
+=== COMMITS ===
+ede8e79 feat(runtime): add unused image cleanup protecting tengiz-apps images
+=== STAT ===
+ internal/runtime/cleanup.go      | 73 ++++++++++++++++++++++++++++++++++++++++
+ internal/runtime/cleanup_test.go | 33 ++++++++++++++++++
+ 2 files changed, 106 insertions(+)
+=== DIFF ===
+diff --git a/internal/runtime/cleanup.go b/internal/runtime/cleanup.go
+index 183ca4c..4637a1d 100644
+--- a/internal/runtime/cleanup.go
++++ b/internal/runtime/cleanup.go
+@@ -138,10 +138,83 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
+ 		tag := parts[0]
+ 		if strings.HasSuffix(tag, ":latest") {
+ 			continue
+ 		}
+ 		if err := r.RemoveImage(ctx, tag); err != nil {
+ 			log.Printf("[runtime] failed to remove old image %s: %v", tag, err)
+ 		}
+ 	}
+ 	return nil
+ }
++
++type imageInfo struct {
++	ID  string
++	Ref string
++}
++
++func parseImageList(output string) []imageInfo {
++	lines := strings.Split(strings.TrimSpace(output), "\n")
++	var list []imageInfo
++	for _, line := range lines {
++		if line == "" {
++			continue
++		}
++		parts := strings.SplitN(line, "|", 2)
++		if len(parts) < 2 {
++			continue
++		}
++		list = append(list, imageInfo{ID: parts[0], Ref: parts[1]})
++	}
++	return list
++}
++
++func unusedForeignImages(all []imageInfo, inUse []string) []imageInfo {
++	used := make(map[string]bool, len(inUse))
++	for _, ref := range inUse {
++		used[ref] = true
++	}
++	var out []imageInfo
++	for _, img := range all {
++		if strings.HasPrefix(img.Ref, "tengiz-apps/") {
++			continue
++		}
++		if used[img.Ref] || used[img.ID] {
++			continue
++		}
++		out = append(out, img)
++	}
++	return out
++}
++
++func (r *dockerRuntime) cleanupImages(ctx context.Context, opts CleanupOptions) ([]string, error) {
++	allCmd := exec.CommandContext(ctx, "docker", "images",
++		"--format", "{{.ID}}|{{.Repository}}:{{.Tag}}")
++	allOut, err := allCmd.CombinedOutput()
++	if err != nil {
++		return nil, fmt.Errorf("docker images: %w\n%s", err, string(allOut))
++	}
++
++	psCmd := exec.CommandContext(ctx, "docker", "ps", "-a",
++		"--format", "{{.Image}}")
++	psOut, err := psCmd.CombinedOutput()
++	if err != nil {
++		return nil, fmt.Errorf("docker ps (images): %w\n%s", err, string(psOut))
++	}
++	var inUse []string
++	for _, line := range strings.Split(strings.TrimSpace(string(psOut)), "\n") {
++		if line != "" {
++			inUse = append(inUse, line)
++		}
++	}
++
++	var removed []string
++	for _, img := range unusedForeignImages(parseImageList(string(allOut)), inUse) {
++		removed = append(removed, img.Ref)
++		if opts.DryRun {
++			continue
++		}
++		if err := r.RemoveImage(ctx, img.ID); err != nil {
++			log.Printf("[runtime] cleanup: remove image %s: %v", img.ID, err)
++		}
++	}
++	return removed, nil
++}
+diff --git a/internal/runtime/cleanup_test.go b/internal/runtime/cleanup_test.go
+index 051fa3b..7a0f6d1 100644
+--- a/internal/runtime/cleanup_test.go
++++ b/internal/runtime/cleanup_test.go
+@@ -44,20 +44,53 @@ func TestParseContainerList(t *testing.T) {
+ 		t.Fatalf("expected 4 entries, got %d: %+v", len(list), list)
+ 	}
+ 	if list[0].Name != "web-app" {
+ 		t.Errorf("entry[0].Name = %q, want %q", list[0].Name, "web-app")
+ 	}
+ 	if list[0].Labels != "tengiz-app=myapp,tengiz-env=production" {
+ 		t.Errorf("entry[0].Labels = %q", list[0].Labels)
+ 	}
+ }
+ 
++func TestParseImageList(t *testing.T) {
++	output := "abc123|tengiz-apps/myapp:production-latest\n" +
++		"def456|nginx:latest\n" +
++		"ghi789|<none>:<none>\n" +
++		"jkl012|redis:7"
++	list := parseImageList(output)
++	if len(list) != 4 {
++		t.Fatalf("expected 4 entries, got %d: %+v", len(list), list)
++	}
++	if list[0].ID != "abc123" || list[0].Ref != "tengiz-apps/myapp:production-latest" {
++		t.Errorf("entry[0] = %+v", list[0])
++	}
++}
++
++func TestUnusedForeignImages(t *testing.T) {
++	all := []imageInfo{
++		{ID: "a", Ref: "tengiz-apps/myapp:production-latest"}, // protected repo
++		{ID: "b", Ref: "nginx:latest"},                        // used
++		{ID: "c", Ref: "redis:7"},                             // unused foreign
++		{ID: "d", Ref: "<none>:<none>"},                       // dangling, unused
++	}
++	got := unusedForeignImages(all, []string{"nginx:latest", "someid"})
++	want := []string{"c", "d"}
++	if len(got) != len(want) {
++		t.Fatalf("got %d, want %d: %+v", len(got), len(want), got)
++	}
++	for i, id := range got {
++		if id.ID != want[i] {
++			t.Errorf("got[%d] = %q, want %q", i, id.ID, want[i])
++		}
++	}
++}
++
+ func TestStoppedForeignContainers(t *testing.T) {
+ 	list := []containerInfo{
+ 		{ID: "a", Name: "web", Status: "Exited (0) 1 hour ago", Labels: "tengiz-app=myapp"},
+ 		{ID: "b", Name: "stale", Status: "Exited (137) 2 hours ago", Labels: ""},
+ 		{ID: "c", Name: "created", Status: "Created", Labels: ""},
+ 		{ID: "d", Name: "running", Status: "Up 1 hour", Labels: ""},
+ 		{ID: "e", Name: "dead", Status: "Dead", Labels: ""},
+ 		{ID: "f", Name: "restarting", Status: "Restarting (1) 5 seconds ago", Labels: ""},
+ 	}
+ 	got := stoppedForeignContainers(list)

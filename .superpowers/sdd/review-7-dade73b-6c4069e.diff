@@ -1,0 +1,82 @@
+BASE: dade73b
+HEAD: 6c4069e
+=== COMMITS ===
+6c4069e docs: document tengiz cleanup command
+=== STAT ===
+ AGENTS.md |  1 +
+ README.md | 22 ++++++++++++++++++++++
+ 2 files changed, 23 insertions(+)
+=== DIFF ===
+diff --git a/AGENTS.md b/AGENTS.md
+index 070c39a..e8ee1f2 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -51,20 +51,21 @@ tengiz secret set <app> <key> <value> → set an encrypted secret
+ tengiz secret get <app> <key>     → get a secret value
+ tengiz secret unset <app> <key>   → remove a secret
+ tengiz secret list <app>          → list secrets (values masked)
+ tengiz secret rotate-key         → rotate encryption key for local store
+ tengiz domain add/remove/list   → custom domains
+ tengiz volume add/remove/list   → persistent storage volumes
+ tengiz preview list <app>       → list preview deployments
+ tengiz preview rm <app> <pr>    → remove a preview deployment
+ tengiz preview deploy <app> <pr> → create/update preview deployment (webhook preferred)
+ tengiz rollback <app>           → rollback to previous deployment
++tengiz cleanup [--dry-run] → prune unused Docker resources (protects tengiz-app labeled containers)
+ tengiz notification enable      → enable notifications
+ tengiz notification disable     → disable notifications
+ tengiz notification config <app> [--events ...] [--all] → configure which events trigger notifications
+ tengiz notification set-channel <type> [--webhook-url ...] [--smtp-server ...] → configure a notification channel
+ tengiz notification show        → show current notification configuration
+ ```
+ 
+ ## Rules
+ 
+ - UI/UX değişikliklerinde README.md ve dokümantasyonu güncelle
+diff --git a/README.md b/README.md
+index 7c1d0a6..4b68987 100644
+--- a/README.md
++++ b/README.md
+@@ -228,20 +228,42 @@ Remove an application completely — stops the container, deletes it, and cleans
+ | `app` | Application name (required) |
+ 
+ ### `tengiz rollback <app>`
+ 
+ Rollback to the previous deployment. The previous active container is started on a new port, the proxy route is updated, and the current container is stopped and removed. Deployment statuses are updated in the deployment history.
+ 
+ | Argument | Description |
+ |----------|-------------|
+ | `app` | Application name (required) |
+ 
++### `tengiz cleanup`
++
++Clean up unused Docker resources to reclaim disk space. Prunes stopped containers, unused images, unused volumes, and unused networks.
++
++Containers managed by Tengiz (labeled `tengiz-app`) and images built by Tengiz (`tengiz-apps/*`) are always protected and never removed.
++
++| Flag | Description |
++|------|-------------|
++| `--dry-run` | Preview what would be removed without removing anything |
++| `--containers` | Clean stopped containers not managed by Tengiz |
++| `--images` | Clean unused images not built by Tengiz |
++| `--volumes` | Clean unused volumes |
++| `--networks` | Clean unused networks |
++
++With no category flag, all four categories are cleaned. Example:
++
++```bash
++tengiz cleanup              # clean all categories
++tengiz cleanup --dry-run    # preview without removing
++tengiz cleanup --containers # only stopped non-Tengiz containers
++```
++
+ ### `tengiz domain`
+ 
+ Manage custom domains for applications.
+ 
+ #### `tengiz domain add <app> <domain>`
+ 
+ Add a custom domain to an application.
+ 
+ | Argument | Description |
+ |----------|-------------|
