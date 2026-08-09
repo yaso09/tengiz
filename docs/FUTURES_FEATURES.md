@@ -1721,3 +1721,63 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Dokku's `config:set` accepts many `KEY=VALUE` pairs in one call, plus two flags: `--no-restart` (persist the variables without redeploying/restarting the app — useful when scripting multiple batches or developing plugins), and `--encoded` (pass values as base64 so multi-line/whitespace-heavy content like SSH keys, PEMs, or JSON blobs round-trip byte-for-byte without shell escaping). `config:export --format shell|json|envfile` and `config:bundle` (tarfile) complement the write path.
 - **Why add to Tengiz:** Tengiz's `config set <app> <key> <value>` (implemented) is one-var-per-call and always restarts. Teams bootstrapping an app set 10+ vars — with one restart per call that is 10 redeploys. `tengiz config set app KEY1=V1 KEY2=V2 --no-restart` batches the write into a single persisted state update with one explicit `tengiz restart`; `--encoded` gives a safe path for multiline secrets/keys without shell-escaping pain (complements the `tengiz secret` commands). Trivial to add on the existing `config.Store` write path.
 - **Detected:** 2026-08-09
+
+## Container HTTP Port Override (`containerHttpPort`)
+- **Source:** CapRover
+- **Description:** Per-app setting for which **internal container port serves HTTP** to the proxy (default 80, with an 8080 fallback in CapRover). The Load Balancer generates the app server block pointing at this port. Independent from Dockerfile `EXPOSE` and from host-port mapping — it only tells the reverse proxy where to route inbound web traffic. Combined with per-app multi-port declarations.
+- **Why add to Tengiz:** Tengiz's proxy assumes a single detected container port; apps that listen on non-detected ports (Rails/Puma on 3000, custom servers, containers without a detectable HTTP server) silently fail behind the proxy. A per-app `.tengiz.yaml` `ports.container_http_port: 3000` override decouples routing from framework detection, fixes the "it builds but never responds" class of bugs, and complements the existing Port Mapping Protocol Selection (#111) which covers TCP/UDP publish — this one targets the HTTP route target itself.
+- **Detected:** 2026-08-09
+
+## Detached Deploy Response (`isDetachedBuild`) — Immediate Ack, Background Deploy
+- **Source:** CapRover
+- **Description:** Deploy API accepts an `isDetachedBuild` / `?detached` flag. When set, the endpoint returns immediately ("Deploy started") instead of awaiting build completion; the build continues in the background and can be polled via status endpoints. The client holding the HTTP connection is released the moment the build is scheduled (deliberately arranged before actual work starts).
+- **Why add to Tengiz:** Tengiz's webhook/CI deploy path blocks until build+deploy completes. Long builds (node_modules, monorepos) hold the HTTP connection open, risking client timeouts, dropped CI pipelines, and duplicate retries. A `tengiz webhook deploy --detach` (or `.tengiz.yaml` `deploy.detached: true`) that returns a job ID immediately unblocks parallel PR workflows, dovetails with the existing Build Queue with Dedup (#124) and the planned Real-Time WebSocket for Deploy Logs (#138) for live progress.
+- **Detected:** 2026-08-09
+
+## Pre-Deploy Hook as a Container Spec Transformation (`preDeployFunction`)
+- **Source:** CapRover
+- **Description:** An app can define a small user-supplied function executed in the deploy pipeline **before** the container/service spec is applied. The hook receives a handle to the app plus a **mutable Docker service spec** (the same object) and can edit it — volumes, env, command, labels, resource limits, network. The result of the function is applied. Failure aborts the deploy. This is distinct from shell pre-deploy hooks that run commands — mutation of the container spec itself (after framework detection) is the differentiator.
+- **Why add to Tengiz:** Framework detection + `.tengiz.yaml` overrides cover common cases, but some apps need deploy-time spec manipulation that's awkward to express declaratively (conditional volume mounts, per-branch command overrides, injecting custom labels). A Go-native equivalent — a `.tengiz.yaml` `deploy.mutate` block or a user function hook in the builder's `BuildResult` — that can edit the final `runtime.Run` args gives power users an escape hatch. Complements the pre-deploy hooks (#9) and extended hook system (#24) with a spec-level transformation point.
+- **Detected:** 2026-08-09
+
+## Partial (PATCH) App Definition Update — Field-Preserving Merge
+- **Source:** CapRover
+- **Description:** Apps definitions expose both a full `POST /update` and a `PATCH /appdefinition` that **merges only the supplied fields** into the existing definition (implemented with a partial-update merge). Changing only `instanceCount` does not wipe `envVars`, `ports`, or `volumes`. This is distinct from full-replace semantics.
+- **Why add to Tengiz:** Tengiz's per-app config writes risk losing un-supplied fields when a single command (e.g. `tengiz config set` or a webhook-driven update) serializes only a subset of `AppEntry.Config`. A PATCH-style update mechanism on the `config.Store` (field-to-field merge instead of whole-struct replace) prevents accidental data loss in scripts targeting one setting and matches the "scalings won't cancel env" contract users expect from a PaaS. Referenced directly by the partial-update needs noted in App Report (#10).
+- **Detected:** 2026-08-09
+
+## Per-App Proxy Config Validation with Automatic Revert
+- **Source:** CapRover
+- **Description:** When applying custom nginx config (or any proxy-affecting change), CapRover validates the generated config (equivalent of `nginx -t`) **before** reloading. On validation failure it reverts the stored app definition to its previous committed state and throws, guaranteeing a broken config never leaves an app unreachable. Concurrent config regenerations are serialized through a coalesced reload queue.
+- **Why add to Tengiz:** The existing "Per-App Custom Proxy Configuration" record describes the feature's surface but not the safety contract. Tengiz's proxy AOT has no validation step — a malformed `proxy.buffer_size` / bad header rule goes live and can break routing. A validate-before-swap step (parse derived rule tables, reject invalid) plus auto-revert on failure and a serialized reload queue makes custom proxy config safe for production use. Applies to both the standalone validator and the Config Display command (#48).
+- **Detected:** 2026-08-09
+
+## Custom Domain Ownership Verification (Deploy Ownership Proof)
+- **Source:** CapRover
+- **Description:** Before enabling a custom domain / SSL, CapRover proves the requester actually controls the domain: it writes a random secret token to `/.well-known/captain-identifier` under the app's domain static dir, then fetches `http://<domain>/.well-known/captain-identifier` from the server and requires the returned body to match. A separate verification checks that `<uuid>.<rootDomain>` resolves to this server (for root-domain adoption). Failure produces `VERIFICATION_FAILED`.
+- **Why add to Tengiz:** Current custom domain support (implemented) accepts any domain string; pointing someone else's domain at your Tengiz instance can silently intercept traffic or hit an unexpected `*.tengiz.local` route. Adding domain-ownership proof before the domain is registered in the proxy (write challenge → HTTP check) prevents a user mis-claiming or stealing domains. A `tengiz domain verify <app> <domain>` command predates the SSL work (#65) and hardens the custom domain story. Distinct from the general `.well-known` serving (#59) — this is an explicit ownership challenge/response.
+- **Detected:** 2026-08-09
+
+## Short-Lived Download Tokens (2-minute JWT for Artifacts/Backups)
+- **Source:** CapRover
+- **Description:** Backup downloads and admin artifacts are authenticated via a **dedicated short-lived download token** (a JWT with ~2-minute expiry, separate from the main auth token). The token is issued and the download router accepts only those short-lived tokens. Backup files auto-delete after 2 hours. Keeps long-lived credentials out of shareable/cURLable artifact URLs.
+- **Why add to Tengiz:** Tengiz's Full System Backup & Restore (#23, planned) would produce artifacts someone can copy/S3-upload. Sharing those links with a long-lived admin credential (or where nobody can download at all) is the current gap. A CLI `tengiz backup download --token <short-lived>` and API token-wrapping flow lets ops grab or share a restore tarball without exposing permanent keys — and naturally extends to build-log/binary artifacts. Complements the existing Encryption at Rest (#109) and backup (#23) work.
+- **Detected:** 2026-08-09
+
+## DataStore Schema Versioning & Automatic Migrations
+- **Source:** CapRover (`runDataStoreMigrations`)
+- **Description:** CapRover persists a `schemaVersion` in its JSON data store and runs an ordered series of migration functions when the version is older. Each migration (e.g. injecting keys like `isLegacyAppName`) reads the raw stored JSON, transforms it, bumps the schema version; older data is upgraded transparently on load. Config file is validated on boot (`validateConfigFile` → hard error if unparseable).
+- **Why add to Tengiz:** Tengiz stores state in plain JSON (`apps.json`, `ports.json`, per-env files) with no versioning or migration strategy — any future struct change either breaks old files or forces a manual rebuild. A `schemaVersion` field (`tengiz apps.json`) + a small migration registry in `config.Store` keeps old installs upgrading cleanly, prevents silent data corruption, and enables the "rename field / add field with default" pattern used by every mature PaaS. High leverage given how central the state files are to Tengiz.
+- **Detected:** 2026-08-09
+
+## Cron-Scheduled Per-App Image Retention GC (keep-last-N per app, timezone-aware)
+- **Source:** CapRover (`DiskCleanupManager`)
+- **Description:** A cron-driven disk GC that maintains a per-app registry of deployed image versions and, on each run, computes which images are no longer referenced and NOT among the most recent `mostRecentLimit` versions **per app** (default keep 1). Accepts a validated cron expression + timezone; reschedules when config changes. Also exposes a "what WOULD be reclaimed" (unused images) dry-run endpoint.
+- **Why add to Tengiz:** Existing rollback and Docker Housekeeping (#6) delete old stuff globally, but Tengiz only keeps last-N images implicitly via deploy teardown. As apps accumulate versions, disk bloat recurs per app. `tengiz cleanup --keep-latest-per-app N --cron "0 3 * * *" --tz UTC` schedules unattended per-app image GC while preserving rollback targets — the exact missing scheduled + per-app dimension that Granular Docker Prune (#56) notes as a gap. Replacing the manual `KeepLastNImages` call with a durable cron registry.
+- **Detected:** 2026-08-09
+
+## Schema-Driven One-Click App Template Wizard (Variables + Dependency Ordering)
+- **Source:** CapRover
+- **Description:** CapOne's one-click app templates are schema-driven: each template declares service definitions, exact variable list (with `label`, `description`, `defaultValue`, and `validRegex` per variable), exposes a magic `$$cap_appname` app-name variable, and references `depends_on` between services. Deployment resolves the dependency tree (orders services, errors "Infinite loops"), interpolates each variable over every string in the template, creates multi-app projects and tags services for later app-set lifecycle. Progress is reported via step/`deployment steps` machine; /deploy returns a jobId polled through `/deploy/progress`.
+- **Why add to Tengiz:** The existing One-Click Service Templates (#64) ship Compose definitions but no variable wizard or dependency runner. Adding a schema-driven template format — variable validation regex, `$$cap_appname` magic var, dependency-topological ordering with loop detection, and an async jobId progress API — is what makes "service templates" feel production-grade in a self-hosted Vercel-style product and powers the planned AI-Powered Deployment Assistant (#132). Maps naturally onto App Tags (#113) for service-set grouping and matches the user-facing "create a service" flow per current roadmap.
+- **Detected:** 2026-08-09
