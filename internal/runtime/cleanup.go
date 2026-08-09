@@ -28,6 +28,75 @@ func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (Clean
 	return CleanupResult{}, nil
 }
 
+type containerInfo struct {
+	ID     string
+	Name   string
+	Status string
+	Labels string
+}
+
+func parseContainerList(output string) []containerInfo {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	var list []containerInfo
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 4)
+		if len(parts) < 4 {
+			continue
+		}
+		list = append(list, containerInfo{
+			ID:     parts[0],
+			Name:   parts[1],
+			Status: parts[2],
+			Labels: parts[3],
+		})
+	}
+	return list
+}
+
+func stoppedForeignContainers(list []containerInfo) []containerInfo {
+	var out []containerInfo
+	for _, c := range list {
+		if strings.Contains(c.Labels, labelKey+"=") {
+			continue
+		}
+		if !isStoppedStatus(c.Status) {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+func isStoppedStatus(status string) bool {
+	return strings.HasPrefix(status, "Exited") ||
+		status == "Created" ||
+		status == "Dead"
+}
+
+func (r *dockerRuntime) cleanupContainers(ctx context.Context, opts CleanupOptions) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-a",
+		"--format", "{{.ID}}|{{.Names}}|{{.Status}}|{{.Labels}}")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps: %w\n%s", err, string(out))
+	}
+	var removed []string
+	for _, c := range stoppedForeignContainers(parseContainerList(string(out))) {
+		removed = append(removed, c.Name)
+		if opts.DryRun {
+			continue
+		}
+		rm := exec.CommandContext(ctx, "docker", "rm", "-f", c.ID)
+		if rerrOut, rerr := rm.CombinedOutput(); rerr != nil {
+			log.Printf("[runtime] cleanup: remove container %s: %v\n%s", c.Name, rerr, string(rerrOut))
+		}
+	}
+	return removed, nil
+}
+
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()
