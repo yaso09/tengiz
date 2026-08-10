@@ -58,6 +58,78 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	return nil
 }
 
+const pruneLabelFilter = "label!=tengiz-app"
+
+var pruneCategorySingular = map[string]string{
+	"containers": "container",
+	"images":     "image",
+	"volumes":    "volume",
+	"networks":   "network",
+	"builder":    "builder",
+}
+
+func buildPruneArgs(category string) []string {
+	if category == "builder" {
+		return []string{"builder", "prune", "-f"}
+	}
+	singular, ok := pruneCategorySingular[category]
+	if !ok {
+		return nil
+	}
+	return []string{singular, "prune", "-f", "--filter", pruneLabelFilter}
+}
+
+func buildPruneListArgs(category string) []string {
+	switch category {
+	case "containers":
+		return []string{"ps", "-aq", "--format", "{{.ID}}|{{.State}}|{{.Labels}}"}
+	case "images":
+		return []string{"image", "ls", "-q", "--filter", "dangling=true"}
+	case "volumes":
+		return []string{"volume", "ls", "-q", "--filter", "dangling=true"}
+	case "networks":
+		return []string{"network", "ls", "-q"}
+	default:
+		return nil
+	}
+}
+
+func countPrunableContainers(output string) int {
+	count := 0
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		state, labels := parts[1], parts[2]
+		if state == "running" {
+			continue
+		}
+		if strings.Contains(labels, "tengiz-app=") {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func countLines(output string) int {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return 0
+	}
+	n := 0
+	for _, l := range strings.Split(trimmed, "\n") {
+		if strings.TrimSpace(l) != "" {
+			n++
+		}
+	}
+	return n
+}
+
 func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (*PruneResult, error) {
 	return &PruneResult{DryRun: opts.DryRun}, nil
 }
