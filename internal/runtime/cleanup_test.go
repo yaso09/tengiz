@@ -113,3 +113,14 @@ func TestCountLines(t *testing.T) {
 		}
 	}
 }
+
+func TestDockerPruneNoCategories(t *testing.T) {
+	r := &dockerRuntime{}
+	res, err := r.Prune(context.Background(), PruneOptions{})
+	if err != nil {
+		t.Fatalf("Prune() with no categories error = %v", err)
+	}
+	if res.DryRun || res.Containers != 0 || res.Images != 0 || res.Volumes != 0 || res.Networks != 0 || res.BuildCache {
+		t.Errorf("unexpected Prune() result: %+v", res)
+	}
+}

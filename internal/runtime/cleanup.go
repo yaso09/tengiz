@@ -131,5 +131,90 @@ func countLines(output string) int {
 }
 
 func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (*PruneResult, error) {
-	return &PruneResult{DryRun: opts.DryRun}, nil
+	result := &PruneResult{DryRun: opts.DryRun}
+	for _, category := range []string{"containers", "images", "volumes", "networks", "builder"} {
+		if !optsEnabled(opts, category) {
+			continue
+		}
+		if category == "builder" {
+			if opts.DryRun {
+				result.BuildCache = true
+				continue
+			}
+			if err := r.runPrune(ctx, "builder"); err != nil {
+				log.Printf("[runtime] build cache prune failed (buildx not available?): %v", err)
+				continue
+			}
+			result.BuildCache = true
+			continue
+		}
+		count := r.countCandidates(ctx, category)
+		setPruneCount(result, category, count)
+		if opts.DryRun {
+			continue
+		}
+		if err := r.runPrune(ctx, category); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func optsEnabled(opts PruneOptions, category string) bool {
+	switch category {
+	case "containers":
+		return opts.Containers
+	case "images":
+		return opts.Images
+	case "volumes":
+		return opts.Volumes
+	case "networks":
+		return opts.Networks
+	case "builder":
+		return opts.BuildCache
+	}
+	return false
+}
+
+func setPruneCount(result *PruneResult, category string, count int) {
+	switch category {
+	case "containers":
+		result.Containers = count
+	case "images":
+		result.Images = count
+	case "volumes":
+		result.Volumes = count
+	case "networks":
+		result.Networks = count
+	}
+}
+
+func (r *dockerRuntime) countCandidates(ctx context.Context, category string) int {
+	args := buildPruneListArgs(category)
+	if args == nil {
+		return 0
+	}
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("[runtime] count %s candidates: %v", category, err)
+		return 0
+	}
+	if category == "containers" {
+		return countPrunableContainers(string(out))
+	}
+	return countLines(string(out))
+}
+
+func (r *dockerRuntime) runPrune(ctx context.Context, category string) error {
+	args := buildPruneArgs(category)
+	if args == nil {
+		return fmt.Errorf("unknown prune category %q", category)
+	}
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker %s prune: %w\n%s", category, err, string(out))
+	}
+	return nil
 }
