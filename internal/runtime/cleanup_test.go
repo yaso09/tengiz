@@ -146,3 +146,16 @@ func TestFormatBytes(t *testing.T) {
 		}
 	}
 }
+
+func TestStubPruneWithAllOptions(t *testing.T) {
+	m := NewStub()
+	rep, err := m.Prune(context.Background(), PruneOptions{
+		Images: true, Volumes: true, Networks: true, BuildCache: true,
+	})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if rep.Space != "" {
+		t.Errorf("Space = %q, want empty (stub)", rep.Space)
+	}
+}

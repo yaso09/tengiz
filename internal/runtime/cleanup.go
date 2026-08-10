@@ -59,8 +59,132 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	return nil
 }
 
+func parseReclaimedBytesSafe(out string) int64 {
+	if b, ok := parseReclaimedBytes(out); ok {
+		return b
+	}
+	return 0
+}
+
+func (r *dockerRuntime) listUnusedImages(ctx context.Context) []imageInfo {
+	cmd := exec.CommandContext(ctx, "docker", "image", "ls", "-a",
+		"--format", "{{.Repository}}:{{.Tag}}|{{.ID}}|{{.Containers}}")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil
+	}
+	var result []imageInfo
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		info, ok := parseImageListLine(line)
+		if ok && info.containers == 0 && !strings.HasPrefix(info.repoTag, "<none>") {
+			result = append(result, info)
+		}
+	}
+	return result
+}
+
+func (r *dockerRuntime) pruneDryRun(ctx context.Context, opts PruneOptions) PruneReport {
+	var rep PruneReport
+	// docker ps does not support the label!= filter (only prune commands do),
+	// so count all exited containers and subtract the Tengiz-managed ones.
+	if out, err := exec.CommandContext(ctx, "docker", "container", "ls", "-aq",
+		"--filter", "status=exited").CombinedOutput(); err == nil {
+		rep.ContainersRemoved = nonEmptyLineCount(string(out))
+	}
+	if out, err := exec.CommandContext(ctx, "docker", "container", "ls", "-aq",
+		"--filter", "status=exited", "--filter", "label=tengiz-app").CombinedOutput(); err == nil {
+		rep.ContainersRemoved -= nonEmptyLineCount(string(out))
+	}
+	if opts.Networks {
+		if out, err := exec.CommandContext(ctx, "docker", "network", "ls", "-q",
+			"--filter", "dangling=true").CombinedOutput(); err == nil {
+			rep.NetworksRemoved = nonEmptyLineCount(string(out))
+		}
+	}
+	if opts.Images {
+		for _, img := range r.listUnusedImages(ctx) {
+			if !isTengizRepo(img.repoTag) {
+				rep.ImagesRemoved++
+			}
+		}
+	} else {
+		if out, err := exec.CommandContext(ctx, "docker", "image", "ls", "-q",
+			"--filter", "dangling=true").CombinedOutput(); err == nil {
+			rep.ImagesRemoved = nonEmptyLineCount(string(out))
+		}
+	}
+	if opts.Volumes {
+		if out, err := exec.CommandContext(ctx, "docker", "volume", "ls", "-q",
+			"--filter", "dangling=true").CombinedOutput(); err == nil {
+			rep.VolumesRemoved = nonEmptyLineCount(string(out))
+		}
+	}
+	return rep
+}
+
 func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneReport, error) {
-	return PruneReport{}, nil
+	if opts.DryRun {
+		rep := r.pruneDryRun(ctx, opts)
+		rep.Space = "0B"
+		return rep, nil
+	}
+
+	var rep PruneReport
+
+	// Containers + networks + dangling images. The label filter guarantees
+	// Tengiz-managed containers (label tengiz-app=...) are never removed,
+	// including scale-to-zero stopped containers.
+	out, err := exec.CommandContext(ctx, "docker", "system", "prune", "-f",
+		"--filter", "label!=tengiz-app").CombinedOutput()
+	if err != nil {
+		return rep, fmt.Errorf("docker system prune: %w\n%s", err, string(out))
+	}
+	rep.ContainersRemoved = countDeletedIDs(string(out), "Deleted Containers:")
+	rep.NetworksRemoved = countDeletedIDs(string(out), "Deleted Networks:")
+	rep.TotalBytes += parseReclaimedBytesSafe(string(out))
+
+	// Images
+	if opts.Images {
+		for _, img := range r.listUnusedImages(ctx) {
+			if isTengizRepo(img.repoTag) {
+				// Retention for Tengiz images is the caller's job (KeepLastNImages).
+				continue
+			}
+			o, err := exec.CommandContext(ctx, "docker", "image", "rmi", "-f", img.id).CombinedOutput()
+			if err != nil {
+				log.Printf("[runtime] failed to remove image %s: %v\n%s", img.id, err, string(o))
+				continue
+			}
+			rep.ImagesRemoved++
+		}
+	} else {
+		if out, err := exec.CommandContext(ctx, "docker", "image", "prune", "-f").CombinedOutput(); err == nil {
+			rep.TotalBytes += parseReclaimedBytesSafe(string(out))
+		}
+	}
+
+	// Volumes
+	if opts.Volumes {
+		out, err := exec.CommandContext(ctx, "docker", "volume", "prune", "-f").CombinedOutput()
+		if err != nil {
+			return rep, fmt.Errorf("docker volume prune: %w\n%s", err, string(out))
+		}
+		rep.VolumesRemoved = countDeletedIDs(string(out), "Deleted Volumes:")
+		rep.TotalBytes += parseReclaimedBytesSafe(string(out))
+	}
+
+	// Build cache
+	if opts.BuildCache {
+		if out, err := exec.CommandContext(ctx, "docker", "builder", "prune", "-f").CombinedOutput(); err == nil {
+			rep.TotalBytes += parseReclaimedBytesSafe(string(out))
+		}
+	}
+
+	rep.Space = formatBytes(rep.TotalBytes)
+	return rep, nil
 }
 
 type imageInfo struct {
