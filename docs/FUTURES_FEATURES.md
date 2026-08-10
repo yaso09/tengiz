@@ -1642,3 +1642,101 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Coolify's `GlobalSearch` (`app/Livewire/GlobalSearch.php:248-742`) is a command-palette search across ALL resources: applications, services, 8 database types, servers, projects, environments, navigation routes, and one-click templates — searchable by name, description, FQDN, UUID, and PR preview id. Results are ranked by word-boundary fuzzy matching with priority (name > type > description), cached per team (300s), and support natural-language create commands ("new project", "new mysql") with a guided creation wizard. Category shortcuts ("apps", "db", "servers") map to resource groups.
 - **Why add to Tengiz:** As Tengiz gains more resource types, `tengiz ps`-style listing becomes unmanageable. A command-palette experience (`tengiz` alone opens a fuzzy search, or `tengiz find <query>`) gives instant access: `tengiz find "staging"` surfaces the staging app, its server, its domain, and its environment in one ranked result set. Go's `golang.org/x/term` + ANSI rendering or a simple ranked substring matcher (like fzf scoring) implements this with zero deps. Feeds the future web UI's search box. Low-medium effort, high UX polish that distinguishes Tengiz from pure-CLI tools.
 - **Detected:** 2026-08-10
+
+---
+
+## Per-Domain SSO Forward-Auth Gate (OIDC at the Proxy Edge)
+- **Source:** Dokploy
+- **Description:** Enterprise-grade SSO gate per domain via an `oauth2-proxy` container wired to any OIDC provider (Google, GitHub, Okta). A `forwardAuth` Traefik middleware is attached to each enabled domain, with an `errors` middleware that rewrites 401→302 and redirects to `/oauth2/sign_in?rd={url}`. Identity headers (`X-Auth-Request-User`, `X-Auth-Request-Email`) are propagated to the backend, and cookie sessions are shared across subdomains via `OAUTH2_PROXY_COOKIE_DOMAINS`. Toggled per-domain in `services/proprietary/forward-auth.ts:337-382`, middleware wired in `utils/traefik/forward-auth.ts:96-182`, oauth2-proxy setup in `setup/forward-auth-setup.ts:7-72`.
+- **Why add to Tengiz:** Tengiz only has HTTP Basic auth today. A proxy-edge forward-auth gate protects entire apps behind SSO with zero app-side changes — ideal for internal tools, staging, and admin panels. Go implementation: an oauth2-proxy sidecar container or a built-in OIDC authorization-code flow in the proxy with session cookie middleware. Complements OIDC SSO (#128, admin/team auth) — this is user-facing app protection at the edge, and is distinct from Basic Auth (#32).
+- **Detected:** 2026-08-10
+
+## Structured HTTP Access-Log Pipeline (Per-Request Telemetry with Filtering & Rotation)
+- **Source:** Dokploy
+- **Description:** Parses the reverse-proxy access log into a rich `LogEntry` model capturing `DownstreamStatus`, `RouterName`, `ServiceName`, `OriginStatus`, `RetryAttempts`, `Duration`, and client/user info (`utils/access-log/types.ts:1-48`). `parseRawConfig` supports pagination, sorting, hostname search, date-range filtering, and status-class filters (info/success/redirect/client/server via `isStatusInRange`, `utils/access-log/utils.ts:69-172`). A cron truncates the log to the last 1000 lines and sends `SIGUSR1` to safely reopen it (`utils/access-log/handler.ts:22-47`).
+- **Why add to Tengiz:** `tengiz logs` streams container stdout but has zero HTTP request telemetry. A `tengiz access-log` command giving per-app request/response status, latency, retries, and route matching would give CLI users Vercel-like analytics without a web dashboard. Go implementation: proxy middleware recording structured JSONL requests with the same query filters. Distinct from GoAccess (#125, external analytics container) — this is a built-in, queryable store in the Go proxy.
+- **Detected:** 2026-08-10
+
+## Edge Traffic-Shaping Middleware Suite (Rate Limit, In-Flight, Circuit Breaker, Retry, Compress, Weighted/Mirror/Failover)
+- **Source:** Dokploy
+- **Description:** Full edge middleware suite the proxy can generate: rate limiting (average/period/burst with source criterion, `file-types.ts:1011-1033`), in-flight request caps returning 429 (`884-904`), circuit breaker with expression-triggered fallback (`564-581`), retry middleware with backoff (`1093-1102`), gzip compression with min-response-size and exclusions (`583-598`), sticky-session cookies (`343-358`), and weighted/mirroring (percent-based)/failover traffic distribution plus load-balancer health checks (`424-477`).
+- **Why add to Tengiz:** A single-process `httputil.ReverseProxy` gives zero overload protection. Rate limits, in-flight caps, circuit breaking, retries, and gzip are table stakes for a production Vercel alternative. Weighted/mirroring services enable canary and shadow deployments via CLI flags. `.tengiz.yaml`'da `proxy.middlewares: { rate_limit, circuit_breaker, retry, compress }`. Distinct from API/webhook rate limiting (#100, #147) — this is per-app edge traffic shaping.
+- **Detected:** 2026-08-10
+
+## PROXY Protocol, HTTP/3 & Trusted Forwarded-Headers Support
+- **Source:** Dokploy
+- **Description:** Entrypoint-level networking configuration: PROXY protocol with `trustedIPs`, forwarded-headers trust allowlist, HTTP/2 `maxConcurrentStreams`, HTTP/3 `advertisedPort`, read/write/idle transport timeouts, and backend TLS verification (`utils/traefik/types.ts:78-146`, `499-508`).
+- **Why add to Tengiz:** Users front Tengiz with HAProxy/Nginx/cloud LBs that speak PROXY protocol or forward `X-Forwarded-For`. Without trusted-IP handling, client IPs (used for idle/rate-limit decisions) are spoofable, and HTTP/3 improves latency for static-heavy sites. `.tengiz.yaml`'da `proxy.proxy_protocol.trusted_ips`, `proxy.http3: true`. Complements CDN Provider Detection (#136) with explicit PROXY-protocol parsing and transport tuning.
+- **Detected:** 2026-08-10
+
+## Pre-Deploy DNS Validation + sslip.io Convenience Domains
+- **Source:** Dokploy
+- **Description:** `validateDomain` strips scheme/path, does an `A`-record lookup, and returns `isValid`, `resolvedIp`, plus a warning when the domain doesn't point at the expected server IP — still passing when a CDN fronts it (`services/domain.ts:153-212`). Also auto-generates unique `{project}-{hash}-{ip}.sslip.io` subdomains that resolve to the server IP with zero DNS setup (`services/domain.ts:46-70`, `templates/index.ts:33-51`).
+- **Why add to Tengiz:** `tengiz domain add example.com` currently registers blindly; misconfigured DNS is the #1 onboarding failure. A `--check` validation flag that fails fast with "domain resolves to X, expected Y" plus built-in `*.sslip.io` convenience domains removes the DNS-setup step for trials and sandboxes. Low effort (`net.LookupIP` in Go), high onboarding value.
+- **Detected:** 2026-08-10
+
+## Internationalized Domain Names (IDN → Punycode) Normalization
+- **Source:** Dokploy
+- **Description:** Converts non-ASCII hosts to punycode (e.g. `тест.рф` → `xn--e1aybc.xn--p1ai`) before placing them in any proxy `Host(...)` rule, since the proxy requires ASCII hosts (`utils/traefik/domain.ts:122-148`).
+- **Why add to Tengiz:** Users with non-ASCII brand domains currently cannot be routed at all in Tengiz (routes keyed on raw host). `tengiz domain add täst.de` should silently normalize to punycode for both routing and certificate issuance. Go implementation via `golang.org/x/net/idna`. Low effort, removes a hard blocker for international deployments.
+- **Detected:** 2026-08-10
+
+## Custom Docker Network Management (IPAM, MTU, IPv6, Import, Multi-Network Attach)
+- **Source:** Dokploy
+- **Description:** Full custom-network lifecycle: imports existing bridge/overlay networks (`findNetworksToSync`/`importDockerNetworks`, `services/network.ts:85-185`), creates networks with IPAM driver + subnet/gateway/IPRange, IPv4/IPv6 toggles, and MTU options (`createDockerNetworkFromRow`, `241-283`), reserves built-ins like `bridge`/`host`/`ingress` (`10-17`), and attaches apps to several networks or detaches from the default entirely (`resolveServiceNetworks`, `291-316`).
+- **Why add to Tengiz:** Tengiz has volume/domain subcommands but no networking story — every app lands on one default bridge. Network isolation (per-app, per-env, or user-defined subnets) is required for multi-tenant safety, and attaching a DB app to a private network while keeping the public web app on the proxy network is a common topology. Extends Docker Network & Volume CRUD (#102) with IPAM/MTU/IPv6 parameters, network import, and multi-network attach.
+- **Detected:** 2026-08-10
+
+## Isolated Preview/Compose Deployments with Collision Avoidance (Randomized Names)
+- **Source:** Dokploy
+- **Description:** Rewrites compose specs for isolated deployments: `addAppNameToPreventCollision` suffixes every service name and (optionally) volume with the app name, and `randomizeDeployableSpecificationFile` suffixes service/volume/network/config/secret names with a random hash, declaring a dedicated external network (`utils/docker/collision.ts:14-64`, `utils/docker/collision/root-network.ts:4-62`, `utils/docker/compose/volume.ts:9-91`). Concurrent isolated deployments (per-PR previews) of the same compose never collide on containers, networks, or volumes.
+- **Why add to Tengiz:** Preview deployments (implemented) handle container-name isolation but not network/volume isolation. When compose support lands, per-preview randomized names + external networks let many previews of the same app run side-by-side without one PR stomping another's data or DNS. Go implementation: YAML rewrite or unique `-p` project names in the compose runner.
+- **Detected:** 2026-08-10
+
+## Container & Volume File Browser/Editor (`tengiz fs`)
+- **Source:** Dokploy
+- **Description:** Structured file access into running containers and named volumes: `uploadFileToContainer` (base64 temp file + `docker cp`, with shell-metacharacter and container-ID validation), `listContainerFiles` (`ls -1Ap`), `readContainerFile` (base64, capped at 512KB with truncation flag), write and delete — via `docker exec`/`docker cp` and ephemeral `busybox` containers for volumes (`services/docker.ts:724-873`, `services/docker-volume.ts:82-161`). Also `getVolumesSize` via `docker system df -v` (`41-59`).
+- **Why add to Tengiz:** Debugging in a CLI-first tool usually means `docker exec` one-offs. A structured `tengiz fs list/cat/put/rm <app|volume> <path>` gives safe, validated file access into running containers and named volumes — ideal for inspecting logs, editing configs, and fixing misconfigured apps without re-deploying. Complements Container Entering (#140) with non-interactive, scriptable file operations.
+- **Detected:** 2026-08-10
+
+## Generic Docker Resource Inspector & Reloader (Standalone Containers + Swarm Services)
+- **Source:** Dokploy
+- **Description:** `getDockerResourceType` probes whether a name is a swarm service (`docker service inspect`) or a standalone container (`docker inspect`); `reloadDockerResource` force-recreates a service (`docker service update --force`) or restarts a container (`services/settings.ts:247-312`). The same type-switch pattern reads env vars and ports from either resource kind (`settings.ts:314-409`), and helpers enumerate per-node swarm tasks with error states (`services/docker.ts:173-231, 298-362`).
+- **Why add to Tengiz:** Tengiz's runtime is single-container oriented. A generic resource inspector lets users manage any Docker resource on the host — including pre-existing containers and services — smoothing migration paths for users already running Docker workloads. `tengiz resource inspect/reload/env/ports <name>` maps cleanly to `os/exec` calls. Low-medium effort, high ops value.
+- **Detected:** 2026-08-10
+
+## One-Command Database Rebuild/Reset (Teardown + Redeploy)
+- **Source:** Dokploy
+- **Description:** `rebuildDatabase` removes the running DB service, waits ~6 seconds, force-removes every attached volume mount (`docker volume rm --force`), then redeploys from scratch — a destructive "reset to empty" for Postgres/MySQL/MariaDB/Mongo/Redis/LibSQL (`utils/databases/rebuild.ts:29-66`).
+- **Why add to Tengiz:** For a developer-facing PaaS, resetting a database to a clean state is a daily dev-loop need (reproducible seed states, CI fixtures). `tengiz db rebuild <app> --confirm` stops the container, removes its volumes, and re-provisions — reusing the existing runtime manager. Small to implement, high dev-velocity value. Complements managed DB provisioning (#63).
+- **Detected:** 2026-08-10
+
+## Volume Restore In-Use Safety Guard
+- **Source:** Dokploy
+- **Description:** Before restoring a volume, checks `docker volume ls` for existence and `docker ps -a --filter volume=` for referencing containers (running or stopped). If in use, it prints the owning containers — identified as Swarm service / compose project / plain container with IDs and states — and aborts with exit 1; only unreferenced volumes are force-removed and recreated from the backup (`utils/volume-backups/restore.ts:49-103`).
+- **Why add to Tengiz:** Restoring onto a live volume is a data-loss footgun. A `tengiz volume restore` that inspects referencing containers and refuses to clobber an in-use volume (unless `--force`) is exactly the safety check a Go implementation can do natively with `docker ps --format json`. Complements Safe Volume Deletion (#110) on the restore path.
+- **Detected:** 2026-08-10
+
+## Database Backup & Restore for Arbitrary Compose/Swarm Stack Services
+- **Source:** Dokploy
+- **Description:** The backup engine supports `backupType: "compose"` — backing up a database running inside a user's own docker-compose project or swarm stack, not a Dokploy-managed DB. The container is located by label (`com.docker.compose.project` + service, or `com.docker.stack.namespace` + swarm service) and DB credentials are stored as JSONB `metadata` on the backup record (`utils/backups/utils.ts:137-258`, `utils/backups/compose.ts:19-80`). Restore targets the same arbitrary container (`utils/restore/compose.ts:15-103`).
+- **Why add to Tengiz:** Tengiz has no compose/stack concept, so backup features only work for DBs it provisions itself. Extending backup/restore to any database running in a user's existing `docker-compose.yml` (`tengiz backup add --compose-project ... --service db`) turns Tengiz from a "managed DB" tool into a general-purpose ops tool for the compose stacks CLI users already run. Complements Automated DB Backups (#127) and Compose Import (#91).
+- **Detected:** 2026-08-10
+
+## Credential-Redacted Command Logging
+- **Source:** Dokploy
+- **Description:** Every command string (rclone flags embedding S3 access keys, docker exec with tokens, curl with headers) is passed through `redactRcloneCredentials()` before reaching logs, error output, or notifications — replacing secret values with `[REDACTED]` (`utils/backups/redact.ts:8-11`), applied consistently across backup, cleanup, and whole-platform backup error paths (`utils/backups/index.ts:157`, `utils/backups/web-server.ts:134-149`).
+- **Why add to Tengiz:** A Go CLI that shells out with secrets (`docker exec -e`, rclone, curl with tokens) will inevitably echo commands on error paths — and errors get pasted into bug reports and support threads. A single `redact` helper applied to every logged/emitted command string is near-zero-cost habit with real security payoff for a tool that already manages encrypted secrets (#32) and S3 keys.
+- **Detected:** 2026-08-10
+
+## Preview Deployment Security Gate + PR Comment Status Table
+- **Source:** Dokploy
+- **Description:** Blocks preview deployments triggered by PRs from untrusted contributors: checks the PR author's GitHub permission level and requires `write`/`maintain`/`admin`, otherwise posts a deduped "Security Protection" comment to the PR (`services/github.ts:200-348`). For allowed PRs, maintains a live status table in a single PR comment (`running` → `success`/`error` with the preview URL), updating the same comment in place rather than creating new ones (`services/application.ts:396-427`, `services/github.ts:81-103`).
+- **Why add to Tengiz:** Public repos would otherwise let strangers execute code via PR pushes to preview environments. The PR-comment status flow is also better UX than commit status alone (#38). This is an important safety + UX layer for the already-implemented preview deployments, and maps to the existing gitdeploy/preview packages.
+- **Detected:** 2026-08-10
+
+## Host-Level Port Conflict Detection (Ephemeral `--net=host` Probe)
+- **Source:** Dokploy
+- **Description:** `checkPortInUse` first scans running containers' published ports (`docker port`), then — because the platform itself may run in a container — spawns `docker run --rm --net=host busybox nc -z 0.0.0.0 <port>` to detect host-level (non-Docker) services listening on the port, returning structured `{ isInUse, conflictingContainer }` results including which container or "a host-level service" holds the port (`services/settings.ts:411-452`).
+- **Why add to Tengiz:** Tengiz persists port allocations in `~/.tengiz/ports.json` but never verifies the host actually has the port free. A deploy-time `--check-port` validation that catches both container and host conflicts before launch prevents the classic "port silently bound elsewhere" failure the proxy can't detect. Complements Pre-Install Env Validation / tengiz doctor (#114) with a runtime port-conflict check.
+- **Detected:** 2026-08-10
