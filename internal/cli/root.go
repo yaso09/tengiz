@@ -86,6 +86,25 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+
+	initCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	stopCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	startCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	rmCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	logsCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	healthCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	rollbackCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	buildLogsCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	configSetCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	configGetCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	configUnsetCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	configShowCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	domainAddCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	domainRemoveCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	domainListCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	volumeAddCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	volumeRemoveCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
+	volumeListCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 }
 
 var rootCmd = &cobra.Command{
