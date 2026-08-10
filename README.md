@@ -97,6 +97,7 @@ go build -o tengiz .
 cd my-project
 tengiz deploy          # detect framework, build image, start container
 tengiz proxy           # start reverse proxy on :8080 with scale-to-zero
+tengiz cleanup         # safe label-based Docker housekeeping
 # Visit http://my-project.tengiz.local:8080
 ```
 
@@ -234,6 +235,27 @@ Rollback to the previous deployment. The previous active container is started on
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name (required) |
+
+### `tengiz cleanup`
+
+Prune unused Docker resources while keeping Tengiz-managed containers and rollback images intact.
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Prune stopped containers that do not have the `tengiz-app` label (idle scale-to-zero containers are preserved) |
+| `--images` | Prune dangling images only — tagged `tengiz-apps/<app>:<id>` rollback images are kept |
+| `--networks` | Prune unused networks |
+| `--build-cache` | Prune the Docker builder cache |
+| `--volumes` | Prune unused volumes (opt-in — never enabled by default) |
+| `--dry-run` | Show current disk usage (`docker system df`) and what would be cleaned, without deleting anything |
+| `--interval <minutes>` | Repeat cleanup every N minutes until interrupted (default `0` = run once) |
+
+When no category flag is passed, the safe defaults apply: containers, images, networks, and build cache. Volumes are only ever pruned with an explicit `--volumes`. Use `--interval` with cron or a systemd timer for periodic housekeeping. Examples:
+
+- `tengiz cleanup` — safe defaults (weekly cron recommended)
+- `tengiz cleanup --dry-run` — inspect first, delete nothing
+- `tengiz cleanup --volumes` — include unused volumes
+- `tengiz cleanup --interval 60` — keep running every hour until Ctrl+C
 
 ### `tengiz domain`
 
