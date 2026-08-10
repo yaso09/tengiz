@@ -191,6 +191,73 @@ func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (Clean
 			result.VolumesRemoved += parseCount(output, "Deleted Volumes")
 		}
 	}
+
+	if opts.AllImages {
+		images, err := r.listImages(ctx)
+		if err != nil {
+			log.Printf("[runtime] failed to list images for cleanup: %v", err)
+		} else {
+			protected := make(map[string]bool, len(opts.ProtectedRefs))
+			for _, ref := range opts.ProtectedRefs {
+				protected[ref] = true
+			}
+			for _, img := range selectImagesToRemove(images, protected, true) {
+				ref := img.Repo + ":" + img.Tag
+				if err := r.RemoveImage(ctx, ref); err != nil {
+					log.Printf("[runtime] failed to remove image %s: %v", ref, err)
+					continue
+				}
+				result.ImagesRemoved++
+			}
+		}
+	}
+
 	result.BytesReclaimed = reclaimed
 	return result, nil
+}
+
+type imageInfo struct {
+	Repo string
+	Tag  string
+	ID   string
+}
+
+func parseImages(out string) []imageInfo {
+	var images []imageInfo
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		images = append(images, imageInfo{Repo: parts[0], Tag: parts[1], ID: parts[2]})
+	}
+	return images
+}
+
+func selectImagesToRemove(images []imageInfo, protected map[string]bool, all bool) []imageInfo {
+	var toRemove []imageInfo
+	for _, img := range images {
+		if img.Repo == "<none>" || img.Tag == "<none>" {
+			continue
+		}
+		if protected[img.Repo+":"+img.Tag] {
+			continue
+		}
+		if all {
+			toRemove = append(toRemove, img)
+		}
+	}
+	return toRemove
+}
+
+func (r *dockerRuntime) listImages(ctx context.Context) ([]imageInfo, error) {
+	cmd := exec.CommandContext(ctx, "docker", "images", "--format", "{{.Repository}}|{{.Tag}}|{{.ID}}")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker images: %w", err)
+	}
+	return parseImages(string(out)), nil
 }

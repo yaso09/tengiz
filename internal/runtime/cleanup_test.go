@@ -100,3 +100,43 @@ func TestParseReclaimed(t *testing.T) {
 		t.Errorf("parseReclaimed(builder) = %d, want 512", got)
 	}
 }
+
+func TestParseImages(t *testing.T) {
+	out := "tengiz-apps/myapp|production-1|sha256:aaa\n<none>|<none>|sha256:bbb\n"
+	images := parseImages(out)
+	if len(images) != 2 {
+		t.Fatalf("parseImages() = %d images, want 2", len(images))
+	}
+	if images[0].Repo != "tengiz-apps/myapp" || images[0].Tag != "production-1" || images[0].ID != "sha256:aaa" {
+		t.Errorf("parseImages()[0] = %+v", images[0])
+	}
+	if images[1].Repo != "<none>" || images[1].Tag != "<none>" {
+		t.Errorf("parseImages()[1] = %+v", images[1])
+	}
+}
+
+func TestSelectImagesToRemove(t *testing.T) {
+	images := []imageInfo{
+		{Repo: "tengiz-apps/myapp", Tag: "production-3", ID: "id3"},
+		{Repo: "tengiz-apps/myapp", Tag: "production-2", ID: "id2"},
+		{Repo: "tengiz-apps/oldapp", Tag: "production-1", ID: "id4"},
+		{Repo: "redis", Tag: "7-alpine", ID: "id5"},
+	}
+	protected := map[string]bool{
+		"tengiz-apps/myapp:production-3": true,
+		"tengiz-apps/myapp:production-2": true,
+	}
+
+	got := selectImagesToRemove(images, protected, false)
+	if len(got) != 0 {
+		t.Errorf("selectImagesToRemove(all=false) = %v, want none", got)
+	}
+
+	gotAll := selectImagesToRemove(images, protected, true)
+	if len(gotAll) != 2 {
+		t.Fatalf("selectImagesToRemove(all=true) = %v, want 2", gotAll)
+	}
+	if gotAll[0].Repo != "tengiz-apps/oldapp" || gotAll[1].Repo != "redis" {
+		t.Errorf("unexpected selection: %+v", gotAll)
+	}
+}
