@@ -9,6 +9,61 @@ import (
 	"strings"
 )
 
+// CleanupOptions controls which Docker resources are pruned by Cleanup.
+type CleanupOptions struct {
+	Containers bool // prune stopped containers NOT labeled tengiz-app (idle scale-to-zero containers are kept)
+	Images     bool // prune dangling images only — tagged rollback images are preserved
+	Networks   bool // prune unused networks
+	BuildCache bool // prune the Docker builder cache
+	Volumes    bool // prune unused volumes (opt-in; never enabled by default)
+	DryRun     bool // report disk usage only, delete nothing
+}
+
+// pruneArgs returns the docker CLI sub-arguments for a cleanup category.
+// Every prune is non-interactive (-f). Container pruning excludes Tengiz-managed
+// containers (label tengiz-app) so idle scale-to-zero containers survive cleanup.
+func pruneArgs(category string) []string {
+	switch category {
+	case "containers":
+		return []string{"container", "prune", "-f", "--filter", "label!=tengiz-app"}
+	case "build-cache":
+		return []string{"builder", "prune", "-f"}
+	case "images":
+		return []string{"image", "prune", "-f"}
+	case "networks":
+		return []string{"network", "prune", "-f"}
+	case "volumes":
+		return []string{"volume", "prune", "-f"}
+	}
+	return nil
+}
+
+// systemDfArgs returns docker sub-arguments for the disk-usage report used by dry runs.
+func systemDfArgs() []string {
+	return []string{"system", "df"}
+}
+
+// cleanupCategories returns the requested categories in a fixed order (containers first).
+func cleanupCategories(opts CleanupOptions) []string {
+	var cats []string
+	if opts.Containers {
+		cats = append(cats, "containers")
+	}
+	if opts.BuildCache {
+		cats = append(cats, "build-cache")
+	}
+	if opts.Images {
+		cats = append(cats, "images")
+	}
+	if opts.Networks {
+		cats = append(cats, "networks")
+	}
+	if opts.Volumes {
+		cats = append(cats, "volumes")
+	}
+	return cats
+}
+
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()
