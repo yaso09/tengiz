@@ -64,6 +64,47 @@ func cleanupCategories(opts CleanupOptions) []string {
 	return cats
 }
 
+// Cleanup prunes the requested Docker resource categories. Containers without
+// the tengiz-app label, dangling images, unused networks, build cache, and
+// (opt-in) unused volumes are removed. In dry-run mode nothing is deleted;
+// instead docker system df output plus the planned categories is returned.
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (string, error) {
+	cats := cleanupCategories(opts)
+	if !opts.DryRun && len(cats) == 0 {
+		return "", fmt.Errorf("nothing to clean: enable at least one category (--containers, --images, --networks, --build-cache, --volumes)")
+	}
+
+	if opts.DryRun {
+		cmd := exec.CommandContext(ctx, "docker", systemDfArgs()...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("docker system df: %w\n%s", err, string(out))
+		}
+		var b strings.Builder
+		b.WriteString("Dry run — nothing will be deleted.\n")
+		if len(cats) == 0 {
+			b.WriteString("Planned categories: containers, build-cache, images, networks\n")
+		} else {
+			b.WriteString("Planned categories: " + strings.Join(cats, ", ") + "\n")
+		}
+		b.WriteString("\nCurrent disk usage:\n")
+		b.Write(out)
+		return b.String(), nil
+	}
+
+	var b strings.Builder
+	for _, cat := range cats {
+		args := pruneArgs(cat)
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return strings.TrimSuffix(b.String(), "\n"), fmt.Errorf("docker %s prune: %w\n%s", cat, err, string(out))
+		}
+		fmt.Fprintf(&b, "[%s]\n%s\n", cat, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSuffix(b.String(), "\n"), nil
+}
+
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()

@@ -77,3 +77,14 @@ func TestCleanupCategoriesPartial(t *testing.T) {
 		}
 	}
 }
+
+func TestStubCleanupReturnsEmptyReport(t *testing.T) {
+	m := NewStub()
+	report, err := m.Cleanup(context.Background(), CleanupOptions{Containers: true})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if report != "" {
+		t.Errorf("Cleanup() report = %q, want empty", report)
+	}
+}
