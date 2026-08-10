@@ -28,12 +28,30 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type CleanupOptions struct {
+	Containers bool
+	Images     bool
+	Volumes    bool
+	Networks   bool
+	BuildCache bool
+	DryRun     bool
+}
+
+type CleanupSummary struct {
+	ContainersRemoved []string `json:"containers_removed"`
+	ImagesRemoved     []string `json:"images_removed"`
+	VolumesRemoved    []string `json:"volumes_removed"`
+	NetworksRemoved   []string `json:"networks_removed"`
+	BuildCacheOutput  string   `json:"build_cache_output,omitempty"`
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
 	RemoveImage(ctx context.Context, imageTag string) error
 	KeepLastNImages(ctx context.Context, appName string, n int) error
+	Prune(ctx context.Context, opts CleanupOptions) (CleanupSummary, error)
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
@@ -116,6 +134,10 @@ func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
 
 func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
 	return nil
+}
+
+func (m *stubManager) Prune(ctx context.Context, opts CleanupOptions) (CleanupSummary, error) {
+	return CleanupSummary{}, nil
 }
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
