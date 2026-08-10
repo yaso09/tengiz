@@ -124,7 +124,7 @@ func getEnv(cmd *cobra.Command) string {
 var initCmd = &cobra.Command{
 	Use:   "init [name]",
 	Short: "Create a .tengiz.yaml configuration file",
-	Long:  "Creates a .tengiz.yaml in the current directory with an optional app name. Prompts for missing values.",
+	Long:  "Creates a .tengiz.yaml in the current directory with an optional app name. Use --env to create an environment-specific .tengiz.{env}.yaml override. Prompts for missing values.",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := filepath.Base(getwd())
