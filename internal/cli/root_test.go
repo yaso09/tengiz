@@ -97,6 +97,7 @@ func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *ty
 func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) Cleanup(ctx context.Context, opts runtime.CleanupOptions) (runtime.CleanupResult, error) { return runtime.CleanupResult{}, nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
@@ -373,6 +374,129 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	for name, found := range expected {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
+		}
+	}
+}
+
+func TestCollectProtectedRefs(t *testing.T) {
+	store := config.NewStore(t.TempDir())
+	store.SaveApp(types.AppEntry{
+		Name:     "myapp",
+		ImageTag: "tengiz-apps/myapp:production-3",
+		Config: types.AppConfig{
+			Name:        "myapp",
+			Environment: "production",
+		},
+	})
+	store.AddDeployment("myapp", types.DeploymentEntry{ID: "1", ImageTag: "tengiz-apps/myapp:production-1", Status: string(types.DeployRolled)})
+	store.AddDeployment("myapp", types.DeploymentEntry{ID: "2", ImageTag: "tengiz-apps/myapp:production-2", Status: string(types.DeployPrevious)})
+	store.AddDeployment("myapp", types.DeploymentEntry{ID: "3", ImageTag: "tengiz-apps/myapp:production-3", Status: string(types.DeployActive)})
+
+	refs := collectProtectedRefs(store)
+	refSet := make(map[string]bool, len(refs))
+	for _, r := range refs {
+		refSet[r] = true
+	}
+	for _, want := range []string{
+		"tengiz-apps/myapp:production-3",
+		"tengiz-apps/myapp:production-2",
+		"tengiz-apps/myapp:production-latest",
+	} {
+		if !refSet[want] {
+			t.Errorf("protected refs missing %q: %v", want, refs)
+		}
+	}
+	if refSet["tengiz-apps/myapp:production-1"] {
+		t.Errorf("rolled deployment image should NOT be protected: %v", refs)
+	}
+}
+
+type recordingRT struct {
+	runtime.Manager
+	lastOpts runtime.CleanupOptions
+}
+
+func (r *recordingRT) Cleanup(ctx context.Context, opts runtime.CleanupOptions) (runtime.CleanupResult, error) {
+	r.lastOpts = opts
+	return runtime.CleanupResult{Commands: [][]string{{"container", "prune", "-f"}}}, nil
+}
+
+func TestRunCleanupPassesOptions(t *testing.T) {
+	store := config.NewStore(t.TempDir())
+	store.SaveApp(types.AppEntry{
+		Name:     "myapp",
+		ImageTag: "tengiz-apps/myapp:production-1",
+		Config: types.AppConfig{
+			Name:        "myapp",
+			Environment: "production",
+		},
+	})
+
+	rec := &recordingRT{}
+	result, err := runCleanup(rec, store, true, false, true)
+	if err != nil {
+		t.Fatalf("runCleanup() error = %v", err)
+	}
+	if !rec.lastOpts.DryRun {
+		t.Errorf("expected DryRun=true, got %+v", rec.lastOpts)
+	}
+	if !rec.lastOpts.Volumes {
+		t.Errorf("expected Volumes=true, got %+v", rec.lastOpts)
+	}
+	if rec.lastOpts.AllImages {
+		t.Errorf("expected AllImages=false, got %+v", rec.lastOpts)
+	}
+	found := false
+	for _, ref := range rec.lastOpts.ProtectedRefs {
+		if ref == "tengiz-apps/myapp:production-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected protected ref tengiz-apps/myapp:production-1 in %v", rec.lastOpts.ProtectedRefs)
+	}
+	if len(result.Commands) == 0 {
+		t.Errorf("expected commands from recorder, got %+v", result)
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		in   int64
+		want string
+	}{
+		{0, "0B"},
+		{512, "512B"},
+		{12300, "12.30kB"},
+		{1200000, "1.20MB"},
+		{2000000000, "2.00GB"},
+	}
+	for _, tc := range tests {
+		if got := formatBytes(tc.in); got != tc.want {
+			t.Errorf("formatBytes(%d) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestPrintCleanupResult(t *testing.T) {
+	out := captureOutput(func() {
+		printCleanupResult(runtime.CleanupResult{
+			ContainersRemoved: 2,
+			ImagesRemoved:     5,
+			NetworksRemoved:   1,
+			VolumesRemoved:    0,
+			BytesReclaimed:    1200000,
+		}, false)
+	})
+	for _, want := range []string{
+		"containers removed: 2",
+		"images removed: 5",
+		"networks removed: 1",
+		"volumes removed: 0",
+		"space reclaimed: 1.20MB",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
 		}
 	}
 }
