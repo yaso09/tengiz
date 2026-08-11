@@ -106,6 +106,7 @@ func printPlan(w io.Writer, r cleanup.Result, dryRun bool) {
 	}
 	fmt.Fprintf(w, "[tengiz] cleanup %s:\n", verb)
 	fmt.Fprintf(w, "  containers:  %d\n", len(r.ContainersRemoved))
+	fmt.Fprintf(w, "  networks:    %d\n", len(r.NetworksRemoved))
 	fmt.Fprintf(w, "  images:      %d\n", len(r.ImagesRemoved))
 	fmt.Fprintf(w, "  volumes:     %d\n", len(r.VolumesRemoved))
 	buildCache := "no"
@@ -118,6 +119,7 @@ func printPlan(w io.Writer, r cleanup.Result, dryRun bool) {
 func printResult(w io.Writer, r cleanup.Result) {
 	fmt.Fprintf(w, "[tengiz] cleanup complete:\n")
 	fmt.Fprintf(w, "  containers removed: %d\n", len(r.ContainersRemoved))
+	fmt.Fprintf(w, "  networks removed:   %d\n", len(r.NetworksRemoved))
 	fmt.Fprintf(w, "  images removed:     %d\n", len(r.ImagesRemoved))
 	fmt.Fprintf(w, "  volumes removed:    %d\n", len(r.VolumesRemoved))
 	buildCache := "no"

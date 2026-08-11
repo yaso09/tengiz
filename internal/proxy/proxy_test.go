@@ -37,6 +37,8 @@ func (m *mockRuntime) ListImages(ctx context.Context) ([]runtime.ImageInfo, erro
 func (m *mockRuntime) ListVolumes(ctx context.Context) ([]runtime.VolumeInfo, error) { return nil, nil }
 func (m *mockRuntime) PruneBuildCache(ctx context.Context) error { return nil }
 func (m *mockRuntime) RemoveVolume(ctx context.Context, name string) error { return nil }
+func (m *mockRuntime) ListNetworks(ctx context.Context) ([]runtime.NetworkInfo, error) { return nil, nil }
+func (m *mockRuntime) RemoveNetwork(ctx context.Context, name string) error { return nil }
 func (m *mockRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestExtractApp(t *testing.T) {

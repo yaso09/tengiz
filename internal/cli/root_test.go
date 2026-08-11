@@ -102,6 +102,8 @@ func (m *mockRTForDeploy) ListImages(ctx context.Context) ([]runtime.ImageInfo, 
 func (m *mockRTForDeploy) ListVolumes(ctx context.Context) ([]runtime.VolumeInfo, error) { return nil, nil }
 func (m *mockRTForDeploy) PruneBuildCache(ctx context.Context) error { return nil }
 func (m *mockRTForDeploy) RemoveVolume(ctx context.Context, name string) error { return nil }
+func (m *mockRTForDeploy) ListNetworks(ctx context.Context) ([]runtime.NetworkInfo, error) { return nil, nil }
+func (m *mockRTForDeploy) RemoveNetwork(ctx context.Context, name string) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {

@@ -14,9 +14,11 @@ import (
 type mockPruneRT struct {
 	containers      []runtime.ContainerInfo
 	images          []runtime.ImageInfo
+	networks        []runtime.NetworkInfo
 	volumes         []runtime.VolumeInfo
 	removed         []string
 	imagesRemoved   []string
+	networksRemoved []string
 	volumesRemoved  []string
 	buildCacheCalls int
 }
@@ -35,6 +37,15 @@ func (m *mockPruneRT) ListVolumes(ctx context.Context) ([]runtime.VolumeInfo, er
 
 func (m *mockPruneRT) PruneBuildCache(ctx context.Context) error {
 	m.buildCacheCalls++
+	return nil
+}
+
+func (m *mockPruneRT) ListNetworks(ctx context.Context) ([]runtime.NetworkInfo, error) {
+	return m.networks, nil
+}
+
+func (m *mockPruneRT) RemoveNetwork(ctx context.Context, name string) error {
+	m.networksRemoved = append(m.networksRemoved, name)
 	return nil
 }
 
@@ -183,6 +194,41 @@ func TestPruneWithoutVolumesFlagKeepsVolumes(t *testing.T) {
 	}
 	if len(m.volumesRemoved) != 0 {
 		t.Errorf("volumes removed without --volumes = %v, want none", m.volumesRemoved)
+	}
+}
+
+func TestNetworkCandidates(t *testing.T) {
+	networks := []runtime.NetworkInfo{
+		{Name: "bridge", InUse: false},
+		{Name: "host", InUse: false},
+		{Name: "none", InUse: false},
+		{Name: "mybridge", InUse: false},
+		{Name: "usedbridge", InUse: true},
+	}
+	got := networkCandidates(networks)
+	if len(got) != 1 || got[0].Name != "mybridge" {
+		t.Fatalf("networkCandidates() = %+v, want only mybridge", got)
+	}
+}
+
+func TestPruneRemovesUnusedNetworks(t *testing.T) {
+	m := &mockPruneRT{
+		networks: []runtime.NetworkInfo{
+			{Name: "mybridge", InUse: false},
+			{Name: "usedbridge", InUse: true},
+		},
+	}
+	c := New(m, config.NewStore(t.TempDir()))
+
+	result, err := c.Prune(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if len(m.networksRemoved) != 1 || m.networksRemoved[0] != "mybridge" {
+		t.Errorf("networks removed = %v, want [mybridge]", m.networksRemoved)
+	}
+	if len(result.NetworksRemoved) != 1 || result.NetworksRemoved[0] != "mybridge" {
+		t.Errorf("result.NetworksRemoved = %v, want [mybridge]", result.NetworksRemoved)
 	}
 }
 

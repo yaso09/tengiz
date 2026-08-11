@@ -23,6 +23,7 @@ type Options struct {
 type Result struct {
 	ContainersRemoved []string
 	ImagesRemoved     []string
+	NetworksRemoved   []string
 	VolumesRemoved    []string
 	BuildCache        bool
 	Errors            []string
@@ -85,6 +86,27 @@ func volumeNames(vs []runtime.VolumeInfo) []string {
 	names := make([]string, 0, len(vs))
 	for _, v := range vs {
 		names = append(names, v.Name)
+	}
+	return names
+}
+
+func networkCandidates(networks []runtime.NetworkInfo) []runtime.NetworkInfo {
+	var candidates []runtime.NetworkInfo
+	for _, n := range networks {
+		if n.Name == "bridge" || n.Name == "host" || n.Name == "none" {
+			continue
+		}
+		if !n.InUse {
+			candidates = append(candidates, n)
+		}
+	}
+	return candidates
+}
+
+func networkNames(ns []runtime.NetworkInfo) []string {
+	names := make([]string, 0, len(ns))
+	for _, n := range ns {
+		names = append(names, n.Name)
 	}
 	return names
 }
@@ -159,10 +181,12 @@ type PruneRuntime interface {
 	ListContainers(ctx context.Context) ([]runtime.ContainerInfo, error)
 	ListImages(ctx context.Context) ([]runtime.ImageInfo, error)
 	ListVolumes(ctx context.Context) ([]runtime.VolumeInfo, error)
+	ListNetworks(ctx context.Context) ([]runtime.NetworkInfo, error)
 	PruneBuildCache(ctx context.Context) error
 	Remove(ctx context.Context, name string) error
 	RemoveImage(ctx context.Context, imageTag string) error
 	RemoveVolume(ctx context.Context, name string) error
+	RemoveNetwork(ctx context.Context, name string) error
 }
 
 type Cleaner struct {
@@ -195,6 +219,11 @@ func (c *Cleaner) Plan(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("load deployment refs: %w", err)
 	}
 
+	networks, err := c.rt.ListNetworks(ctx)
+	if err != nil {
+		return Result{}, fmt.Errorf("list networks: %w", err)
+	}
+
 	imgCandidates := imageCandidates(images, protectedIDs, protectedRefs, opts.AllImages)
 
 	var volCandidates []runtime.VolumeInfo
@@ -209,6 +238,7 @@ func (c *Cleaner) Plan(ctx context.Context, opts Options) (Result, error) {
 	return Result{
 		ContainersRemoved: containerNames(containerCandidates(containers)),
 		ImagesRemoved:     imageTargets(imgCandidates),
+		NetworksRemoved:   networkNames(networkCandidates(networks)),
 		VolumesRemoved:    volumeNames(volCandidates),
 		BuildCache:        true,
 	}, nil
@@ -231,6 +261,13 @@ func (c *Cleaner) Prune(ctx context.Context, opts Options) (Result, error) {
 			continue
 		}
 		result.ContainersRemoved = append(result.ContainersRemoved, name)
+	}
+	for _, name := range plan.NetworksRemoved {
+		if err := c.rt.RemoveNetwork(ctx, name); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("network %s: %v", name, err))
+			continue
+		}
+		result.NetworksRemoved = append(result.NetworksRemoved, name)
 	}
 	for _, img := range plan.ImagesRemoved {
 		if err := c.rt.RemoveImage(ctx, img); err != nil {

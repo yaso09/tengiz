@@ -59,3 +59,13 @@ func TestStubPruneMethods(t *testing.T) {
 		t.Fatalf("RemoveVolume: %v", err)
 	}
 }
+
+func TestStubNetworkMethods(t *testing.T) {
+	m := NewStub()
+	if _, err := m.ListNetworks(context.Background()); err != nil {
+		t.Fatalf("ListNetworks: %v", err)
+	}
+	if err := m.RemoveNetwork(context.Background(), "mybridge"); err != nil {
+		t.Fatalf("RemoveNetwork: %v", err)
+	}
+}

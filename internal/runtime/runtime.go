@@ -39,6 +39,8 @@ type Manager interface {
 	ListVolumes(ctx context.Context) ([]VolumeInfo, error)
 	PruneBuildCache(ctx context.Context) error
 	RemoveVolume(ctx context.Context, name string) error
+	ListNetworks(ctx context.Context) ([]NetworkInfo, error)
+	RemoveNetwork(ctx context.Context, name string) error
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
@@ -140,6 +142,14 @@ func (m *stubManager) PruneBuildCache(ctx context.Context) error {
 }
 
 func (m *stubManager) RemoveVolume(ctx context.Context, name string) error {
+	return nil
+}
+
+func (m *stubManager) ListNetworks(ctx context.Context) ([]NetworkInfo, error) {
+	return nil, nil
+}
+
+func (m *stubManager) RemoveNetwork(ctx context.Context, name string) error {
 	return nil
 }
 

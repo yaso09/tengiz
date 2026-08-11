@@ -166,3 +166,54 @@ func (r *dockerRuntime) PruneBuildCache(ctx context.Context) error {
 	}
 	return nil
 }
+
+type NetworkInfo struct {
+	ID    string
+	Name  string
+	InUse bool
+}
+
+func (r *dockerRuntime) ListNetworks(ctx context.Context) ([]NetworkInfo, error) {
+	cmd := exec.CommandContext(ctx, "docker", "network", "ls", "--format", "{{json .}}")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker network ls: %w\n%s", err, string(out))
+	}
+	var infos []NetworkInfo
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		var raw struct {
+			ID   string `json:"ID"`
+			Name string `json:"Name"`
+		}
+		if json.Unmarshal([]byte(line), &raw) != nil {
+			continue
+		}
+		infos = append(infos, NetworkInfo{ID: raw.ID, Name: raw.Name, InUse: r.networkInUse(ctx, raw.Name)})
+	}
+	return infos, nil
+}
+
+func (r *dockerRuntime) networkInUse(ctx context.Context, name string) bool {
+	cmd := exec.CommandContext(ctx, "docker", "network", "inspect", "--format", "{{len .Containers}}", name)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return true
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return true
+	}
+	return count > 0
+}
+
+func (r *dockerRuntime) RemoveNetwork(ctx context.Context, name string) error {
+	cmd := exec.CommandContext(ctx, "docker", "network", "rm", name)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker network rm: %w\n%s", err, string(out))
+	}
+	return nil
+}
