@@ -11,6 +11,7 @@ import (
 	"github.com/yaso09/tengiz/internal/builder"
 	"github.com/yaso09/tengiz/internal/config"
 	"github.com/yaso09/tengiz/internal/git"
+	"github.com/yaso09/tengiz/internal/hooks"
 	"github.com/yaso09/tengiz/internal/notify"
 	"github.com/yaso09/tengiz/internal/proxy"
 	"github.com/yaso09/tengiz/internal/runtime"
@@ -41,6 +42,17 @@ func NewPipelineWithEnv(dataDir, env string, rt runtime.Manager, store *config.S
 		rt:      rt,
 		store:   store,
 	}
+}
+
+// runPreDeployHooks runs the host-side shell commands declared under
+// pre_deploy: in the cloned repo's .tengiz.yaml. A missing config file
+// means no hooks and a nil return; a failing hook aborts the deploy.
+func (p *Pipeline) runPreDeployHooks(ctx context.Context, dir string) error {
+	cfg, err := config.Load(dir)
+	if err != nil {
+		return nil
+	}
+	return hooks.Run(ctx, dir, cfg.PreDeploy)
 }
 
 func extractAppName(repo string) string {
@@ -115,6 +127,10 @@ func (p *Pipeline) Deploy(ctx context.Context, repoURL, branch, provider string)
 		if listErr == nil && len(appSecrets) > 0 {
 			p.b.SetBuildSecrets(appSecrets)
 		}
+	}
+
+	if err := p.runPreDeployHooks(ctx, cloneDir); err != nil {
+		return fmt.Errorf("pre_deploy: %w", err)
 	}
 
 	deploymentID := fmt.Sprintf("%d", time.Now().Unix())
