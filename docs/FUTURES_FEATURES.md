@@ -1714,3 +1714,101 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Komodo's stack config supports a `compose_cmd_wrapper` template containing a `[[COMPOSE_COMMAND]]` placeholder that wraps every compose subcommand — e.g. `op run -- [[COMPOSE_COMMAND]]` (1Password) or `doppler run -- [[COMPOSE_COMMAND]]`. `compose_cmd_wrapper_include` limits which subcommands (default `["up", "deploy"]`) get wrapped. Env files are layered so wrapper-injected secrets and Tengiz's own generated env combine (`bin/periphery/src/api/compose.rs:1063-1085`, `bin/periphery/src/api/swarm/stack.rs:38-60`).
 - **Why add to Tengiz:** For users who already run secrets through 1Password/Doppler CLI, the wrapper gives a zero-config path to inject those secrets into compose/stack deploys without changing Tengiz's own secret system. It also allows wrapping with arbitrary tools (op, doppler, direnv). `.tengiz.yaml`'da `stack.compose_wrapper: "op run -- [[COMPOSE_COMMAND]]"`. Low effort — a string substitution around the composed command in the stack/compose lifecycle. Complements Secret File Command Substitution (recorded above) which covers env vars — this covers the whole command.
 - **Detected:** 2026-08-11
+
+---
+
+## Persistent Notification Queue with Delivery Status (Pending/Sent/Failed)
+- **Source:** Juno
+- **Description:** Notifications are first persisted as `Pending`, then delivery is deferred via a zero-delay timer; after the send attempt the record is updated to `Sent` or `Failed` (state transition helpers `Notification::sent()`/`failed()`). Records are queryable by time/segment range, and `get_notify_status()` aggregates them into `NotifyStatus { pending, sent, failed }` counts (`src/observatory/src/notifications/notify.rs`, `src/observatory/src/api/notifications.rs:22-27`, `src/observatory/src/store/stable.rs:10-77`).
+- **Why add to Tengiz:** The implemented `notify.Manager.Send/SendAsync` is fire-and-forget: if the process dies mid-send or the Discord/Slack endpoint rejects, there's no record of what was sent or failed. A durable queue in `notifications-{env}.json` with `Pending/Sent/Failed` states survives crashes and enables a `tengiz notification status` command showing delivery health at a glance. Low-medium effort on top of the existing `notify` package.
+- **Detected:** 2026-08-11
+
+## Idempotency-Keyed Notification Delivery (Dedupe on Retry)
+- **Source:** Juno
+- **Description:** Each notification builds a deterministic `idempotency_key` from `segment_id + created_at + nonce` (truncated to 256 chars) and sends it as an `idempotency-key` header to the email API, preventing duplicate messages when a send is retried (`src/observatory/src/notifications/http/request.rs:26-61`, `src/observatory/src/impls.rs:60-73`).
+- **Why add to Tengiz:** When the `health` package restarts a failing container in a loop, each failure can fire a notification — retries inside the notify layer then amplify duplicates across Discord/Slack/Email. Keying sends by event fingerprint (`app + event + time-window`) and sending it as an idempotency header lets email/HTTP providers dedupe automatically. Pairs with Alert Throttling (below): idempotency dedupes identical messages, throttling bounds distinct messages. Low effort.
+- **Detected:** 2026-08-11
+
+## Alert Throttling Window (Max 1 Alert Per Period)
+- **Source:** Juno
+- **Description:** `should_notify_funding_failure()` queries monitoring history for the last 24h (`DELAY_BETWEEN_FUNDING_FAILURE_NOTIFICATION_NS`) and skips the notification entirely if a failure already occurred in that window — "no more than one funding failure email a day" (`src/mission_control/src/monitoring/cycles/notification.rs:48-71`, `constants.rs:7-8`).
+- **Why add to Tengiz:** The recorded Alert Debounce/Hysteresis (Komodo) suppresses transient blips, but a container that stays down across many health-check cycles still fires a notification every cycle → alert fatigue that makes operators ignore real incidents. A per-app/per-event time-window throttle (`alerts.throttle_window: 24h`) in the `notify`/`health` layers caps distinct alerts to one per window regardless of how many cycles fail. Low effort (timestamps in the notifications store).
+- **Detected:** 2026-08-11
+
+## Threshold-Based Auto-Remediation Resource Monitor
+- **Source:** Juno
+- **Description:** A `FundManager` monitors each registered canister every hour with a strategy (`BelowThreshold(min_cycles, fund_cycles)`); when balance drops below the threshold it automatically tops up to the target, then runs an observer callback per round to persist history and send notifications. Schedulers can be started/stopped and per-segment strategies are persisted (`src/mission_control/src/monitoring/cycles/funding.rs`, `start.rs:28-117`, `register.rs`).
+- **Why add to Tengiz:** Juno's closest analog to a PaaS resource guardian. The direct mapping: monitor each container's CPU/memory via `docker stats`; when usage exceeds a threshold, auto-restart (or auto-scale) the container. This turns Tengiz's passive `health` checks into proactive self-healing, and its "register strategy per segment, start scheduler, observer callback" architecture maps 1:1 to a Go monitor loop with callback hooks (restart, notify, record). `.tengiz.yaml`'da `monitoring.resources.threshold_cpu: 85`, `monitoring.resources.action: restart`. Medium effort, high operational value — a differentiator from Dokku/Kamal.
+- **Detected:** 2026-08-11
+
+## Monitoring History with Retention-Based Pruning
+- **Source:** Juno
+- **Description:** Each monitoring round appends a record keyed by `(segment_id, created_at, nonce)`; before inserting, entries older than 30 days (`RETAIN_ARCHIVE_STATUSES_NS`) are deleted via a time-windowed delete (`src/mission_control/src/monitoring/cycles/history.rs:15-60`, `src/mission_control/src/monitoring/store/stable.rs:49-120`).
+- **Why add to Tengiz:** Tengiz's state files (`~/.tengiz/*.json`) grow unboundedly as deployments, health events, and notifications accumulate; on a long-lived single-node host this degrades every load/save. Adopt the same pattern: append a `created_at` timestamp to every state entry and prune entries older than a configured retention window (`state.retention_days: 30`) before each write. Low effort, prevents the #1 long-term state corruption issue.
+- **Detected:** 2026-08-11
+
+## Persistent Scheduler State with Restart Re-arm
+- **Source:** Juno
+- **Description:** Background schedulers store `{enabled: bool}` flags in stable state; `post_upgrade` calls `defer_restart_monitoring()`, which re-arms only the previously-enabled schedulers rather than resetting state. Each scheduler runs a periodic job (`src/observatory/src/openid/scheduler.rs`, `store/heap/openid.rs:10-95`, `memory/lifecycle.rs:43-57`).
+- **Why add to Tengiz:** Tengiz's `idle` timers and `health` checks are purely in-memory: after a daemon restart or upgrade, scale-to-zero timers are lost and apps that were being monitored silently stop being monitored. Persisting per-app "monitored: true/false" and "idle timeout" in `apps.json`, then re-arming on startup, makes monitoring survive restarts — exactly the pattern Juno uses. Low effort (read state at boot), directly closes a correctness gap in the current scale-to-zero model.
+- **Detected:** 2026-08-11
+
+## Capped Exponential Backoff for Background Polling
+- **Source:** Juno
+- **Description:** On a fetch failure, the background job delays 120s, then doubles the delay on each consecutive failure, capped at the nominal interval via `min()` (`FETCH_CERTIFICATE_INTERVAL`, `src/observatory/src/openid/certificate.rs:11-36`).
+- **Why add to Tengiz:** The `health` package polls every app on a fixed interval; when an app is down, a fixed interval hammers the dead endpoint and burns CPU/docker-exec calls across all apps. Capped exponential backoff per app (e.g. 5s → 10s → 20s ... capped at the health interval) reduces load during outages while staying responsive when the app recovers. Low effort in the health goroutine; complements the recorded Threshold-Based Auto-Remediation monitor.
+- **Detected:** 2026-08-11
+
+## Range-Query Filtering over Ordered Composite Keys
+- **Source:** Juno
+- **Description:** Notifications, monitoring history, and analytics events use a composite key `(segment_id, created_at, nonce)` with `MIN/MAX` sentinel keys to enable efficient time-window range scans over an ordered map (`src/observatory/src/store/filter.rs`, `src/orbiter/src/events/filters.rs`, `src/mission_control/src/monitoring/store/stable.rs:93-113`).
+- **Why add to Tengiz:** `tengiz logs --since/--until`, `tengiz build-logs`, and future `tengiz monitoring history` need time-windowed queries over JSON state. Juno's pattern (sortable composite keys + sentinel-bounded ranges) ports cleanly to Go: sort JSON records by `(app, timestamp, nonce)` and slice with from/to bounds instead of scanning-and-filtering the whole file. Improves the recorded Build Tracking/App Report features with efficient history retrieval. Low-medium effort.
+- **Detected:** 2026-08-11
+
+## Expiry-Scoped Access Keys with Revocation
+- **Source:** Juno
+- **Description:** Access keys carry `Admin`/`Write`/`Submit` scopes with expiry validation (admin keys never expire; write/submit keys enforce max counts and expiry), plus a revoked-principal blocklist. Auth checks reject expired or revoked keys (`src/libs/shared/src/segments/access_keys.rs:93-178, 203-322`, `constants/shared.rs:45-51`).
+- **Why add to Tengiz:** The recorded Granular Scoped API Keys (#180) covers permission levels but not expiry enforcement or revocation. Juno's model adds: keys that auto-expire (`tengiz token create --expires-in 24h`), a blocklist for emergency revocation without deleting the key, and scope semantics (Submit = can trigger deploys but not change config). Complements App Deploy Tokens for CI/CD where short-lived, auto-rotating credentials are a security win. Low-medium effort.
+- **Detected:** 2026-08-11
+
+## Bot Traffic Filtering at Ingestion
+- **Source:** Juno
+- **Description:** Analytics ingestion requires a `User-Agent` header and rejects known bots via the `isbot` crate before any analytics event is persisted — returning `400`/`403` instead of recording garbage (`src/orbiter/src/handler/guards.rs`, `msg.rs`).
+- **Why add to Tengiz:** In scale-to-zero mode, bots (crawlers, uptime probes, scrapers) don't just pollute analytics — each hit wakes a stopped container, draining the idle timeout budget and inflating cold-start costs. Filtering bot traffic at the proxy before cold-start (reject known bot UAs for idle apps, or don't count them as "real" traffic for idle extension) saves resources and keeps metrics clean. Complements Built-in Platform Analytics and the recorded CDN/IP-detection features. Low effort — a UA match in the proxy middleware.
+- **Detected:** 2026-08-11
+
+## Zero-Cold-Start Preflight & Unsupported-Method Handling
+- **Source:** Juno
+- **Description:** Known routes answer `OPTIONS → 204` and unsupported methods → `405` from precomputed, pre-certified responses without running any request logic; only supported methods reach the handler (`src/orbiter/src/http/routes/api/routes.rs`, `http/server.rs:12-111`, `setup.rs`).
+- **Why add to Tengiz:** Browsers fire `OPTIONS` preflight requests before every cross-origin POST/PUT. In scale-to-zero, each preflight currently wakes a stopped container for a response the app never actually needs. Precomputing `OPTIONS → 204` and `405` for unsupported methods in the proxy (before cold-start) keeps containers asleep for preflight traffic. Complements the recorded WebSocket/custom-headers proxy work and the KEDA autoscaling (#61) cold-start story. Low effort, measurable cold-start reduction.
+- **Detected:** 2026-08-11
+
+## Analytics Period Export (Batched Zipped JSON)
+- **Source:** Juno
+- **Description:** Analytics export splits the requested range into hourly periods, fetches them in batches of ~12 concurrent requests, and produces a zip of per-period JSON files (`src/frontend/src/lib/services/orbiter/orbiter.export.services.ts:17-133`, `src/frontend/src/lib/utils/orbiter.paginated.utils.ts:8-33`).
+- **Why add to Tengiz:** The recorded Built-in Platform Analytics collects data but gives no way to take it elsewhere. `tengiz analytics export --from 2026-08-01 --to 2026-08-11 --format zip` produces per-period JSON for offline analysis, migration, or compliance — using bounded concurrent batches so it doesn't hammer the state store. Directly extends the analytics feature with a deliverable output. Low-medium effort.
+- **Detected:** 2026-08-11
+
+## Incremental Cursor-Based History Sync
+- **Source:** Juno
+- **Description:** History sync fetches only records newer than the last locally-known `created_at` (cursor) and merges them, instead of re-fetching everything; it runs on a periodic timer (`src/frontend/src/lib/workers/monitoring.worker.ts:238-281, 333-406`, `constants/app.constants.ts:10`).
+- **Why add to Tengiz:** Commands like `tengiz logs --since` and the health/monitoring status reader currently re-read full state files or full docker logs each time. A persisted per-app cursor (last-processed `created_at` or log offset) lets the proxy/health/CLI do incremental syncs — critical as `~/.tengiz/*.json` grows and for future log/metrics draining. Pairs with the Range-Query feature (above). Low-medium effort.
+- **Detected:** 2026-08-11
+
+## Optimistic Concurrency for State Writes (Version/Timestamp Checks)
+- **Source:** Juno
+- **Description:** Updates validate either a monotonic `version` (wrapping at `u64::MAX`) or an `updated_at` timestamp before overwriting; session and ownership IDs must match too, preventing lost updates (`src/orbiter/src/events/store.rs:31-56, 140-168, 251-265`, `src/libs/shared/src/data/version.rs`).
+- **Why add to Tengiz:** Tengiz's proxy, health goroutines, and CLI all write `apps.json`/`ports-{env}.json` concurrently. Two simultaneous deploys or a proxy write racing a CLI `config set` can silently lose one update. Juno's pattern — stamp each entry with a version, and abort/retry on mismatch — is the lightweight alternative to the recorded file-based operation locking (#101). Low-medium effort, protects the single source of truth.
+- **Detected:** 2026-08-11
+
+## Per-App Restricted CORS Origin
+- **Source:** Juno
+- **Description:** Per-satellite config includes a `restricted_origin` that is enforced as `Access-Control-Allow-Origin` on write responses, while preflight OPTIONS stays allow-all for performance (`src/orbiter/src/assert/config.rs`, `config/store.rs:40-103`, `handler/adapters/response_builder.rs:10-35`, `http/routes/api/cors.rs:24-45`).
+- **Why add to Tengiz:** Tengiz apps have no per-app CORS policy — the proxy forwards whatever the app sets, and anyone can make cross-origin requests to any deployed app. Juno's `restricted_origin` gives per-app control: enforce a single allowed origin on state-changing (POST/PUT/DELETE) requests at the proxy while leaving GET/preflight permissive. `.tengiz.yaml`'da `proxy.cors_origin: https://app.example.com`. Complements the recorded Custom HTTP Headers per URL Path (#60). Low effort.
+- **Detected:** 2026-08-11
+
+## Chunked/Resumable Upload Batch Protocol
+- **Source:** Juno
+- **Description:** Large asset uploads use a batch protocol: `init_asset_upload` creates a batch and returns a `batch_id`, `upload_asset_chunk` stores individual chunks, and `commit_asset_upload` assembles the asset from chunks and triggers hooks. Batch ownership and chunk membership are validated on every step (`src/libs/satellite/src/api/storage.rs`, `src/libs/storage/src/assert.rs:22-164`, `libs/storage/src/runtime.rs:73-88`).
+- **Why add to Tengiz:** The recorded Built-in File/Blob Storage lacks a resumable upload path — no `batch_id`/chunk model means large files must be sent in one request and a network drop restarts the whole upload. A chunked batch protocol gives the blob storage feature: progress tracking, resume after interruption, and per-chunk validation. `.tengiz.yaml` storage config + `/__tengiz/storage/init|chunk|commit` proxy routes. Low-medium effort once blob storage exists.
+- **Detected:** 2026-08-11
