@@ -9,10 +9,6 @@ import (
 	"strings"
 )
 
-func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
-	return CleanupResult{}, nil
-}
-
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()
@@ -95,4 +91,76 @@ func buildDryRunArgs(category string) []string {
 		return []string{"network", "ls", "--filter", "dangling=true", "--format", "{{.Name}}"}
 	}
 	return nil
+}
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
+	var result CleanupResult
+	for _, cat := range []string{categoryContainers, categoryImages, categoryVolumes, categoryNetworks} {
+		if !cleanupEnabled(opts, cat) {
+			continue
+		}
+		if opts.DryRun {
+			items, err := r.listForCleanup(ctx, cat, opts)
+			if err != nil {
+				return result, err
+			}
+			switch cat {
+			case categoryContainers:
+				result.Containers = items
+			case categoryImages:
+				result.Images = items
+			case categoryVolumes:
+				result.Volumes = items
+			case categoryNetworks:
+				result.Networks = items
+			}
+			continue
+		}
+		if err := r.runPrune(ctx, cat, opts); err != nil {
+			return result, err
+		}
+	}
+	return result, nil
+}
+
+func cleanupEnabled(opts CleanupOptions, category string) bool {
+	switch category {
+	case categoryContainers:
+		return opts.Containers
+	case categoryImages:
+		return opts.Images
+	case categoryVolumes:
+		return opts.Volumes
+	case categoryNetworks:
+		return opts.Networks
+	}
+	return false
+}
+
+func (r *dockerRuntime) runPrune(ctx context.Context, category string, opts CleanupOptions) error {
+	args := buildPruneArgs(category)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker %s prune: %w\n%s", category, err, string(out))
+	}
+	log.Printf("[runtime] docker %s prune: %s", category, strings.TrimSpace(string(out)))
+	return nil
+}
+
+func (r *dockerRuntime) listForCleanup(ctx context.Context, category string, opts CleanupOptions) ([]string, error) {
+	args := buildDryRunArgs(category)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker %s list: %w\n%s", category, err, string(out))
+	}
+	var items []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			items = append(items, line)
+		}
+	}
+	return items, nil
 }

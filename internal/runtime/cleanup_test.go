@@ -66,3 +66,26 @@ func TestBuildDryRunArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		opts     CleanupOptions
+		category string
+		want     bool
+	}{
+		{"containers on", CleanupOptions{Containers: true}, categoryContainers, true},
+		{"containers off", CleanupOptions{}, categoryContainers, false},
+		{"images on", CleanupOptions{Images: true}, categoryImages, true},
+		{"volumes on", CleanupOptions{Volumes: true}, categoryVolumes, true},
+		{"networks on", CleanupOptions{Networks: true}, categoryNetworks, true},
+		{"unknown category", CleanupOptions{Containers: true}, "bogus", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cleanupEnabled(tt.opts, tt.category); got != tt.want {
+				t.Errorf("cleanupEnabled(%+v, %q) = %v, want %v", tt.opts, tt.category, got, tt.want)
+			}
+		})
+	}
+}
