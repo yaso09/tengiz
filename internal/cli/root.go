@@ -19,6 +19,7 @@ import (
 	"github.com/yaso09/tengiz/internal/git"
 	"github.com/yaso09/tengiz/internal/gitdeploy"
 	"github.com/yaso09/tengiz/internal/health"
+	"github.com/yaso09/tengiz/internal/hooks"
 	"github.com/yaso09/tengiz/internal/notify"
 	"github.com/yaso09/tengiz/internal/idle"
 	"github.com/yaso09/tengiz/internal/preview"
@@ -125,6 +126,9 @@ var initCmd = &cobra.Command{
 		content := fmt.Sprintf(`name: %s
 environment: %s
 # port: 3000            # container internal port (auto-detected if omitted)
+# pre_deploy:              # commands run on the host before image build
+#   - echo "pre-deploy"
+#   - ./scripts/migrate.sh
 serverless:
   enabled: true
   idle_timeout: 5m      # scale-to-zero timeout
@@ -234,6 +238,34 @@ var deployCmd = &cobra.Command{
 
 		deploymentID := fmt.Sprintf("%d", time.Now().Unix())
 
+		// Set up notification manager
+		notifyMgr := notify.NewManager(dataDir, envFlag)
+		if loadErr := notifyMgr.LoadConfig(); loadErr == nil {
+			cfg := notifyMgr.GetConfig()
+			if cfg != nil && cfg.Enabled {
+				if cfg.Discord != nil {
+					notifyMgr.AddNotifier(notify.NewDiscordNotifier(*cfg.Discord))
+				}
+				if cfg.Slack != nil {
+					notifyMgr.AddNotifier(notify.NewSlackNotifier(*cfg.Slack))
+				}
+				if cfg.Email != nil {
+					notifyMgr.AddNotifier(notify.NewEmailNotifier(*cfg.Email))
+				}
+			}
+		}
+
+		// Run pre-deploy hooks (host-side shell commands) before building the image
+		if err := hooks.Run(context.Background(), projectRoot, cfg.PreDeploy); err != nil {
+			notifyMgr.SendAsync(context.Background(), types.NotificationEvent{
+				Type:    types.EventDeployFailure,
+				AppName: cfg.Name,
+				Message: fmt.Sprintf("Pre-deploy hook failed for %s: %v", cfg.Name, err),
+				Metadata: map[string]string{"environment": envFlag},
+			})
+			return fmt.Errorf("pre_deploy: %w", err)
+		}
+
 		b := builder.New(dataDir)
 		if cfg.Build.NixpacksConfig != nil {
 			b.SetNixpacksConfig(cfg.Build.NixpacksConfig)
@@ -267,23 +299,6 @@ var deployCmd = &cobra.Command{
 		rt, err := runtime.NewDocker()
 		if err != nil {
 			return fmt.Errorf("docker: %w", err)
-		}
-
-		// Set up notification manager
-		notifyMgr := notify.NewManager(dataDir, envFlag)
-		if loadErr := notifyMgr.LoadConfig(); loadErr == nil {
-			cfg := notifyMgr.GetConfig()
-			if cfg != nil && cfg.Enabled {
-				if cfg.Discord != nil {
-					notifyMgr.AddNotifier(notify.NewDiscordNotifier(*cfg.Discord))
-				}
-				if cfg.Slack != nil {
-					notifyMgr.AddNotifier(notify.NewSlackNotifier(*cfg.Slack))
-				}
-				if cfg.Email != nil {
-					notifyMgr.AddNotifier(notify.NewEmailNotifier(*cfg.Email))
-				}
-			}
 		}
 
 		// Check if this app already exists (previous deploy)
