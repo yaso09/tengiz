@@ -1,8 +1,10 @@
 package runtime
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -107,4 +109,49 @@ func parsePruneCount(out []byte) int {
 		}
 	}
 	return count
+}
+
+func (r *dockerRuntime) PruneContainers(ctx context.Context) (int, error) {
+	cmd := exec.CommandContext(ctx, "docker", pruneArgs("container")...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("docker container prune: %w\n%s", err, string(out))
+	}
+	return parsePruneCount(out), nil
+}
+
+func (r *dockerRuntime) PruneImages(ctx context.Context) (int, error) {
+	cmd := exec.CommandContext(ctx, "docker", pruneArgs("image")...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("docker image prune: %w\n%s", err, string(out))
+	}
+	return parsePruneCount(out), nil
+}
+
+func (r *dockerRuntime) PruneVolumes(ctx context.Context) (int, error) {
+	cmd := exec.CommandContext(ctx, "docker", pruneArgs("volume")...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("docker volume prune: %w\n%s", err, string(out))
+	}
+	return parsePruneCount(out), nil
+}
+
+func (r *dockerRuntime) PruneNetworks(ctx context.Context) (int, error) {
+	cmd := exec.CommandContext(ctx, "docker", pruneArgs("network")...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("docker network prune: %w\n%s", err, string(out))
+	}
+	return parsePruneCount(out), nil
+}
+
+func (r *dockerRuntime) DockerDiskInfo(ctx context.Context) (DockerDiskInfo, error) {
+	cmd := exec.CommandContext(ctx, "docker", systemDFArgs()...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return DockerDiskInfo{}, fmt.Errorf("docker system df: %w\n%s", err, string(out))
+	}
+	return parseSystemDF(out)
 }

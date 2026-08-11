@@ -1,6 +1,9 @@
 package runtime
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestParseHumanSize(t *testing.T) {
 	tests := []struct {
@@ -121,5 +124,24 @@ func TestParsePruneCountNothing(t *testing.T) {
 	out := []byte("Total reclaimed space: 0B\n")
 	if got := parsePruneCount(out); got != 0 {
 		t.Errorf("parsePruneCount(empty) = %d, want 0", got)
+	}
+}
+
+func TestStubPruneMethods(t *testing.T) {
+	m := NewStub()
+	if n, err := m.PruneContainers(context.Background()); err != nil || n != 0 {
+		t.Fatalf("PruneContainers() = %d, %v; want 0, nil", n, err)
+	}
+	if n, err := m.PruneImages(context.Background()); err != nil || n != 0 {
+		t.Fatalf("PruneImages() = %d, %v; want 0, nil", n, err)
+	}
+	if n, err := m.PruneVolumes(context.Background()); err != nil || n != 0 {
+		t.Fatalf("PruneVolumes() = %d, %v; want 0, nil", n, err)
+	}
+	if n, err := m.PruneNetworks(context.Background()); err != nil || n != 0 {
+		t.Fatalf("PruneNetworks() = %d, %v; want 0, nil", n, err)
+	}
+	if info, err := m.DockerDiskInfo(context.Background()); err != nil || info.Images != 0 {
+		t.Fatalf("DockerDiskInfo() = %+v, %v; want zero, nil", info, err)
 	}
 }
