@@ -16,9 +16,10 @@
 | `builder` | Framework detection (`detect.go`) + Dockerfile generation (`builder.go`). Supports: Docker, Next.js, Vite, Go, Node, Python, static. Nixpacks backend (`build.builder: nixpacks`) for hundreds of frameworks (Ruby, Rust, PHP, etc). Env-aware image tags (`{env}-{deploymentID}`). |
 | `proxy` | `httputil.ReverseProxy` with host-based routing (`appname.tengiz.local` → port 9000+) and custom domain support. Cold-starts stopped containers on demand. Env-aware via `NewWithEnv`. |
 | `idle` | Per-app timer. `Reset(name)` extends deadline. On expiry: calls `runtime.Stop()`. Default 5m timeout. Env-aware via `NewWithEnv`. |
-| `config` | Loads `.tengiz.yaml` via viper. `LoadWithEnv(path, env)` and `LoadForEnvironment(path, env)` merge `.tengiz.{env}.yaml` overrides (latter adds env name validation + comprehensive scalar merge). `Store` persists apps + port allocations in `~/.tengiz/` (env-scoped). Adds `GetEnv`/`SetEnv`/`UnsetEnv`/`ListEnv` for env var management. |
+| `config` | Loads `.tengiz.yaml` via viper. `LoadWithEnv(path, env)` and `LoadForEnvironment(path, env)` merge `.tengiz.{env}.yaml` overrides (latter adds env name validation + comprehensive scalar merge). `PreDeploy` list merged via env override (replace, not append). `Store` persists apps + port allocations in `~/.tengiz/` (env-scoped). Adds `GetEnv`/`SetEnv`/`UnsetEnv`/`ListEnv` for env var management. |
+| `hooks` | Host-side pre-deploy hook runner. `Run(ctx, dir, commands)` executes each command sequentially via `/bin/sh -c` in `dir`, streaming stdout/stderr, aborting on first non-zero exit. Empty/nil list = no-op. |
 | `health` | Periodic HTTP health checks with automatic restart. Env-aware via `NewWithEnv`. |
-| `gitdeploy` | Git-based deployment pipeline. Env-aware via `NewPipelineWithEnv`. |
+| `gitdeploy` | Git-based deployment pipeline. Env-aware via `NewPipelineWithEnv`. `runPreDeployHooks` loads `.tengiz.yaml` from the clone dir and runs `pre_deploy` before the image build; a failing hook aborts the deploy. |
 | `preview` | Preview deployment lifecycle (PR-based). `Manager` struct with `Create/Update/Delete/List`. Webhook `pull_request` events trigger auto-create/update/cleanup. |
 | `encrypt` | AES-256-GCM encrypt/decrypt, key generation, key file load/save |
 | `secrets` | `Manager` struct: encrypted per-app secrets storage in `secrets-{env}.json`. `Provider` interface with `LocalProvider` (file-based), `VaultProvider`, `DopplerProvider` backends. `NewManagerFromConfig` for provider selection. `ResolveInterpolations` for `[[secret.NAME]]` env var expansion. `RotateKey` on `LocalProvider` for re-encryption. |
@@ -80,6 +81,7 @@ tengiz notification show        → show current notification configuration
 - No config file = uses dir name as app name + defaults
 - Env vars stored in `AppEntry.Config.Env` → auto-persisted via JSON in `~/.tengiz/apps.json`
 - `.tengiz.yaml` `env:` section uses `KEY: value` format (map, not list)
+- `.tengiz.yaml` `pre_deploy:` is a list of host-side shell commands run via `/bin/sh -c` before the image build (both `tengiz deploy` and git deploys). Env-specific `.tengiz.{env}.yaml` overrides replace the base list (same semantics as `domains`/`volumes`); a non-zero exit aborts the deploy.
 - Proxy's `extractApp()` checks custom domains first (`p.domains` map), then strips `.tengiz.local`/`.localhost` suffixes and checks the full prefix as a route key, then falls back to first subdomain part (e.g. `pr-42.myapp.tengiz.local` → `pr-42.myapp` as route key, `myapp.tengiz.local` → `myapp`)
 - Tests for `proxy` are slow (~2s each) due to TCP dial timeout on unreachable ports
 - `idle` tests are time-sensitive (use `time.Sleep` with 50ms granularity)
