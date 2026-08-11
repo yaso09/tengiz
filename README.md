@@ -227,6 +227,19 @@ Remove an application completely — stops the container, deletes it, and cleans
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup [--dry-run] [--volumes] [--all]`
+
+Remove unused Docker resources to reclaim disk space on single-server deployments.
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Show what would be removed without removing anything |
+| `-y`, `--yes` | Skip the confirmation prompt |
+| `--volumes` | Also remove unused Docker volumes (destructive) |
+| `--all` | Remove all unused images, not just dangling ones |
+
+By default removes stopped non-Tengiz containers, dangling images, unused custom networks, and the Docker build cache. **Tengiz-managed containers are always protected** — apps labeled `tengiz-app` (including scale-to-zero stopped containers, versioned containers, and preview deployments) are never removed. Images referenced by any container or by deployment history in `~/.tengiz/` are never removed. Prompts for confirmation unless `--dry-run` or `--yes` is given.
+
 ### `tengiz rollback <app>`
 
 Rollback to the previous deployment. The previous active container is started on a new port, the proxy route is updated, and the current container is stopped and removed. Deployment statuses are updated in the deployment history.
@@ -573,6 +586,7 @@ When `webhook.secret` is set, the server verifies the payload signature on every
 | `tengiz git disconnect` | Remove the SSH deploy key |
 | `tengiz webhook [-p <port>] [--config <path>]` | Start the webhook server with optional config |
 | `tengiz init --git-repo URL` | Create config with git repo |
+| `tengiz cleanup [--dry-run] [--volumes] [--all]` | Remove unused Docker resources (protects Tengiz-managed containers) |
 
 ## Architecture
 
