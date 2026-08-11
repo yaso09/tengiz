@@ -86,6 +86,13 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers not managed by Tengiz")
+	cleanupCmd.Flags().Bool("images", false, "prune dangling images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without removing anything")
+	cleanupCmd.Flags().Duration("interval", 0, "run cleanup periodically (e.g. 1h, 24h); 0 = run once and exit")
+	rootCmd.AddCommand(cleanupCmd)
 }
 
 var rootCmd = &cobra.Command{
@@ -1275,6 +1282,101 @@ var webhookCmd = &cobra.Command{
 		fmt.Printf("[tengiz] starting webhook server on :%d\n", port)
 		return s.Start(ctx, port)
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Prune unused Docker resources",
+	Long: `Prunes unused Docker resources to reclaim disk space: stopped containers
+not managed by Tengiz, dangling images, unused volumes, and unused networks.
+
+Tengiz-managed containers (labeled tengiz-app, including scale-to-zero
+stopped containers and preview deployments) are always preserved.
+
+By default all categories are pruned. Use --containers, --images,
+--volumes, --networks to select specific categories. Use --dry-run to
+show what would be removed without removing anything. Use --interval to
+run cleanup periodically (e.g. --interval 24h).`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts, err := pruneOptionsFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		interval, _ := cmd.Flags().GetDuration("interval")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		runOnce := func() error {
+			report, err := rt.Prune(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("[tengiz] cleanup: %d containers, %d images, %d volumes, %d networks\n",
+				report.ContainersRemoved, report.ImagesRemoved, report.VolumesRemoved, report.NetworksRemoved)
+			return nil
+		}
+
+		if interval <= 0 {
+			return runOnce()
+		}
+
+		ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt)
+		defer cancel()
+		if err := runOnce(); err != nil {
+			return err
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+				if err := runOnce(); err != nil {
+					log.Printf("[tengiz] cleanup: %v", err)
+				}
+			}
+		}
+	},
+}
+
+func pruneOptionsFromFlags(cmd *cobra.Command) (runtime.PruneOptions, error) {
+	containers, err := cmd.Flags().GetBool("containers")
+	if err != nil {
+		return runtime.PruneOptions{}, err
+	}
+	images, err := cmd.Flags().GetBool("images")
+	if err != nil {
+		return runtime.PruneOptions{}, err
+	}
+	volumes, err := cmd.Flags().GetBool("volumes")
+	if err != nil {
+		return runtime.PruneOptions{}, err
+	}
+	networks, err := cmd.Flags().GetBool("networks")
+	if err != nil {
+		return runtime.PruneOptions{}, err
+	}
+	dryRun, err := cmd.Flags().GetBool("dry-run")
+	if err != nil {
+		return runtime.PruneOptions{}, err
+	}
+
+	if !cmd.Flags().Changed("containers") && !cmd.Flags().Changed("images") &&
+		!cmd.Flags().Changed("volumes") && !cmd.Flags().Changed("networks") {
+		containers, images, volumes, networks = true, true, true, true
+	}
+
+	return runtime.PruneOptions{
+		Containers: containers,
+		Images:     images,
+		Volumes:    volumes,
+		Networks:   networks,
+		DryRun:     dryRun,
+	}, nil
 }
 
 var notificationCmd = &cobra.Command{

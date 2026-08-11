@@ -379,3 +379,69 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		}
 	}
 }
+
+func newCleanupFlagsCmd() *cobra.Command {
+	c := &cobra.Command{Use: "cleanup"}
+	c.Flags().Bool("containers", false, "")
+	c.Flags().Bool("images", false, "")
+	c.Flags().Bool("volumes", false, "")
+	c.Flags().Bool("networks", false, "")
+	c.Flags().Bool("dry-run", false, "")
+	c.Flags().Duration("interval", 0, "")
+	return c
+}
+
+func TestCleanupCmdRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCmdFlags(t *testing.T) {
+	for _, flag := range []string{"containers", "images", "volumes", "networks", "dry-run", "interval"} {
+		if cleanupCmd.Flags().Lookup(flag) == nil {
+			t.Errorf("cleanupCmd missing --%s flag", flag)
+		}
+	}
+}
+
+func TestPruneOptionsFromFlagsDefaultAll(t *testing.T) {
+	c := newCleanupFlagsCmd()
+	opts, err := pruneOptionsFromFlags(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.Containers || !opts.Images || !opts.Volumes || !opts.Networks {
+		t.Errorf("expected all categories by default, got %+v", opts)
+	}
+	if opts.DryRun {
+		t.Error("dry-run should default to false")
+	}
+}
+
+func TestPruneOptionsFromFlagsExplicit(t *testing.T) {
+	c := newCleanupFlagsCmd()
+	if err := c.Flags().Set("containers", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Flags().Set("dry-run", "true"); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := pruneOptionsFromFlags(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.Containers {
+		t.Error("containers should be true when explicitly set")
+	}
+	if opts.Images || opts.Volumes || opts.Networks {
+		t.Errorf("only containers should be set, got %+v", opts)
+	}
+	if !opts.DryRun {
+		t.Error("dry-run should be true")
+	}
+}
