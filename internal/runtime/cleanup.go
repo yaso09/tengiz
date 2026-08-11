@@ -61,3 +61,38 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	}
 	return nil
 }
+
+const (
+	categoryContainers = "containers"
+	categoryImages     = "images"
+	categoryVolumes    = "volumes"
+	categoryNetworks   = "networks"
+)
+
+func buildPruneArgs(category string) []string {
+	switch category {
+	case categoryContainers:
+		return []string{"container", "prune", "-f", "--filter", "label!=tengiz-app"}
+	case categoryImages:
+		return []string{"image", "prune", "-f"}
+	case categoryVolumes:
+		return []string{"volume", "prune", "-f", "--filter", "label!=tengiz-app"}
+	case categoryNetworks:
+		return []string{"network", "prune", "-f", "--filter", "label!=tengiz-app"}
+	}
+	return nil
+}
+
+func buildDryRunArgs(category string) []string {
+	switch category {
+	case categoryContainers:
+		return []string{"ps", "-a", "--filter", "status=exited", "--filter", "label!=tengiz-app", "--format", "{{.ID}}"}
+	case categoryImages:
+		return []string{"images", "--filter", "dangling=true", "--format", "{{.ID}}"}
+	case categoryVolumes:
+		return []string{"volume", "ls", "--filter", "dangling=true", "--format", "{{.Name}}"}
+	case categoryNetworks:
+		return []string{"network", "ls", "--filter", "dangling=true", "--format", "{{.Name}}"}
+	}
+	return nil
+}
