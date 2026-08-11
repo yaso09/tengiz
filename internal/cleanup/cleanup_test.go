@@ -1,6 +1,7 @@
 package cleanup
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +10,181 @@ import (
 	"github.com/yaso09/tengiz/internal/runtime"
 	"github.com/yaso09/tengiz/internal/types"
 )
+
+type mockPruneRT struct {
+	containers      []runtime.ContainerInfo
+	images          []runtime.ImageInfo
+	volumes         []runtime.VolumeInfo
+	removed         []string
+	imagesRemoved   []string
+	volumesRemoved  []string
+	buildCacheCalls int
+}
+
+func (m *mockPruneRT) ListContainers(ctx context.Context) ([]runtime.ContainerInfo, error) {
+	return m.containers, nil
+}
+
+func (m *mockPruneRT) ListImages(ctx context.Context) ([]runtime.ImageInfo, error) {
+	return m.images, nil
+}
+
+func (m *mockPruneRT) ListVolumes(ctx context.Context) ([]runtime.VolumeInfo, error) {
+	return m.volumes, nil
+}
+
+func (m *mockPruneRT) PruneBuildCache(ctx context.Context) error {
+	m.buildCacheCalls++
+	return nil
+}
+
+func (m *mockPruneRT) Remove(ctx context.Context, name string) error {
+	m.removed = append(m.removed, name)
+	return nil
+}
+
+func (m *mockPruneRT) RemoveImage(ctx context.Context, imageTag string) error {
+	m.imagesRemoved = append(m.imagesRemoved, imageTag)
+	return nil
+}
+
+func (m *mockPruneRT) RemoveVolume(ctx context.Context, name string) error {
+	m.volumesRemoved = append(m.volumesRemoved, name)
+	return nil
+}
+
+func TestPruneDryRunRemovesNothing(t *testing.T) {
+	m := &mockPruneRT{
+		containers: []runtime.ContainerInfo{
+			{Name: "foreign-stopped", State: "exited", Labels: map[string]string{}},
+		},
+		images: []runtime.ImageInfo{
+			{ID: "sha256:aaa", Repository: "<none>", Tag: "<none>"},
+		},
+		volumes: []runtime.VolumeInfo{
+			{Name: "freevol", InUse: false},
+		},
+	}
+	c := New(m, config.NewStore(t.TempDir()))
+
+	result, err := c.Prune(context.Background(), Options{DryRun: true, Volumes: true})
+	if err != nil {
+		t.Fatalf("Prune(dry-run): %v", err)
+	}
+	if len(result.ContainersRemoved) != 1 || result.ContainersRemoved[0] != "foreign-stopped" {
+		t.Errorf("dry-run containers = %v, want [foreign-stopped]", result.ContainersRemoved)
+	}
+	if len(result.ImagesRemoved) != 1 || result.ImagesRemoved[0] != "sha256:aaa" {
+		t.Errorf("dry-run images = %v, want [sha256:aaa]", result.ImagesRemoved)
+	}
+	if len(result.VolumesRemoved) != 1 || result.VolumesRemoved[0] != "freevol" {
+		t.Errorf("dry-run volumes = %v, want [freevol]", result.VolumesRemoved)
+	}
+	if !result.BuildCache {
+		t.Error("dry-run BuildCache = false, want true")
+	}
+	if len(m.removed) != 0 || len(m.imagesRemoved) != 0 || len(m.volumesRemoved) != 0 || m.buildCacheCalls != 0 {
+		t.Errorf("dry-run mutated state: removed=%v images=%v volumes=%v cacheCalls=%d",
+			m.removed, m.imagesRemoved, m.volumesRemoved, m.buildCacheCalls)
+	}
+}
+
+func TestPruneRemovesCandidates(t *testing.T) {
+	m := &mockPruneRT{
+		containers: []runtime.ContainerInfo{
+			{Name: "foreign-stopped", State: "exited", Labels: map[string]string{}},
+			{Name: "tengiz-myapp", State: "exited", Labels: map[string]string{runtime.AppLabel: "myapp"}},
+			{Name: "foreign-running", State: "running", Labels: map[string]string{}},
+		},
+		images: []runtime.ImageInfo{
+			{ID: "sha256:aaa", Repository: "<none>", Tag: "<none>"},
+			{ID: "sha256:bbb", Repository: "tengiz-apps/myapp", Tag: "production-v1"},
+		},
+		volumes: []runtime.VolumeInfo{
+			{Name: "freevol", InUse: false},
+			{Name: "usedvol", InUse: true},
+		},
+	}
+	c := New(m, config.NewStore(t.TempDir()))
+
+	result, err := c.Prune(context.Background(), Options{Volumes: true})
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+
+	if len(m.removed) != 1 || m.removed[0] != "foreign-stopped" {
+		t.Errorf("removed containers = %v, want [foreign-stopped]", m.removed)
+	}
+	if len(m.imagesRemoved) != 1 || m.imagesRemoved[0] != "sha256:aaa" {
+		t.Errorf("removed images = %v, want [sha256:aaa]", m.imagesRemoved)
+	}
+	if len(m.volumesRemoved) != 1 || m.volumesRemoved[0] != "freevol" {
+		t.Errorf("removed volumes = %v, want [freevol]", m.volumesRemoved)
+	}
+	if m.buildCacheCalls != 1 {
+		t.Errorf("build cache calls = %d, want 1", m.buildCacheCalls)
+	}
+	if !result.BuildCache {
+		t.Error("result.BuildCache = false, want true")
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("unexpected errors: %v", result.Errors)
+	}
+}
+
+func TestPruneAllImagesProtectsDeploymentRefs(t *testing.T) {
+	dir := t.TempDir()
+	store := config.NewStore(dir)
+	store.AddDeployment("myapp", types.DeploymentEntry{
+		ID:       "1700000000",
+		ImageTag: "tengiz-apps/myapp:production-v1",
+		Status:   string(types.DeployActive),
+	})
+
+	m := &mockPruneRT{
+		containers: []runtime.ContainerInfo{
+			{Name: "tengiz-myapp", State: "running", Image: "sha256:bbb", Labels: map[string]string{runtime.AppLabel: "myapp"}},
+		},
+		images: []runtime.ImageInfo{
+			{ID: "sha256:aaa", Repository: "<none>", Tag: "<none>"},
+			{ID: "sha256:bbb", Repository: "tengiz-apps/myapp", Tag: "production-v1"},
+			{ID: "sha256:ccc", Repository: "tengiz-apps/myapp", Tag: "production-v1"},
+			{ID: "sha256:ddd", Repository: "tengiz-apps/oldapp", Tag: "production-v9"},
+		},
+	}
+	c := New(m, store)
+
+	result, err := c.Prune(context.Background(), Options{AllImages: true})
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+
+	if len(result.ImagesRemoved) != 2 {
+		t.Fatalf("images removed = %v, want 2 (dangling + unreferenced oldapp)", result.ImagesRemoved)
+	}
+	for _, img := range result.ImagesRemoved {
+		if img == "sha256:bbb" || img == "tengiz-apps/myapp:production-v1" {
+			t.Errorf("protected image removed: %s", img)
+		}
+	}
+}
+
+func TestPruneWithoutVolumesFlagKeepsVolumes(t *testing.T) {
+	m := &mockPruneRT{
+		volumes: []runtime.VolumeInfo{
+			{Name: "freevol", InUse: false},
+		},
+	}
+	c := New(m, config.NewStore(t.TempDir()))
+
+	_, err := c.Prune(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if len(m.volumesRemoved) != 0 {
+		t.Errorf("volumes removed without --volumes = %v, want none", m.volumesRemoved)
+	}
+}
 
 func TestContainerCandidates(t *testing.T) {
 	containers := []runtime.ContainerInfo{

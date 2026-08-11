@@ -1,12 +1,14 @@
 package cleanup
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/yaso09/tengiz/internal/config"
 	"github.com/yaso09/tengiz/internal/runtime"
 	"github.com/yaso09/tengiz/internal/types"
 )
@@ -151,4 +153,104 @@ func readJSON(dataDir, name string, v interface{}) bool {
 		return false
 	}
 	return json.Unmarshal(data, v) == nil
+}
+
+type PruneRuntime interface {
+	ListContainers(ctx context.Context) ([]runtime.ContainerInfo, error)
+	ListImages(ctx context.Context) ([]runtime.ImageInfo, error)
+	ListVolumes(ctx context.Context) ([]runtime.VolumeInfo, error)
+	PruneBuildCache(ctx context.Context) error
+	Remove(ctx context.Context, name string) error
+	RemoveImage(ctx context.Context, imageTag string) error
+	RemoveVolume(ctx context.Context, name string) error
+}
+
+type Cleaner struct {
+	rt    PruneRuntime
+	store *config.Store
+}
+
+func New(rt PruneRuntime, store *config.Store) *Cleaner {
+	return &Cleaner{rt: rt, store: store}
+}
+
+func (c *Cleaner) Plan(ctx context.Context, opts Options) (Result, error) {
+	containers, err := c.rt.ListContainers(ctx)
+	if err != nil {
+		return Result{}, fmt.Errorf("list containers: %w", err)
+	}
+	images, err := c.rt.ListImages(ctx)
+	if err != nil {
+		return Result{}, fmt.Errorf("list images: %w", err)
+	}
+
+	protectedIDs := make(map[string]bool)
+	for _, ctr := range containers {
+		if ctr.Image != "" {
+			protectedIDs[ctr.Image] = true
+		}
+	}
+	protectedRefs, err := referencedImageRefs(c.store.DataDir())
+	if err != nil {
+		return Result{}, fmt.Errorf("load deployment refs: %w", err)
+	}
+
+	imgCandidates := imageCandidates(images, protectedIDs, protectedRefs, opts.AllImages)
+
+	var volCandidates []runtime.VolumeInfo
+	if opts.Volumes {
+		vols, err := c.rt.ListVolumes(ctx)
+		if err != nil {
+			return Result{}, fmt.Errorf("list volumes: %w", err)
+		}
+		volCandidates = volumeCandidates(vols)
+	}
+
+	return Result{
+		ContainersRemoved: containerNames(containerCandidates(containers)),
+		ImagesRemoved:     imageTargets(imgCandidates),
+		VolumesRemoved:    volumeNames(volCandidates),
+		BuildCache:        true,
+	}, nil
+}
+
+func (c *Cleaner) Prune(ctx context.Context, opts Options) (Result, error) {
+	plan, err := c.Plan(ctx, opts)
+	if err != nil {
+		return Result{}, err
+	}
+	if opts.DryRun {
+		return plan, nil
+	}
+
+	result := Result{BuildCache: plan.BuildCache}
+
+	for _, name := range plan.ContainersRemoved {
+		if err := c.rt.Remove(ctx, name); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("container %s: %v", name, err))
+			continue
+		}
+		result.ContainersRemoved = append(result.ContainersRemoved, name)
+	}
+	for _, img := range plan.ImagesRemoved {
+		if err := c.rt.RemoveImage(ctx, img); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("image %s: %v", img, err))
+			continue
+		}
+		result.ImagesRemoved = append(result.ImagesRemoved, img)
+	}
+	for _, vol := range plan.VolumesRemoved {
+		if err := c.rt.RemoveVolume(ctx, vol); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("volume %s: %v", vol, err))
+			continue
+		}
+		result.VolumesRemoved = append(result.VolumesRemoved, vol)
+	}
+	if plan.BuildCache {
+		if err := c.rt.PruneBuildCache(ctx); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("build cache: %v", err))
+			result.BuildCache = false
+		}
+	}
+	return result, nil
 }
