@@ -138,6 +138,9 @@ func LoadForEnvironment(path, env string) (*types.AppConfig, error) {
 	if envCfg.Volumes != nil {
 		cfg.Volumes = envCfg.Volumes
 	}
+	if envCfg.PreDeploy != nil {
+		cfg.PreDeploy = envCfg.PreDeploy
+	}
 
 	if envCfg.Env != nil {
 		if cfg.Env == nil {

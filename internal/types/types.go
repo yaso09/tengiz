@@ -76,6 +76,7 @@ type AppConfig struct {
 	Name        string              `mapstructure:"name"`
 	Port        int                 `mapstructure:"port"`
 	Build       BuildConfig         `mapstructure:"build"`
+	PreDeploy   []string            `mapstructure:"pre_deploy,omitempty" json:"pre_deploy,omitempty"`
 	Serverless  ServerlessConfig    `mapstructure:"serverless"`
 	Domains     []string            `mapstructure:"domains"`
 	HealthCheck *HealthCheckConfig  `mapstructure:"healthcheck,omitempty"`
