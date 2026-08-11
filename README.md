@@ -18,6 +18,7 @@
 - **Multi-environment** — Isolate dev/staging/production with `--env` flag, env-scoped config overrides, and separate state files.
 - **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
+- **Docker housekeeping** — Reclaim disk space with label-safe `tengiz cleanup` (containers, images, volumes, networks).
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
@@ -234,6 +235,29 @@ Rollback to the previous deployment. The previous active container is started on
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name (required) |
+
+### `tengiz cleanup`
+
+Reclaim disk space by pruning unused Docker resources. Tengiz-managed resources (containers labeled `tengiz-app=*`, images tagged `tengiz-apps/*`) are always preserved.
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Prune stopped/unused containers that are not managed by Tengiz |
+| `--images` | Prune dangling images; old images beyond `--retain-images` are removed per app |
+| `--volumes` | Prune anonymous volumes no longer referenced by any container |
+| `--networks` | Prune networks no longer referenced by any container |
+| `--dry-run` | Preview the reclaim without deleting anything |
+| `--retain-images N` | Keep the last N images per app for rollback (default 5) |
+
+With no category flag, all categories run:
+
+```
+tengiz cleanup
+tengiz cleanup --dry-run
+tengiz cleanup --containers --volumes
+```
+
+Schedulable via cron/systemd for automatic housekeeping.
 
 ### `tengiz domain`
 
