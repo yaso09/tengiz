@@ -10,9 +10,9 @@ import (
 
 var containerPruneFilters = []string{
 	"--filter", "status=exited",
-	"--filter", "label!=tengiz-app",
-	"--filter", "label!=tengiz-env",
 }
+
+const containerLabelFormat = "{{.ID}}|{{.Label \"tengiz-app\"}}|{{.Label \"tengiz-env\"}}"
 
 func parseIDs(output string) []string {
 	fields := strings.Fields(output)
@@ -42,7 +42,25 @@ func pruneByIDs(ctx context.Context, ids []string, remove func(context.Context, 
 }
 
 func collectContainersArgs() []string {
-	return append([]string{"ps", "-aq"}, containerPruneFilters...)
+	args := append([]string{"ps", "-a", "--format", containerLabelFormat}, containerPruneFilters...)
+	return args
+}
+
+func parseContainerCandidates(output string) []string {
+	ids := make([]string, 0)
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		if parts[1] == "" && parts[2] == "" {
+			ids = append(ids, parts[0])
+		}
+	}
+	return ids
 }
 
 func removeContainerArgs(id string) []string {
@@ -71,10 +89,11 @@ func (r *dockerRuntime) removeContainer(ctx context.Context, id string) error {
 }
 
 func (r *dockerRuntime) pruneContainers(ctx context.Context, dryRun bool) (int, error) {
-	ids, err := collectRefs(ctx, collectContainersArgs())
+	out, err := execDocker(ctx, collectContainersArgs()...)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("docker %s: %w\n%s", strings.Join(collectContainersArgs(), " "), err, string(out))
 	}
+	ids := parseContainerCandidates(string(out))
 	return pruneByIDs(ctx, ids, r.removeContainer, dryRun), nil
 }
 

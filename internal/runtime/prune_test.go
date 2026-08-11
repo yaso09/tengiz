@@ -80,10 +80,8 @@ func TestPruneContainerArgs(t *testing.T) {
 		{
 			"containers",
 			collectContainersArgs(),
-			[]string{"ps", "-aq",
-				"--filter", "status=exited",
-				"--filter", "label!=tengiz-app",
-				"--filter", "label!=tengiz-env"},
+			[]string{"ps", "-a", "--format", containerLabelFormat,
+				"--filter", "status=exited"},
 		},
 		{"remove container", removeContainerArgs("abc"), []string{"rm", "-f", "abc"}},
 	}
@@ -91,6 +89,32 @@ func TestPruneContainerArgs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if !reflect.DeepEqual(tt.got, tt.want) {
 				t.Errorf("got %v, want %v", tt.got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseContainerCandidates(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   []string
+	}{
+		{"empty", "", []string{}},
+		{"only tengiz", "abc|myapp|production\n", []string{}},
+		{"only env label", "abc||production\n", []string{}},
+		{"non-tengiz", "abc||\n", []string{"abc"}},
+		{
+			"mixed",
+			"abc|myapp|production\ndef||\nghi|other||\n",
+			[]string{"def"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseContainerCandidates(tt.output)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("parseContainerCandidates(%q) = %v, want %v", tt.output, got, tt.want)
 			}
 		})
 	}
