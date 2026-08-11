@@ -379,3 +379,54 @@ env:
 		t.Errorf("API_KEY = %q, want %q", cfg.Env["api_key"], "staging-key")
 	}
 }
+
+func TestLoadWithPreDeploy(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `name: myapp
+pre_deploy:
+  - echo "before deploy"
+  - ./scripts/migrate.sh
+`
+	os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), []byte(yaml), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.PreDeploy) != 2 {
+		t.Fatalf("PreDeploy = %v, want 2 entries", cfg.PreDeploy)
+	}
+	if cfg.PreDeploy[0] != `echo "before deploy"` {
+		t.Errorf("PreDeploy[0] = %q, want %q", cfg.PreDeploy[0], `echo "before deploy"`)
+	}
+	if cfg.PreDeploy[1] != "./scripts/migrate.sh" {
+		t.Errorf("PreDeploy[1] = %q, want %q", cfg.PreDeploy[1], "./scripts/migrate.sh")
+	}
+}
+
+func TestLoadForEnvironment_preDeployOverride(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), []byte("name: myapp\npre_deploy:\n  - base hook\n"), 0644)
+	os.WriteFile(filepath.Join(dir, ".tengiz.staging.yaml"), []byte("pre_deploy:\n  - staging hook\n"), 0644)
+
+	cfg, err := LoadForEnvironment(dir, "staging")
+	if err != nil {
+		t.Fatalf("LoadForEnvironment() error = %v", err)
+	}
+	if len(cfg.PreDeploy) != 1 || cfg.PreDeploy[0] != "staging hook" {
+		t.Errorf("PreDeploy = %v, want [staging hook] (env overrides base)", cfg.PreDeploy)
+	}
+}
+
+func TestLoadForEnvironment_preDeployInherited(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".tengiz.yaml"), []byte("name: myapp\npre_deploy:\n  - base hook\n"), 0644)
+
+	cfg, err := LoadForEnvironment(dir, "production")
+	if err != nil {
+		t.Fatalf("LoadForEnvironment() error = %v", err)
+	}
+	if len(cfg.PreDeploy) != 1 || cfg.PreDeploy[0] != "base hook" {
+		t.Errorf("PreDeploy = %v, want [base hook] (inherited when no env file)", cfg.PreDeploy)
+	}
+}
