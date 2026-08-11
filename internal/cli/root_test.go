@@ -220,6 +220,40 @@ func TestInitCmdGitFlags(t *testing.T) {
 	}
 }
 
+func TestInitCmdHasEnvFlag(t *testing.T) {
+	flag := initCmd.Flags().Lookup("env")
+	if flag == nil {
+		t.Fatal("initCmd missing --env flag")
+	}
+	if v := flag.DefValue; v != "" {
+		t.Errorf("initCmd --env default = %q, want empty string", v)
+	}
+}
+
+func TestInitCmdCreatesEnvConfig(t *testing.T) {
+	dir := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(oldWD) })
+
+	rootCmd.SetArgs([]string{"init", "--env", "staging"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("init --env staging: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, ".tengiz.staging.yaml")); err != nil {
+		t.Errorf(".tengiz.staging.yaml not created: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".tengiz.yaml")); err == nil {
+		t.Error(".tengiz.yaml should not be created when --env is set")
+	}
+}
+
 func TestVolumeAddCommand(t *testing.T) {
 	tmpDir := t.TempDir()
 	dataDir = tmpDir

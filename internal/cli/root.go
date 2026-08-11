@@ -78,6 +78,7 @@ func init() {
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
+	initCmd.Flags().String("env", "", "create environment-specific config (e.g. staging, development)")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
 	logsCmd.Flags().Int("tail", 0, "show only last N lines of logs (0 = all)")
 	logsCmd.Flags().String("since", "", "show logs since timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
@@ -113,12 +114,16 @@ var initCmd = &cobra.Command{
 			name = args[0]
 		}
 
+		env, _ := cmd.Flags().GetString("env")
 		path := ".tengiz.yaml"
-		if _, err := os.Stat(path); err == nil {
-			return fmt.Errorf(".tengiz.yaml already exists")
+		if env != "" {
+			path = fmt.Sprintf(".tengiz.%s.yaml", env)
 		}
 
-		env := getEnv(cmd)
+		if _, err := os.Stat(path); err == nil {
+			return fmt.Errorf("%s already exists", path)
+		}
+
 		gitRepo, _ := cmd.Flags().GetString("git-repo")
 		gitBranch, _ := cmd.Flags().GetString("git-branch")
 
@@ -155,10 +160,10 @@ serverless:
 		}
 
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-			return fmt.Errorf("write .tengiz.yaml: %w", err)
+			return fmt.Errorf("write %s: %w", path, err)
 		}
 
-		fmt.Printf("[tengiz] created .tengiz.yaml for %s\n", name)
+		fmt.Printf("[tengiz] created %s for %s\n", path, name)
 		return nil
 	},
 }
