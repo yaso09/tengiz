@@ -422,6 +422,8 @@ Create a `.tengiz.yaml` in your project root:
 ```yaml
 name: my-app
 port: 3000            # container internal port (auto-detected if omitted)
+pre_deploy:               # host-side shell commands run before image build (optional)
+  - ./scripts/migrate.sh  # failing command aborts the deploy
 serverless:
   enabled: true
   idle_timeout: 5m    # scale-to-zero timeout
@@ -451,6 +453,8 @@ resources:
 ```
 
 Resource limits are passed to Docker as `--cpus` and `--memory` flags. When omitted, containers have no resource constraints. Values follow Docker CLI conventions (e.g., `"0.5"` for half a CPU core, `"512m"` for 512 MB memory).
+
+Pre-deploy hooks (`pre_deploy:`) run host-side shell commands in the project root before the image build. Use them for tasks that must run on the host before the container is built — e.g. schema checks, asset pre-processing, or build-input preparation. Commands run sequentially via `/bin/sh -c`; if any command exits non-zero, the deploy is aborted and the previous version stays live. This is distinct from container-side migration steps: if you need to run migrations *inside* the freshly built image, use `tengiz run <app> -- <migration-command>` after deploy. Env-specific overrides in `.tengiz.{env}.yaml` replace the base `pre_deploy` list.
 
 Without a config file, Tengiz uses defaults: app name = directory name, port auto-detected, serverless enabled, 5m timeout.
 
