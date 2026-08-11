@@ -95,3 +95,25 @@ func TestPruneContainerArgs(t *testing.T) {
 		})
 	}
 }
+
+func TestPruneResourceArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		got  []string
+		want []string
+	}{
+		{"images", collectImagesArgs(), []string{"images", "-q", "--filter", "dangling=true"}},
+		{"volumes", collectVolumesArgs(), []string{"volume", "ls", "-q", "--filter", "dangling=true"}},
+		{"networks", collectNetworksArgs(), []string{"network", "ls", "-q", "--filter", "dangling=true"}},
+		{"remove image", removeImageArgs("abc"), []string{"rmi", "-f", "abc"}},
+		{"remove volume", removeVolumeArgs("vol1"), []string{"volume", "rm", "vol1"}},
+		{"remove network", removeNetworkArgs("abc"), []string{"network", "rm", "abc"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !reflect.DeepEqual(tt.got, tt.want) {
+				t.Errorf("got %v, want %v", tt.got, tt.want)
+			}
+		})
+	}
+}

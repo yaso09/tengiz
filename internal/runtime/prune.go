@@ -77,3 +77,108 @@ func (r *dockerRuntime) pruneContainers(ctx context.Context, dryRun bool) (int, 
 	}
 	return pruneByIDs(ctx, ids, r.removeContainer, dryRun), nil
 }
+
+func collectImagesArgs() []string {
+	return []string{"images", "-q", "--filter", "dangling=true"}
+}
+
+func collectVolumesArgs() []string {
+	return []string{"volume", "ls", "-q", "--filter", "dangling=true"}
+}
+
+func collectNetworksArgs() []string {
+	return []string{"network", "ls", "-q", "--filter", "dangling=true"}
+}
+
+func removeImageArgs(id string) []string {
+	return []string{"rmi", "-f", id}
+}
+
+func removeVolumeArgs(name string) []string {
+	return []string{"volume", "rm", name}
+}
+
+func removeNetworkArgs(id string) []string {
+	return []string{"network", "rm", id}
+}
+
+func (r *dockerRuntime) removeImage(ctx context.Context, id string) error {
+	out, err := execDocker(ctx, removeImageArgs(id)...)
+	if err != nil {
+		return fmt.Errorf("docker rmi: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
+func (r *dockerRuntime) removeVolume(ctx context.Context, name string) error {
+	out, err := execDocker(ctx, removeVolumeArgs(name)...)
+	if err != nil {
+		return fmt.Errorf("docker volume rm: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
+func (r *dockerRuntime) removeNetwork(ctx context.Context, id string) error {
+	out, err := execDocker(ctx, removeNetworkArgs(id)...)
+	if err != nil {
+		return fmt.Errorf("docker network rm: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
+func (r *dockerRuntime) pruneImages(ctx context.Context, dryRun bool) (int, error) {
+	ids, err := collectRefs(ctx, collectImagesArgs())
+	if err != nil {
+		return 0, err
+	}
+	return pruneByIDs(ctx, ids, r.removeImage, dryRun), nil
+}
+
+func (r *dockerRuntime) pruneVolumes(ctx context.Context, dryRun bool) (int, error) {
+	names, err := collectRefs(ctx, collectVolumesArgs())
+	if err != nil {
+		return 0, err
+	}
+	return pruneByIDs(ctx, names, r.removeVolume, dryRun), nil
+}
+
+func (r *dockerRuntime) pruneNetworks(ctx context.Context, dryRun bool) (int, error) {
+	ids, err := collectRefs(ctx, collectNetworksArgs())
+	if err != nil {
+		return 0, err
+	}
+	return pruneByIDs(ctx, ids, r.removeNetwork, dryRun), nil
+}
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneReport, error) {
+	var report PruneReport
+	if opts.Containers {
+		n, err := r.pruneContainers(ctx, opts.DryRun)
+		if err != nil {
+			return report, err
+		}
+		report.ContainersRemoved = n
+	}
+	if opts.Images {
+		n, err := r.pruneImages(ctx, opts.DryRun)
+		if err != nil {
+			return report, err
+		}
+		report.ImagesRemoved = n
+	}
+	if opts.Volumes {
+		n, err := r.pruneVolumes(ctx, opts.DryRun)
+		if err != nil {
+			return report, err
+		}
+		report.VolumesRemoved = n
+	}
+	if opts.Networks {
+		n, err := r.pruneNetworks(ctx, opts.DryRun)
+		if err != nil {
+			return report, err
+		}
+		report.NetworksRemoved = n
+	}
+	return report, nil
+}
