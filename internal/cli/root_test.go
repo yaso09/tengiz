@@ -98,6 +98,13 @@ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppCon
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRTForDeploy) PruneContainers(ctx context.Context) (int, error) { return 0, nil }
+func (m *mockRTForDeploy) PruneImages(ctx context.Context) (int, error)     { return 0, nil }
+func (m *mockRTForDeploy) PruneVolumes(ctx context.Context) (int, error)    { return 0, nil }
+func (m *mockRTForDeploy) PruneNetworks(ctx context.Context) (int, error)   { return 0, nil }
+func (m *mockRTForDeploy) DockerDiskInfo(ctx context.Context) (runtime.DockerDiskInfo, error) {
+	return runtime.DockerDiskInfo{}, nil
+}
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}

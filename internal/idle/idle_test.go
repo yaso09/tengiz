@@ -32,6 +32,13 @@ func (m *mockRuntime) WaitForHealth(ctx context.Context, name string, hc *types.
 func (m *mockRuntime) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRuntime) PruneContainers(ctx context.Context) (int, error) { return 0, nil }
+func (m *mockRuntime) PruneImages(ctx context.Context) (int, error)     { return 0, nil }
+func (m *mockRuntime) PruneVolumes(ctx context.Context) (int, error)    { return 0, nil }
+func (m *mockRuntime) PruneNetworks(ctx context.Context) (int, error)   { return 0, nil }
+func (m *mockRuntime) DockerDiskInfo(ctx context.Context) (runtime.DockerDiskInfo, error) {
+	return runtime.DockerDiskInfo{}, nil
+}
 
 func TestResetExtendsTimer(t *testing.T) {
 	mock := &mockRuntime{}
