@@ -97,6 +97,13 @@ func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *ty
 func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) ListContainers(ctx context.Context) ([]runtime.ContainerInfo, error) { return nil, nil }
+func (m *mockRTForDeploy) ListImages(ctx context.Context) ([]runtime.ImageInfo, error) { return nil, nil }
+func (m *mockRTForDeploy) ListVolumes(ctx context.Context) ([]runtime.VolumeInfo, error) { return nil, nil }
+func (m *mockRTForDeploy) PruneBuildCache(ctx context.Context) error { return nil }
+func (m *mockRTForDeploy) RemoveVolume(ctx context.Context, name string) error { return nil }
+func (m *mockRTForDeploy) ListNetworks(ctx context.Context) ([]runtime.NetworkInfo, error) { return nil, nil }
+func (m *mockRTForDeploy) RemoveNetwork(ctx context.Context, name string) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
