@@ -34,6 +34,11 @@ type Manager interface {
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
 	RemoveImage(ctx context.Context, imageTag string) error
 	KeepLastNImages(ctx context.Context, appName string, n int) error
+	ListContainers(ctx context.Context) ([]ContainerInfo, error)
+	ListImages(ctx context.Context) ([]ImageInfo, error)
+	ListVolumes(ctx context.Context) ([]VolumeInfo, error)
+	PruneBuildCache(ctx context.Context) error
+	RemoveVolume(ctx context.Context, name string) error
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
@@ -115,6 +120,26 @@ func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
 }
 
 func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
+	return nil
+}
+
+func (m *stubManager) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
+	return nil, nil
+}
+
+func (m *stubManager) ListImages(ctx context.Context) ([]ImageInfo, error) {
+	return nil, nil
+}
+
+func (m *stubManager) ListVolumes(ctx context.Context) ([]VolumeInfo, error) {
+	return nil, nil
+}
+
+func (m *stubManager) PruneBuildCache(ctx context.Context) error {
+	return nil
+}
+
+func (m *stubManager) RemoveVolume(ctx context.Context, name string) error {
 	return nil
 }
 

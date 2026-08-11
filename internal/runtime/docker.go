@@ -73,7 +73,7 @@ func resourceArgs(rc *types.ResourceConfig) []string {
 	return args
 }
 
-const labelKey = "tengiz-app"
+const labelKey = AppLabel
 const envLabelKey = "tengiz-env"
 
 type dockerRuntime struct{}
