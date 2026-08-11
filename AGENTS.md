@@ -37,7 +37,7 @@ go vet ./...                  # static analysis
 
 ```
 tengiz --env <env> <command> → global flag for multi-environment (dev/staging/prod)
-tengiz init [name]    → create .tengiz.yaml
+tengiz init [name]    → create .tengiz.yaml (or .tengiz.<env>.yaml with --env)
 tengiz deploy [dir]   → detect, build, run container
 tengiz proxy [-a app] → start reverse proxy on :8080 (use -a to route all traffic to one app)
 tengiz ps             → list apps from Docker

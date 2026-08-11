@@ -117,8 +117,11 @@ Create a `.tengiz.yaml` configuration file in the current directory.
 | Argument | Description |
 |----------|-------------|
 | `name` | Application name (optional, defaults to directory name) |
+| `--env <env>` | Create an environment-specific `.tengiz.<env>.yaml` config instead (e.g. `--env staging` creates `.tengiz.staging.yaml`) |
+| `--git-repo <url>` | Git repository URL for auto-deploy |
+| `--git-branch <branch>` | Git branch for auto-deploy (default `main`) |
 
-Creates a minimal `.tengiz.yaml` with serverless enabled. Errors if one already exists.
+Creates a minimal config with serverless enabled and the selected environment recorded. Errors if one already exists.
 
 ### `tengiz deploy [directory]`
 
