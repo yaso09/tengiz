@@ -247,6 +247,23 @@ func TestStubRun(t *testing.T) {
 	}
 }
 
+func TestStubPrune(t *testing.T) {
+	m := NewStub()
+	report, err := m.Prune(context.Background(), PruneOptions{
+		Containers: true,
+		Images:     true,
+		Volumes:    true,
+		Networks:   true,
+	})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if report.ContainersRemoved != 0 || report.ImagesRemoved != 0 ||
+		report.VolumesRemoved != 0 || report.NetworksRemoved != 0 {
+		t.Errorf("expected empty report, got %+v", report)
+	}
+}
+
 func TestStubRunInteractive(t *testing.T) {
 	m := NewStub()
 	cfg := &types.AppConfig{Name: "testapp", Env: map[string]string{"FOO": "bar"}}

@@ -89,7 +89,7 @@ func (r *dockerRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageT
 	internalPort := cfg.Port
 	if internalPort == 0 {
 		internalPort = 8080
-	}
+	} 
 	cn := ContainerName(cfg.Name, cfg.Environment)
 
 	args := []string{
