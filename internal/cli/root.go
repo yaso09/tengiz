@@ -43,6 +43,8 @@ func init() {
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(rmCmd)
 	rootCmd.AddCommand(logsCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("dry-run", false, "preview what would be removed without removing anything")
 	rootCmd.AddCommand(devCmd)
 	configCmd.AddCommand(configSetCmd)
 	configCmd.AddCommand(configGetCmd)
@@ -595,6 +597,55 @@ var psCmd = &cobra.Command{
 				env = "-"
 			}
 			fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", a.Name, a.State, portStr, env, health)
+		}
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Prune unused Docker resources (containers, images, volumes, networks)",
+	Long: `Reclaims disk space by removing unused Docker resources:
+
+  - stopped containers NOT managed by Tengiz (containers labeled tengiz-app are protected)
+  - dangling (untagged) images
+  - dangling volumes (not referenced by any container)
+  - unused networks (not referenced by any container; built-ins bridge/host/none are kept)
+
+Use --dry-run to preview what would be removed without deleting anything.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		res, err := rt.Cleanup(cmd.Context(), runtime.CleanupOptions{DryRun: dryRun})
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+
+		verb := "removed"
+		if dryRun {
+			verb = "would remove"
+		}
+
+		fmt.Printf("[tengiz] containers %s: %d\n", verb, len(res.Containers))
+		for _, c := range res.Containers {
+			fmt.Printf("  %s\n", c)
+		}
+		fmt.Printf("[tengiz] images %s: %d\n", verb, len(res.Images))
+		for _, img := range res.Images {
+			fmt.Printf("  %s\n", img)
+		}
+		fmt.Printf("[tengiz] volumes %s: %d\n", verb, len(res.Volumes))
+		for _, v := range res.Volumes {
+			fmt.Printf("  %s\n", v)
+		}
+		fmt.Printf("[tengiz] networks %s: %d\n", verb, len(res.Networks))
+		for _, n := range res.Networks {
+			fmt.Printf("  %s\n", n)
 		}
 		return nil
 	},
