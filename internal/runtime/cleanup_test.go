@@ -18,3 +18,15 @@ func TestStubKeepLastNImages(t *testing.T) {
 		t.Fatalf("KeepLastNImages() error = %v", err)
 	}
 }
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	res, err := m.Cleanup(context.Background(), CleanupOptions{DryRun: true})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if len(res.Containers) != 0 || len(res.Images) != 0 ||
+		len(res.Volumes) != 0 || len(res.Networks) != 0 {
+		t.Errorf("expected empty CleanupResult, got %+v", res)
+	}
+}
