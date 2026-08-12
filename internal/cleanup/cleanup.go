@@ -47,12 +47,6 @@ func NewDocker() (Manager, error) {
 	return &dockerRuntime{}, nil
 }
 
-type dockerRuntime struct{}
-
-func (m *dockerRuntime) Prune(ctx context.Context, opts Options) (Report, error) {
-	return Report{DryRun: opts.DryRun}, nil
-}
-
 // NewStub returns a Manager that does nothing, for tests.
 func NewStub() Manager {
 	return &stubManager{}
