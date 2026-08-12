@@ -11,6 +11,13 @@ import (
 
 const labelKey = "tengiz-app"
 
+// builtinNetworks must never be pruned.
+var builtinNetworks = map[string]bool{
+	"bridge": true,
+	"host":   true,
+	"none":   true,
+}
+
 type dockerRuntime struct{}
 
 // runDocker runs the docker CLI and returns trimmed combined output.
@@ -189,6 +196,72 @@ func (r *dockerRuntime) pruneVolumes(ctx context.Context, dryRun bool) ([]string
 	return r.removeAll(ctx, buildVolumeRemoveArgs, candidates), nil
 }
 
+// ---------- networks ----------
+
+func buildNetworkListArgs() []string {
+	return []string{"network", "ls", "--format", "{{.Name}}"}
+}
+
+func parseNetworks(out string, exclude map[string]bool) []string {
+	var names []string
+	for _, name := range splitLines(out) {
+		if !exclude[name] {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func parsePruneNetworksOutput(out string) []string {
+	var names []string
+	collect := false
+	for _, line := range splitLines(out) {
+		if strings.HasPrefix(line, "Deleted Networks:") {
+			collect = true
+			continue
+		}
+		if collect && line != "" {
+			names = append(names, strings.Trim(line, `"'`))
+		}
+	}
+	return names
+}
+
+func buildPruneNetworkArgs() []string {
+	return []string{"network", "prune", "-f"}
+}
+
+func (r *dockerRuntime) pruneNetworks(ctx context.Context, dryRun bool) ([]string, error) {
+	if dryRun {
+		out, err := runDocker(ctx, buildNetworkListArgs()...)
+		if err != nil {
+			return nil, err
+		}
+		return parseNetworks(out, builtinNetworks), nil
+	}
+	out, err := runDocker(ctx, buildPruneNetworkArgs()...)
+	if err != nil {
+		return nil, err
+	}
+	return parsePruneNetworksOutput(out), nil
+}
+
+// ---------- build cache ----------
+
+func buildPruneCacheArgs() []string {
+	return []string{"builder", "prune", "-f"}
+}
+
+func (r *dockerRuntime) pruneBuildCache(ctx context.Context, dryRun bool) (bool, error) {
+	if dryRun {
+		return true, nil
+	}
+	if _, err := runDocker(ctx, buildPruneCacheArgs()...); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // ---------- orchestration ----------
 
 func (r *dockerRuntime) Prune(ctx context.Context, opts Options) (Report, error) {
@@ -220,6 +293,22 @@ func (r *dockerRuntime) Prune(ctx context.Context, opts Options) (Report, error)
 			return rep, fmt.Errorf("volumes: %w", err)
 		}
 		rep.Volumes = vols
+	}
+
+	if opts.All || opts.Networks {
+		nets, err := r.pruneNetworks(ctx, opts.DryRun)
+		if err != nil {
+			return rep, fmt.Errorf("networks: %w", err)
+		}
+		rep.Networks = nets
+	}
+
+	if opts.All || opts.BuildCache {
+		ok, err := r.pruneBuildCache(ctx, opts.DryRun)
+		if err != nil {
+			return rep, fmt.Errorf("build cache: %w", err)
+		}
+		rep.BuildCache = ok
 	}
 
 	return rep, nil

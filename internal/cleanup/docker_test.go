@@ -124,3 +124,42 @@ func TestBuildVolumeArgs(t *testing.T) {
 		t.Errorf("buildVolumeRemoveArgs() = %v, want %v", got, want)
 	}
 }
+
+func TestBuildNetworkArgs(t *testing.T) {
+	if got, want := buildNetworkListArgs(), []string{"network", "ls", "--format", "{{.Name}}"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("buildNetworkListArgs() = %v, want %v", got, want)
+	}
+	if got, want := buildPruneNetworkArgs(), []string{"network", "prune", "-f"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("buildPruneNetworkArgs() = %v, want %v", got, want)
+	}
+	if got, want := buildPruneCacheArgs(), []string{"builder", "prune", "-f"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("buildPruneCacheArgs() = %v, want %v", got, want)
+	}
+}
+
+func TestParseNetworks(t *testing.T) {
+	out := "bridge\nhost\nnone\nmyapp-net"
+	got := parseNetworks(out, builtinNetworks)
+	want := []string{"myapp-net"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parseNetworks() = %v, want %v", got, want)
+	}
+}
+
+func TestParsePruneNetworksOutput(t *testing.T) {
+	out := "WARNING! This will remove all custom networks not used by at least one container.\n" +
+		"Deleted Networks:\n" +
+		"\"myapp-net\"\n" +
+		"\"old-net\"\n"
+	got := parsePruneNetworksOutput(out)
+	want := []string{"myapp-net", "old-net"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parsePruneNetworksOutput() = %v, want %v", got, want)
+	}
+}
+
+func TestParsePruneNetworksOutputNoHeader(t *testing.T) {
+	if got := parsePruneNetworksOutput("nothing here"); got != nil {
+		t.Errorf("expected nil for output without header, got %v", got)
+	}
+}
