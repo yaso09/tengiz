@@ -42,6 +42,7 @@ func init() {
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(rmCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(devCmd)
 	configCmd.AddCommand(configSetCmd)
@@ -86,6 +87,7 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("volumes", false, "also prune unused Docker volumes")
 }
 
 var rootCmd = &cobra.Command{
