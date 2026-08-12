@@ -97,6 +97,7 @@ func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *ty
 func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) Cleanup(ctx context.Context, opts runtime.CleanupOptions) (runtime.CleanupResult, error) { return runtime.CleanupResult{}, nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
@@ -354,6 +355,26 @@ func TestLogsCmdFlagParsing(t *testing.T) {
 		if !strings.Contains(helpText, flag) {
 			t.Errorf("help text missing flag %q", flag)
 		}
+	}
+}
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Use != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupDryRunFlag(t *testing.T) {
+	flag := cleanupCmd.Flags().Lookup("dry-run")
+	if flag == nil {
+		t.Fatal("--dry-run flag not defined")
+	}
+	if flag.DefValue != "false" {
+		t.Errorf("expected --dry-run default false, got %q", flag.DefValue)
 	}
 }
 

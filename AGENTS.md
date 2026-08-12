@@ -41,6 +41,7 @@ tengiz init [name]    → create .tengiz.yaml
 tengiz deploy [dir]   → detect, build, run container
 tengiz proxy [-a app] → start reverse proxy on :8080 (use -a to route all traffic to one app)
 tengiz ps             → list apps from Docker
+tengiz cleanup [--dry-run] → prune unused Docker resources (containers/images/volumes/networks), protecting Tengiz-managed resources
 tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] app  → stream logs with filtering
 tengiz build-logs <app> [deployment-id] → show build logs from previous deployments (--tail N)
 tengiz run <app> <cmd> [-i] [-e KEY=VALUE] → one-off command in temporary container
@@ -75,6 +76,7 @@ tengiz notification show        → show current notification configuration
 
 - Nixpacks is an optional build backend. Enable with `build.builder: nixpacks` in `.tengiz.yaml`. Requires `nixpacks` CLI (`npm install -g nixpacks`). Falls back to error if binary not found.
 - Container names are prefixed `tengiz-<appname>`, labeled with `tengiz-app=<appname>`
+- `tengiz cleanup` only removes containers NOT labeled `tengiz-app`, dangling images, dangling volumes, and unused non-builtin networks; tagged `tengiz-apps/*` images are never pruned by cleanup (deploy-time `KeepLastNImages` handles those)
 - Non-production envs use `tengiz-<appname>-<env>` naming; all envs add `tengiz-env=<env>` label
 - Port allocations: 9000-9999, persisted in `~/.tengiz/ports.json` (env-scoped: `ports-{env}.json`)
 - No config file = uses dir name as app name + defaults
