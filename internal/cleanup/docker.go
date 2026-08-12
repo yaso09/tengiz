@@ -167,6 +167,28 @@ func (r *dockerRuntime) pruneImages(ctx context.Context, apps []string, keep int
 	return r.removeAll(ctx, buildImageRemoveArgs, candidates), nil
 }
 
+// ---------- volumes ----------
+
+func buildDanglingVolumeListArgs() []string {
+	return []string{"volume", "ls", "--filter", "dangling=true", "--format", "{{.Name}}"}
+}
+
+func buildVolumeRemoveArgs(names []string) []string {
+	return append([]string{"volume", "rm"}, names...)
+}
+
+func (r *dockerRuntime) pruneVolumes(ctx context.Context, dryRun bool) ([]string, error) {
+	out, err := runDocker(ctx, buildDanglingVolumeListArgs()...)
+	if err != nil {
+		return nil, err
+	}
+	candidates := splitLines(out)
+	if dryRun {
+		return candidates, nil
+	}
+	return r.removeAll(ctx, buildVolumeRemoveArgs, candidates), nil
+}
+
 // ---------- orchestration ----------
 
 func (r *dockerRuntime) Prune(ctx context.Context, opts Options) (Report, error) {
@@ -190,6 +212,14 @@ func (r *dockerRuntime) Prune(ctx context.Context, opts Options) (Report, error)
 			return rep, fmt.Errorf("images: %w", err)
 		}
 		rep.Images = tags
+	}
+
+	if opts.All || opts.Volumes {
+		vols, err := r.pruneVolumes(ctx, opts.DryRun)
+		if err != nil {
+			return rep, fmt.Errorf("volumes: %w", err)
+		}
+		rep.Volumes = vols
 	}
 
 	return rep, nil

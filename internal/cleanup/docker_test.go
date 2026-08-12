@@ -115,3 +115,12 @@ func TestBuildImageArgs(t *testing.T) {
 		t.Errorf("buildImageRemoveArgs() = %v, want %v", got, want)
 	}
 }
+
+func TestBuildVolumeArgs(t *testing.T) {
+	if got, want := buildDanglingVolumeListArgs(), []string{"volume", "ls", "--filter", "dangling=true", "--format", "{{.Name}}"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("buildDanglingVolumeListArgs() = %v, want %v", got, want)
+	}
+	if got, want := buildVolumeRemoveArgs([]string{"v1"}), []string{"volume", "rm", "v1"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("buildVolumeRemoveArgs() = %v, want %v", got, want)
+	}
+}
