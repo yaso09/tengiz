@@ -235,6 +235,16 @@ Rollback to the previous deployment. The previous active container is started on
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup [--volumes]`
+
+Prune unused Docker resources to reclaim disk space. Removes stopped containers, dangling images, and unused networks. Tengiz-managed containers and volumes (labeled `tengiz-app=*`) are always preserved.
+
+By default, volumes are **not** pruned; pass `--volumes` to also remove unused Docker volumes.
+
+| Flag | Description |
+|------|-------------|
+| `--volumes` | Also prune unused Docker volumes |
+
 ### `tengiz domain`
 
 Manage custom domains for applications.
@@ -572,6 +582,7 @@ When `webhook.secret` is set, the server verifies the payload signature on every
 | `tengiz git connect` | Generate an SSH deploy key |
 | `tengiz git disconnect` | Remove the SSH deploy key |
 | `tengiz webhook [-p <port>] [--config <path>]` | Start the webhook server with optional config |
+| `tengiz cleanup [--volumes]` | Prune unused Docker resources and reclaim disk space |
 | `tengiz init --git-repo URL` | Create config with git repo |
 
 ## Architecture
