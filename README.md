@@ -203,6 +203,32 @@ tengiz run myapp -- rails console
 tengiz run -i myapp -- bash
 ```
 
+### `tengiz cleanup [flags]`
+
+Remove unused Docker resources to free disk space. Tengiz never removes containers or images it manages (anything labeled `tengiz-app`). Old app images beyond the retention window (`--keep-last`, default 5) are removed, always keeping the `:latest` tag and preview (`pr-*`) tags.
+
+Default mode prunes exited helper containers and stale/dangling images. Use `--all` or explicit category flags for riskier categories.
+
+| Flag | Description |
+|------|-------------|
+| `--all` | Clean all categories (containers, images, volumes, networks, build cache) |
+| `--containers` | Remove exited containers not managed by Tengiz |
+| `--images` | Remove dangling images + old app images (keeps last N) |
+| `--volumes` | Remove unused anonymous volumes |
+| `--networks` | Remove unused custom networks |
+| `--builder-cache` | Prune BuildKit build cache |
+| `--dry-run` | Show what would be removed without removing anything |
+| `--keep-last N` | Number of app image versions to keep per app (default: 5) |
+
+Examples:
+
+```bash
+tengiz cleanup                 # safe default: containers + images
+tengiz cleanup --all           # everything
+tengiz cleanup --volumes --networks --dry-run   # preview risky categories
+tengiz cleanup --images --keep-last 10
+```
+
 ### `tengiz start <app>`
 
 Cold-start a stopped container.
@@ -572,6 +598,7 @@ When `webhook.secret` is set, the server verifies the payload signature on every
 | `tengiz git connect` | Generate an SSH deploy key |
 | `tengiz git disconnect` | Remove the SSH deploy key |
 | `tengiz webhook [-p <port>] [--config <path>]` | Start the webhook server with optional config |
+| `tengiz cleanup [--all] [--containers] [--images] [--volumes] [--networks] [--builder-cache] [--dry-run] [--keep-last N]` | Prune unused Docker resources with label-based protection |
 | `tengiz init --git-repo URL` | Create config with git repo |
 
 ## Architecture
