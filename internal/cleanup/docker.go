@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"sort"
 	"strings"
 )
 
@@ -69,6 +70,103 @@ func (r *dockerRuntime) pruneContainers(ctx context.Context, dryRun bool) ([]str
 	return r.removeAll(ctx, buildContainerRemoveArgs, candidates), nil
 }
 
+// ---------- images ----------
+
+const appImageRepo = "tengiz-apps"
+
+func buildDanglingImageListArgs() []string {
+	return []string{"images", "--filter", "dangling=true", "--format", "{{.ID}}"}
+}
+
+func buildAppImageListArgs(app string) []string {
+	return []string{
+		"images",
+		"--filter", fmt.Sprintf("reference=%s/%s:*", appImageRepo, app),
+		"--format", "{{.Repository}}:{{.Tag}}|{{.CreatedAt}}",
+	}
+}
+
+type imageInfo struct {
+	Tag       string
+	CreatedAt string
+}
+
+// isProtectedImageTag reports whether a tag must never be pruned.
+func isProtectedImageTag(tag string) bool {
+	if strings.HasSuffix(tag, ":latest") || strings.HasSuffix(tag, "-latest") {
+		return true
+	}
+	// preview deployments: tengiz-apps/<app>:pr-<n>-<deploymentID>
+	if idx := strings.LastIndex(tag, ":"); idx >= 0 && strings.HasPrefix(tag[idx+1:], "pr-") {
+		return true
+	}
+	return false
+}
+
+// parseImageList parses `repo:tag|createdAt` lines, skipping protected tags,
+// and returns them sorted oldest-first.
+func parseImageList(out string) []imageInfo {
+	var infos []imageInfo
+	for _, line := range splitLines(out) {
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		tag, created := parts[0], parts[1]
+		if isProtectedImageTag(tag) {
+			continue
+		}
+		infos = append(infos, imageInfo{Tag: tag, CreatedAt: created})
+	}
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].CreatedAt < infos[j].CreatedAt
+	})
+	return infos
+}
+
+// selectImageTagsToRemove returns the oldest tags beyond the keep window.
+func selectImageTagsToRemove(infos []imageInfo, keep int) []string {
+	if keep < 0 {
+		keep = 0
+	}
+	if len(infos) <= keep {
+		return nil
+	}
+	var tags []string
+	for _, info := range infos[:len(infos)-keep] {
+		tags = append(tags, info.Tag)
+	}
+	return tags
+}
+
+func buildImageRemoveArgs(tags []string) []string {
+	return append([]string{"rmi", "-f"}, tags...)
+}
+
+func (r *dockerRuntime) pruneImages(ctx context.Context, apps []string, keep int, dryRun bool) ([]string, error) {
+	var candidates []string
+
+	danglingOut, err := runDocker(ctx, buildDanglingImageListArgs()...)
+	if err != nil {
+		return nil, err
+	}
+	candidates = append(candidates, splitLines(danglingOut)...)
+
+	for _, app := range apps {
+		out, err := runDocker(ctx, buildAppImageListArgs(app)...)
+		if err != nil {
+			log.Printf("[cleanup] failed to list images for %s: %v", app, err)
+			continue
+		}
+		candidates = append(candidates, selectImageTagsToRemove(parseImageList(out), keep)...)
+	}
+
+	if dryRun {
+		return candidates, nil
+	}
+	return r.removeAll(ctx, buildImageRemoveArgs, candidates), nil
+}
+
 // ---------- orchestration ----------
 
 func (r *dockerRuntime) Prune(ctx context.Context, opts Options) (Report, error) {
@@ -80,6 +178,18 @@ func (r *dockerRuntime) Prune(ctx context.Context, opts Options) (Report, error)
 			return rep, fmt.Errorf("containers: %w", err)
 		}
 		rep.Containers = names
+	}
+
+	if opts.All || opts.Images {
+		keep := opts.KeepLast
+		if keep <= 0 {
+			keep = 5
+		}
+		tags, err := r.pruneImages(ctx, opts.Apps, keep, opts.DryRun)
+		if err != nil {
+			return rep, fmt.Errorf("images: %w", err)
+		}
+		rep.Images = tags
 	}
 
 	return rep, nil

@@ -49,3 +49,69 @@ func TestStubPruneDoesNotCallDocker(t *testing.T) {
 		t.Fatalf("expected empty report, got %+v", rep)
 	}
 }
+
+func TestIsProtectedImageTag(t *testing.T) {
+	tests := []struct {
+		tag  string
+		want bool
+	}{
+		{"tengiz-apps/demo:production-1720000000", false},
+		{"tengiz-apps/demo:latest", true},
+		{"tengiz-apps/demo:production-latest", true},
+		{"tengiz-apps/demo:pr-42-1720000000", true},
+		{"tengiz-apps/demo:pr-42", true},
+	}
+	for _, tt := range tests {
+		if got := isProtectedImageTag(tt.tag); got != tt.want {
+			t.Errorf("isProtectedImageTag(%q) = %v, want %v", tt.tag, got, tt.want)
+		}
+	}
+}
+
+func TestParseImageList(t *testing.T) {
+	out := "tengiz-apps/demo:production-3|2026-08-01 10:00:00 +0000 UTC\n" +
+		"tengiz-apps/demo:production-latest|2026-08-02 10:00:00 +0000 UTC\n" +
+		"tengiz-apps/demo:production-1|2026-07-01 10:00:00 +0000 UTC\n" +
+		"tengiz-apps/demo:pr-7-1720000000|2026-08-03 10:00:00 +0000 UTC"
+	got := parseImageList(out)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 entries (latest + preview skipped), got %d: %+v", len(got), got)
+	}
+	if got[0].Tag != "tengiz-apps/demo:production-1" {
+		t.Errorf("first (oldest) = %q, want production-1", got[0].Tag)
+	}
+	if got[1].Tag != "tengiz-apps/demo:production-3" {
+		t.Errorf("second = %q, want production-3", got[1].Tag)
+	}
+}
+
+func TestSelectImageTagsToRemove(t *testing.T) {
+	infos := []imageInfo{
+		{Tag: "tengiz-apps/demo:production-1", CreatedAt: "2026-07-01"},
+		{Tag: "tengiz-apps/demo:production-2", CreatedAt: "2026-07-02"},
+		{Tag: "tengiz-apps/demo:production-3", CreatedAt: "2026-07-03"},
+	}
+	got := selectImageTagsToRemove(infos, 1)
+	want := []string{"tengiz-apps/demo:production-1", "tengiz-apps/demo:production-2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("selectImageTagsToRemove() = %v, want %v", got, want)
+	}
+	if got := selectImageTagsToRemove(infos, 5); got != nil {
+		t.Errorf("keep=5 should remove nothing, got %v", got)
+	}
+	if got := selectImageTagsToRemove(infos, -1); len(got) != 3 {
+		t.Errorf("keep=-1 clamps to 0, want all 3 removed, got %v", got)
+	}
+}
+
+func TestBuildImageArgs(t *testing.T) {
+	if got, want := buildDanglingImageListArgs(), []string{"images", "--filter", "dangling=true", "--format", "{{.ID}}"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("buildDanglingImageListArgs() = %v, want %v", got, want)
+	}
+	if got, want := buildAppImageListArgs("demo"), []string{"images", "--filter", "reference=tengiz-apps/demo:*", "--format", "{{.Repository}}:{{.Tag}}|{{.CreatedAt}}"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("buildAppImageListArgs() = %v, want %v", got, want)
+	}
+	if got, want := buildImageRemoveArgs([]string{"a", "b"}), []string{"rmi", "-f", "a", "b"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("buildImageRemoveArgs() = %v, want %v", got, want)
+	}
+}
