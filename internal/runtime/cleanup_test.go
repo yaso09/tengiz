@@ -106,3 +106,17 @@ func TestSumReclaimed(t *testing.T) {
 		})
 	}
 }
+
+func TestStubPrune(t *testing.T) {
+	m := NewStub()
+	report, err := m.Prune(context.Background(), PruneOptions{Containers: true, Images: true})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if report.Containers != 0 || report.Images != 0 || report.Networks != 0 || report.Volumes != 0 {
+		t.Errorf("Prune() report = %+v, want zero-value", report)
+	}
+	if report.ReclaimedSpace != "" {
+		t.Errorf("Prune() ReclaimedSpace = %q, want empty", report.ReclaimedSpace)
+	}
+}

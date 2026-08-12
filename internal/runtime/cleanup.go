@@ -145,6 +145,58 @@ func parseSize(s string) float64 {
 	return 0
 }
 
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneReport, error) {
+	var report PruneReport
+	var reclaimed []string
+
+	if opts.Containers {
+		count, space, err := r.runPrune(ctx, pruneContainers)
+		if err != nil {
+			return report, err
+		}
+		report.Containers = count
+		reclaimed = append(reclaimed, space)
+	}
+	if opts.Images {
+		count, space, err := r.runPrune(ctx, pruneImages)
+		if err != nil {
+			return report, err
+		}
+		report.Images = count
+		reclaimed = append(reclaimed, space)
+	}
+	if opts.Networks {
+		count, space, err := r.runPrune(ctx, pruneNetworks)
+		if err != nil {
+			return report, err
+		}
+		report.Networks = count
+		reclaimed = append(reclaimed, space)
+	}
+	if opts.Volumes {
+		count, space, err := r.runPrune(ctx, pruneVolumes)
+		if err != nil {
+			return report, err
+		}
+		report.Volumes = count
+		reclaimed = append(reclaimed, space)
+	}
+
+	report.ReclaimedSpace = sumReclaimed(reclaimed)
+	return report, nil
+}
+
+func (r *dockerRuntime) runPrune(ctx context.Context, kind pruneType) (int, string, error) {
+	args := buildPruneArgs(kind)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, "", fmt.Errorf("docker %s prune: %w\n%s", string(kind), err, string(out))
+	}
+	count, reclaimed := parsePruneOutput(string(out))
+	return count, reclaimed, nil
+}
+
 func sumReclaimed(values []string) string {
 	var total float64
 	for _, v := range values {
