@@ -6,6 +6,7 @@ import (
 	"log"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -56,4 +57,155 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 		}
 	}
 	return nil
+}
+
+type PruneOptions struct {
+	Containers bool
+	Images     bool
+	Networks   bool
+	Volumes    bool
+}
+
+type PruneReport struct {
+	Containers     int    `json:"containers"`
+	Images         int    `json:"images"`
+	Networks       int    `json:"networks"`
+	Volumes        int    `json:"volumes"`
+	ReclaimedSpace string `json:"reclaimed_space"`
+}
+
+type pruneType string
+
+const (
+	pruneContainers pruneType = "containers"
+	pruneImages     pruneType = "images"
+	pruneNetworks   pruneType = "networks"
+	pruneVolumes    pruneType = "volumes"
+)
+
+func buildPruneArgs(t pruneType) []string {
+	switch t {
+	case pruneContainers:
+		return []string{"container", "prune", "-f", "--filter", "label!=tengiz-app"}
+	case pruneImages:
+		return []string{"image", "prune", "-f"}
+	case pruneNetworks:
+		return []string{"network", "prune", "-f"}
+	case pruneVolumes:
+		return []string{"volume", "prune", "-f", "--filter", "label!=tengiz-app"}
+	default:
+		return nil
+	}
+}
+
+func parsePruneOutput(output string) (int, string) {
+	count := 0
+	reclaimed := ""
+	seenDeletedHeading := false
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "Total reclaimed space:") {
+			reclaimed = strings.TrimSpace(strings.TrimPrefix(trimmed, "Total reclaimed space:"))
+			continue
+		}
+		if strings.HasPrefix(trimmed, "Deleted ") {
+			seenDeletedHeading = true
+			continue
+		}
+		if seenDeletedHeading && trimmed != "" {
+			count++
+		}
+	}
+	return count, reclaimed
+}
+
+var sizeUnits = []struct {
+	suffix  string
+	divisor float64
+}{
+	{"TB", 1e12},
+	{"GB", 1e9},
+	{"MB", 1e6},
+	{"kB", 1e3},
+	{"B", 1},
+}
+
+func parseSize(s string) float64 {
+	s = strings.TrimSpace(s)
+	for _, u := range sizeUnits {
+		if strings.HasSuffix(s, u.suffix) {
+			num := strings.TrimSpace(strings.TrimSuffix(s, u.suffix))
+			f, err := strconv.ParseFloat(num, 64)
+			if err != nil {
+				return 0
+			}
+			return f * u.divisor
+		}
+	}
+	return 0
+}
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneReport, error) {
+	var report PruneReport
+	var reclaimed []string
+
+	if opts.Containers {
+		count, space, err := r.runPrune(ctx, pruneContainers)
+		if err != nil {
+			return report, err
+		}
+		report.Containers = count
+		reclaimed = append(reclaimed, space)
+	}
+	if opts.Images {
+		count, space, err := r.runPrune(ctx, pruneImages)
+		if err != nil {
+			return report, err
+		}
+		report.Images = count
+		reclaimed = append(reclaimed, space)
+	}
+	if opts.Networks {
+		count, space, err := r.runPrune(ctx, pruneNetworks)
+		if err != nil {
+			return report, err
+		}
+		report.Networks = count
+		reclaimed = append(reclaimed, space)
+	}
+	if opts.Volumes {
+		count, space, err := r.runPrune(ctx, pruneVolumes)
+		if err != nil {
+			return report, err
+		}
+		report.Volumes = count
+		reclaimed = append(reclaimed, space)
+	}
+
+	report.ReclaimedSpace = sumReclaimed(reclaimed)
+	return report, nil
+}
+
+func (r *dockerRuntime) runPrune(ctx context.Context, kind pruneType) (int, string, error) {
+	args := buildPruneArgs(kind)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, "", fmt.Errorf("docker %s prune: %w\n%s", string(kind), err, string(out))
+	}
+	count, reclaimed := parsePruneOutput(string(out))
+	return count, reclaimed, nil
+}
+
+func sumReclaimed(values []string) string {
+	var total float64
+	for _, v := range values {
+		total += parseSize(v)
+	}
+	for _, u := range sizeUnits {
+		if u.divisor > 1 && total >= u.divisor {
+			return fmt.Sprintf("%.4g%s", total/u.divisor, u.suffix)
+		}
+	}
+	return fmt.Sprintf("%.0fB", total)
 }
