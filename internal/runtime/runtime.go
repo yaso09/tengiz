@@ -28,12 +28,18 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type CleanupOptions struct {
+	All     bool // also remove unused (non-dangling) images
+	Volumes bool // also remove unused volumes
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
 	RemoveImage(ctx context.Context, imageTag string) error
 	KeepLastNImages(ctx context.Context, appName string, n int) error
+	Cleanup(ctx context.Context, opts CleanupOptions) error
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
@@ -115,6 +121,10 @@ func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
 }
 
 func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
+	return nil
+}
+
+func (m *stubManager) Cleanup(ctx context.Context, opts CleanupOptions) error {
 	return nil
 }
 
