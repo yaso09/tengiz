@@ -28,12 +28,59 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type CleanupTarget string
+
+const (
+	CleanupContainers CleanupTarget = "containers"
+	CleanupImages     CleanupTarget = "images"
+	CleanupNetworks   CleanupTarget = "networks"
+	CleanupVolumes    CleanupTarget = "volumes"
+	CleanupCache      CleanupTarget = "cache"
+)
+
+// AllCleanupTargets returns every prunable category.
+func AllCleanupTargets() []CleanupTarget {
+	return []CleanupTarget{
+		CleanupContainers,
+		CleanupImages,
+		CleanupNetworks,
+		CleanupVolumes,
+		CleanupCache,
+	}
+}
+
+// DefaultCleanupTargets returns the categories pruned when no flag is given.
+// Volumes are intentionally excluded — they may hold persistent data.
+func DefaultCleanupTargets() []CleanupTarget {
+	return []CleanupTarget{
+		CleanupContainers,
+		CleanupImages,
+		CleanupNetworks,
+		CleanupCache,
+	}
+}
+
+type CleanupOptions struct {
+	Targets []CleanupTarget
+	AppName string // if set, only prune resources labeled tengiz-app=<AppName>
+	DryRun  bool
+}
+
+type CleanupResult struct {
+	Containers []string // container IDs removed (or that would be removed)
+	Images     []string // image IDs removed
+	Networks   []string // network IDs removed
+	Volumes    []string // volume names removed
+	CacheBytes int64    // bytes reclaimed from build cache; -1 in dry-run when cache would be pruned
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
 	RemoveImage(ctx context.Context, imageTag string) error
 	KeepLastNImages(ctx context.Context, appName string, n int) error
+	Prune(ctx context.Context, opts CleanupOptions) (CleanupResult, error)
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
@@ -116,6 +163,10 @@ func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
 
 func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
 	return nil
+}
+
+func (m *stubManager) Prune(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
+	return CleanupResult{}, nil
 }
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {

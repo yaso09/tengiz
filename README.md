@@ -301,6 +301,30 @@ List all mounted volumes for an application.
 |----------|-------------|
 | `app` | Application name |
 
+### `tengiz cleanup`
+
+Reclaim disk space by removing unused Docker resources. By default prunes stopped containers, dangling images, unused networks, and build cache. **Tengiz-managed containers are never removed** unless `--app` is given. Volumes are excluded by default because they may hold persistent data — use `--volumes` or `--all` to include them.
+
+| Flag | Description |
+|------|-------------|
+| `-f`, `--force` | Skip the confirmation prompt |
+| `--dry-run` | Show what would be cleaned without removing anything |
+| `--app <name>` | Only clean resources for this app (prunes its stopped containers and keeps its 5 newest images) |
+| `--containers` | Prune stopped containers |
+| `--images` | Prune dangling images |
+| `--networks` | Prune unused networks |
+| `--volumes` | Prune unused volumes (CAUTION: may delete persistent data) |
+| `--cache` | Prune build cache |
+| `--all` | Prune all categories including volumes |
+
+If no category flag is given, defaults to `--containers --images --networks --cache`. Without `--force` or `--dry-run`, prompts for confirmation before removing anything.
+
+```bash
+tengiz cleanup --dry-run   # see what would be removed
+tengiz cleanup             # prune defaults (prompts first)
+tengiz cleanup --all -f    # prune everything, no prompt
+```
+
 ### `tengiz preview`
 
 Manage preview deployments (PR-based ephemeral environments). Preview deployments are automatically created on `pull_request` webhook events (opened/synchronize/reopened) and cleaned up on PR close.
@@ -573,6 +597,7 @@ When `webhook.secret` is set, the server verifies the payload signature on every
 | `tengiz git disconnect` | Remove the SSH deploy key |
 | `tengiz webhook [-p <port>] [--config <path>]` | Start the webhook server with optional config |
 | `tengiz init --git-repo URL` | Create config with git repo |
+| `tengiz cleanup [--all] [--dry-run] [--app <name>]` | Prune unused Docker resources to reclaim disk space |
 
 ## Architecture
 

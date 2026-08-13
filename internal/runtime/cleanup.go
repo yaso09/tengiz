@@ -6,8 +6,291 @@ import (
 	"log"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 )
+
+func parseIDList(output string) []string {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	var ids []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			ids = append(ids, line)
+		}
+	}
+	return ids
+}
+
+// containerListArgs returns `docker ps` args for stopped/created containers.
+// Output lines are "<id> <tengiz-app label value>". The daemon rejects the
+// label!= negation filter on `ps`, so label-based inclusion/exclusion is done
+// in Go via filterContainerLines instead.
+func containerListArgs(appName string) []string {
+	args := []string{"ps", "--filter", "status=exited", "--filter", "status=created"}
+	if appName != "" {
+		args = append(args, "--filter", fmt.Sprintf("label=%s=%s", labelKey, appName))
+	}
+	args = append(args, "--format", fmt.Sprintf("{{.ID}} {{.Label %q}}", labelKey))
+	return args
+}
+
+// filterContainerLines parses `docker ps` lines of "<id> <label>" and keeps
+// the IDs matching the requested app, or (with no app) IDs that have no
+// tengiz-app label, i.e. containers not managed by Tengiz.
+func filterContainerLines(lines []string, appName string) []string {
+	var ids []string
+	for _, line := range lines {
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+			continue
+		}
+		id := strings.TrimSpace(parts[0])
+		label := ""
+		if len(parts) == 2 {
+			label = strings.TrimSpace(parts[1])
+		}
+		if appName != "" {
+			if label != appName {
+				continue
+			}
+		} else if label != "" {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func (r *dockerRuntime) listContainerIDs(ctx context.Context, appName string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "docker", containerListArgs(appName)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps: %w\n%s", err, string(out))
+	}
+	return filterContainerLines(parseIDList(string(out)), appName), nil
+}
+
+func (r *dockerRuntime) removeContainers(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	args := append([]string{"rm", "-f"}, ids...)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker rm: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
+func (r *dockerRuntime) listDanglingImages(ctx context.Context) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "images", "-q", "--filter", "dangling=true")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker images: %w\n%s", err, string(out))
+	}
+	return parseIDList(string(out)), nil
+}
+
+func (r *dockerRuntime) removeImages(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	args := append([]string{"rmi", "-f"}, ids...)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker rmi: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
+func (r *dockerRuntime) listUnusedNetworks(ctx context.Context) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "network", "ls", "-q", "--filter", "dangling=true")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker network ls: %w\n%s", err, string(out))
+	}
+	return parseIDList(string(out)), nil
+}
+
+func (r *dockerRuntime) removeNetworks(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	args := append([]string{"network", "rm"}, ids...)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker network rm: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
+func (r *dockerRuntime) listUnusedVolumes(ctx context.Context) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "volume", "ls", "-q", "--filter", "dangling=true")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker volume ls: %w\n%s", err, string(out))
+	}
+	return parseIDList(string(out)), nil
+}
+
+func (r *dockerRuntime) removeVolumes(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	args := append([]string{"volume", "rm"}, ids...)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker volume rm: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
+var spaceUnits = map[string]int64{
+	"B":   1,
+	"kB":  1e3,
+	"MB":  1e6,
+	"GB":  1e9,
+	"TB":  1e12,
+	"KiB": 1 << 10,
+	"MiB": 1 << 20,
+	"GiB": 1 << 30,
+	"TiB": 1 << 40,
+}
+
+// parseReclaimedSpace extracts the "Total reclaimed space:" value from a
+// docker prune command's output and converts it to bytes.
+func parseReclaimedSpace(output string) int64 {
+	const marker = "Total reclaimed space:"
+	idx := strings.Index(output, marker)
+	if idx < 0 {
+		return 0
+	}
+	rest := strings.TrimSpace(output[idx+len(marker):])
+	if rest == "" {
+		return 0
+	}
+	numEnd := 0
+	for numEnd < len(rest) {
+		c := rest[numEnd]
+		if (c >= '0' && c <= '9') || c == '.' || c == ',' {
+			numEnd++
+			continue
+		}
+		break
+	}
+	if numEnd == 0 {
+		return 0
+	}
+	val, err := strconv.ParseFloat(strings.Replace(rest[:numEnd], ",", ".", 1), 64)
+	if err != nil {
+		return 0
+	}
+	unit := strings.TrimSpace(rest[numEnd:])
+	mult, ok := spaceUnits[unit]
+	if !ok {
+		return 0
+	}
+	return int64(val * float64(mult))
+}
+
+// FormatBytes renders a byte count in a compact human-readable form.
+func FormatBytes(n int64) string {
+	if n <= 0 {
+		return "0 B"
+	}
+	units := []string{"B", "kB", "MB", "GB", "TB"}
+	f := float64(n)
+	i := 0
+	for f >= 1000 && i < len(units)-1 {
+		f /= 1000
+		i++
+	}
+	return fmt.Sprintf("%.2f %s", f, units[i])
+}
+
+func (r *dockerRuntime) pruneCache(ctx context.Context, dryRun bool) (int64, error) {
+	if dryRun {
+		// docker builder prune has no dry-run mode; report intent.
+		return -1, nil
+	}
+	cmd := exec.CommandContext(ctx, "docker", "builder", "prune", "-f")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("docker builder prune: %w\n%s", err, string(out))
+	}
+	return parseReclaimedSpace(string(out)), nil
+}
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
+	var res CleanupResult
+
+	for _, target := range opts.Targets {
+		switch target {
+		case CleanupContainers:
+			ids, err := r.listContainerIDs(ctx, opts.AppName)
+			if err != nil {
+				return res, err
+			}
+			res.Containers = ids
+			if !opts.DryRun && len(ids) > 0 {
+				if err := r.removeContainers(ctx, ids); err != nil {
+					return res, err
+				}
+			}
+		case CleanupImages:
+			ids, err := r.listDanglingImages(ctx)
+			if err != nil {
+				return res, err
+			}
+			res.Images = ids
+			if !opts.DryRun && len(ids) > 0 {
+				if err := r.removeImages(ctx, ids); err != nil {
+					return res, err
+				}
+			}
+			if opts.AppName != "" {
+				// Prune this app's old tagged images, keeping the newest 5.
+				if err := r.KeepLastNImages(ctx, opts.AppName, 5); err != nil {
+					log.Printf("[runtime] cleanup: failed to prune old images for %s: %v", opts.AppName, err)
+				}
+			}
+		case CleanupNetworks:
+			ids, err := r.listUnusedNetworks(ctx)
+			if err != nil {
+				return res, err
+			}
+			res.Networks = ids
+			if !opts.DryRun && len(ids) > 0 {
+				if err := r.removeNetworks(ctx, ids); err != nil {
+					return res, err
+				}
+			}
+		case CleanupVolumes:
+			ids, err := r.listUnusedVolumes(ctx)
+			if err != nil {
+				return res, err
+			}
+			res.Volumes = ids
+			if !opts.DryRun && len(ids) > 0 {
+				if err := r.removeVolumes(ctx, ids); err != nil {
+					return res, err
+				}
+			}
+		case CleanupCache:
+			bytes, err := r.pruneCache(ctx, opts.DryRun)
+			if err != nil {
+				return res, err
+			}
+			res.CacheBytes = bytes
+		}
+	}
+	return res, nil
+}
 
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
