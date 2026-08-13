@@ -1107,6 +1107,9 @@ func runCleanup(ctx context.Context, rt runtime.Manager, store *config.Store, op
 		if err != nil {
 			return report, err
 		}
+		sort.Slice(apps, func(i, j int) bool {
+			return apps[i].Name < apps[j].Name
+		})
 		for _, app := range apps {
 			if err := rt.KeepLastNImages(ctx, app.Name, keep); err != nil {
 				log.Printf("[tengiz] warning: image retention for %s: %v", app.Name, err)
