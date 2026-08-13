@@ -235,6 +235,23 @@ Rollback to the previous deployment. The previous active container is started on
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup [--dry-run] [--containers] [--images] [--volumes] [--networks] [--build-cache] [--keep N] [--schedule interval]`
+
+Reclaim disk space by removing unused Docker resources.
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Show what would be removed without removing anything |
+| `--containers` | Remove stopped helper containers not managed by Tengiz |
+| `--images` | Remove dangling images and old app images beyond retention |
+| `--volumes` | Remove unused anonymous volumes |
+| `--networks` | Remove unused networks |
+| `--build-cache` | Remove the Docker build cache |
+| `--keep N` | Number of newest app images to keep per app (default: 5) |
+| `--schedule` | Run cleanup periodically (e.g. `24h`) until interrupted |
+
+With no category flag, all categories run. Tengiz-managed containers (labeled `tengiz-app`) are never removed, and images referenced by any container are kept. Old app images keep the newest `N` per app (skipping `:latest` and in-use images). Use `--dry-run` first to preview what will be reclaimed.
+
 ### `tengiz domain`
 
 Manage custom domains for applications.
