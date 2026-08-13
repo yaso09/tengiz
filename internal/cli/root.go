@@ -65,6 +65,10 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("volumes", false, "also prune unused volumes (removes data)")
+	cleanupCmd.Flags().Int("keep", 5, "number of images to retain per app")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be done without changing anything")
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
@@ -1159,6 +1163,72 @@ Examples:
 
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources",
+	Long: `Removes stopped containers, dangling images, and unused networks to reclaim disk space.
+Use --volumes to also prune unused volumes (removes data).
+
+Containers labeled tengiz-app (all deployed apps, including stopped scale-to-zero
+containers) are protected from pruning. Per-app image retention caps each app's
+image count at --keep (default 5) so rollback keeps working.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		keep, _ := cmd.Flags().GetInt("keep")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		store := config.NewStoreWithEnv(dataDir, env)
+		apps, err := store.ListApps()
+		if err != nil {
+			return fmt.Errorf("list apps: %w", err)
+		}
+
+		if dryRun {
+			for _, app := range apps {
+				fmt.Printf("[tengiz] (dry-run) would retain %d images for %s\n", keep, app.Name)
+			}
+			msg := "[tengiz] (dry-run) would prune stopped non-tengiz containers, dangling images, unused networks"
+			if volumes {
+				msg += " and unused volumes"
+			}
+			fmt.Println(msg)
+			return nil
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		for _, app := range apps {
+			if err := rt.KeepLastNImages(cmd.Context(), app.Name, keep); err != nil {
+				log.Printf("[tengiz] warning: image retention for %s: %v", app.Name, err)
+			}
+		}
+
+		report, err := rt.Cleanup(cmd.Context(), runtime.CleanupOptions{Volumes: volumes})
+		if err != nil {
+			return err
+		}
+		for _, line := range cleanupSummaryLines(report) {
+			fmt.Println(line)
+		}
+		return nil
+	},
+}
+
+func cleanupSummaryLines(report *runtime.CleanupReport) []string {
+	return []string{
+		fmt.Sprintf("[tengiz] containers removed: %d", report.ContainersRemoved),
+		fmt.Sprintf("[tengiz] images removed: %d", report.ImagesRemoved),
+		fmt.Sprintf("[tengiz] networks removed: %d", report.NetworksRemoved),
+		fmt.Sprintf("[tengiz] volumes removed: %d", report.VolumesRemoved),
+		fmt.Sprintf("[tengiz] reclaimed space: %s", report.ReclaimedSpace),
+	}
 }
 
 var gitCmd = &cobra.Command{
