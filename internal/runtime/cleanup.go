@@ -9,6 +9,22 @@ import (
 	"strings"
 )
 
+type CleanupOptions struct {
+	Volumes bool // also prune unused volumes (opt-in; removes data)
+}
+
+type CleanupReport struct {
+	ContainersRemoved int
+	ImagesRemoved     int
+	NetworksRemoved   int
+	VolumesRemoved    int
+	ReclaimedSpace    string
+}
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (*CleanupReport, error) {
+	return &CleanupReport{}, nil
+}
+
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()
