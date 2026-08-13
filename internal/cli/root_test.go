@@ -97,6 +97,7 @@ func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *ty
 func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) Cleanup(ctx context.Context, opts runtime.CleanupOptions) (runtime.CleanupReport, error) { return runtime.CleanupReport{}, nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
@@ -373,6 +374,117 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	for name, found := range expected {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
+		}
+	}
+}
+
+type recordingCleanupRT struct {
+	runtime.Manager
+	keepCalls []string
+	report    runtime.CleanupReport
+}
+
+func (m *recordingCleanupRT) Cleanup(ctx context.Context, opts runtime.CleanupOptions) (runtime.CleanupReport, error) {
+	return m.report, nil
+}
+
+func (m *recordingCleanupRT) KeepLastNImages(ctx context.Context, appName string, n int) error {
+	m.keepCalls = append(m.keepCalls, appName)
+	return nil
+}
+
+func TestCleanupCmdRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not found: %v", err)
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatalf("cleanup command not registered")
+	}
+}
+
+func TestCleanupCmdFlags(t *testing.T) {
+	for _, flag := range []string{"containers", "images", "volumes", "networks", "build-cache", "all", "dry-run", "force", "keep"} {
+		if cleanupCmd.Flags().Lookup(flag) == nil {
+			t.Errorf("cleanupCmd missing --%s flag", flag)
+		}
+	}
+}
+
+func TestCleanupCmdDryRun(t *testing.T) {
+	rootCmd.SetArgs([]string{"cleanup", "--dry-run", "--force"})
+	output := captureOutput(func() {
+		if err := rootCmd.Execute(); err != nil {
+			t.Errorf("Execute() error = %v", err)
+		}
+	})
+	if !strings.Contains(output, "would remove") {
+		t.Errorf("dry-run output missing 'would remove', got: %s", output)
+	}
+	for _, cat := range []string{"containers", "images", "volumes", "networks", "build cache"} {
+		if !strings.Contains(output, cat) {
+			t.Errorf("dry-run output missing category %q, got: %s", cat, output)
+		}
+	}
+	if strings.Contains(output, "containers removed:") {
+		t.Errorf("dry-run must not report actual removals, got: %s", output)
+	}
+}
+
+func TestRunCleanupPrunesOldImagesPerApp(t *testing.T) {
+	dir := t.TempDir()
+	store := config.NewStore(dir)
+	if err := store.SaveApp(types.AppEntry{Name: "alpha", Config: types.AppConfig{Name: "alpha"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveApp(types.AppEntry{Name: "beta", Config: types.AppConfig{Name: "beta"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &recordingCleanupRT{Manager: runtime.NewStub()}
+	opts := runtime.CleanupOptions{Images: true}
+	_, err := runCleanup(context.Background(), mock, store, opts, 5)
+	if err != nil {
+		t.Fatalf("runCleanup() error = %v", err)
+	}
+	if len(mock.keepCalls) != 2 {
+		t.Fatalf("expected 2 KeepLastNImages calls, got %v", mock.keepCalls)
+	}
+	if mock.keepCalls[0] != "alpha" || mock.keepCalls[1] != "beta" {
+		t.Errorf("keepCalls = %v, want [alpha beta]", mock.keepCalls)
+	}
+}
+
+func TestRunCleanupSkipsImageRetentionWhenDisabled(t *testing.T) {
+	dir := t.TempDir()
+	store := config.NewStore(dir)
+	if err := store.SaveApp(types.AppEntry{Name: "alpha", Config: types.AppConfig{Name: "alpha"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &recordingCleanupRT{Manager: runtime.NewStub()}
+	opts := runtime.CleanupOptions{Containers: true}
+	if _, err := runCleanup(context.Background(), mock, store, opts, 5); err != nil {
+		t.Fatalf("runCleanup() error = %v", err)
+	}
+	if len(mock.keepCalls) != 0 {
+		t.Errorf("expected no KeepLastNImages calls, got %v", mock.keepCalls)
+	}
+}
+
+func TestHumanBytes(t *testing.T) {
+	tests := []struct {
+		in   int64
+		want string
+	}{
+		{0, "0.00B"},
+		{512, "512.00B"},
+		{1500, "1.50kB"},
+		{2000000, "2.00MB"},
+	}
+	for _, tc := range tests {
+		if got := humanBytes(tc.in); got != tc.want {
+			t.Errorf("humanBytes(%d) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
