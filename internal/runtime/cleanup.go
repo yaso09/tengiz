@@ -21,8 +21,62 @@ type CleanupReport struct {
 	ReclaimedSpace    string
 }
 
+func buildCleanupArgs(opts CleanupOptions) []string {
+	args := []string{"system", "prune", "-f"}
+	if opts.Volumes {
+		args = append(args, "--volumes")
+	}
+	// Protect every container carrying the tengiz-app label (deployed apps,
+	// stopped scale-to-zero containers, versioned deploy containers).
+	args = append(args, "--filter", fmt.Sprintf("label!=%s", labelKey))
+	return args
+}
+
 func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (*CleanupReport, error) {
-	return &CleanupReport{}, nil
+	cmd := exec.CommandContext(ctx, "docker", buildCleanupArgs(opts)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker system prune: %w\n%s", err, string(out))
+	}
+	return parsePruneSummary(string(out)), nil
+}
+
+func parsePruneSummary(output string) *CleanupReport {
+	report := &CleanupReport{}
+	section := ""
+	for _, raw := range strings.Split(output, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "Deleted Containers:"):
+			section = "containers"
+		case strings.HasPrefix(line, "Deleted Images:"):
+			section = "images"
+		case strings.HasPrefix(line, "Deleted Networks:"):
+			section = "networks"
+		case strings.HasPrefix(line, "Deleted Volumes:"):
+			section = "volumes"
+		case strings.HasPrefix(line, "Deleted build cache"):
+			section = "buildcache"
+		case strings.HasPrefix(line, "Total reclaimed space:"):
+			report.ReclaimedSpace = strings.TrimSpace(strings.TrimPrefix(line, "Total reclaimed space:"))
+			section = ""
+		default:
+			switch section {
+			case "containers":
+				report.ContainersRemoved++
+			case "images":
+				report.ImagesRemoved++
+			case "networks":
+				report.NetworksRemoved++
+			case "volumes":
+				report.VolumesRemoved++
+			}
+		}
+	}
+	return report
 }
 
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
