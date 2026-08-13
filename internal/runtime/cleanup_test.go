@@ -114,3 +114,14 @@ func TestParseReclaimedBytes(t *testing.T) {
 		}
 	}
 }
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	report, err := m.Cleanup(context.Background(), CleanupOptions{Containers: true, Images: true})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if report != (CleanupReport{}) {
+		t.Errorf("Cleanup() report = %+v, want empty CleanupReport", report)
+	}
+}

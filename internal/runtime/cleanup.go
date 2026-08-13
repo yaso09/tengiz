@@ -164,3 +164,72 @@ func parseSize(s string) int64 {
 		return 0
 	}
 }
+
+type CleanupOptions struct {
+	Containers bool
+	Images     bool
+	Volumes    bool
+	Networks   bool
+	BuildCache bool
+}
+
+type CleanupReport struct {
+	Containers int
+	Images     int
+	Volumes    int
+	Networks   int
+	BuildCache int64
+}
+
+func runDockerPrune(ctx context.Context, args []string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker %s: %w\n%s", args[0], err, string(out))
+	}
+	return string(out), nil
+}
+
+func pruneAndCount(ctx context.Context, args []string, skipPrefix string, firstErr *error) int {
+	out, err := runDockerPrune(ctx, args)
+	if err != nil {
+		if *firstErr == nil {
+			*firstErr = err
+		}
+		return 0
+	}
+	return countPruned(parsePruneOutput(out), skipPrefix)
+}
+
+func pruneAndReclaimed(ctx context.Context, args []string, firstErr *error) int64 {
+	out, err := runDockerPrune(ctx, args)
+	if err != nil {
+		if *firstErr == nil {
+			*firstErr = err
+		}
+		return 0
+	}
+	return parseReclaimedBytes(out)
+}
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupReport, error) {
+	var report CleanupReport
+	var firstErr error
+
+	if opts.Containers {
+		report.Containers = pruneAndCount(ctx, containerPruneArgs(), "", &firstErr)
+	}
+	if opts.Images {
+		report.Images = pruneAndCount(ctx, imagePruneArgs(), "untagged", &firstErr)
+	}
+	if opts.Volumes {
+		report.Volumes = pruneAndCount(ctx, volumePruneArgs(), "", &firstErr)
+	}
+	if opts.Networks {
+		report.Networks = pruneAndCount(ctx, networkPruneArgs(), "", &firstErr)
+	}
+	if opts.BuildCache {
+		report.BuildCache = pruneAndReclaimed(ctx, builderPruneArgs(), &firstErr)
+	}
+	return report, firstErr
+}
