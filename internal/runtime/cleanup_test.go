@@ -96,3 +96,57 @@ func TestContainerListArgs(t *testing.T) {
 		})
 	}
 }
+
+func TestParseReclaimedSpace(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   int64
+	}{
+		{"no marker", "clean", 0},
+		{"zero", "Total reclaimed space: 0B", 0},
+		{"kB adjacent", "Total reclaimed space: 1.5kB", 1500},
+		{"MB spaced", "Total reclaimed space: 12.3 MB", 12300000},
+		{"GB", "Total reclaimed space: 1.2GB", 1200000000},
+		{"KiB", "Total reclaimed space: 2KiB", 2048},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseReclaimedSpace(tt.output); got != tt.want {
+				t.Fatalf("parseReclaimedSpace(%q) = %d, want %d", tt.output, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		name string
+		n    int64
+		want string
+	}{
+		{"zero", 0, "0 B"},
+		{"bytes", 500, "500.00 B"},
+		{"kB", 1500, "1.50 kB"},
+		{"MB", 12300000, "12.30 MB"},
+		{"GB", 1200000000, "1.20 GB"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := FormatBytes(tt.n); got != tt.want {
+				t.Fatalf("FormatBytes(%d) = %q, want %q", tt.n, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDockerPruneEmptyTargets(t *testing.T) {
+	r := &dockerRuntime{}
+	res, err := r.Prune(context.Background(), CleanupOptions{})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if !reflect.DeepEqual(res, CleanupResult{}) {
+		t.Fatalf("Prune() = %+v, want empty CleanupResult", res)
+	}
+}
