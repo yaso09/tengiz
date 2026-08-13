@@ -235,6 +235,24 @@ Rollback to the previous deployment. The previous active container is started on
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup [--all] [--volumes] [--keep-images N] [--app <app>]`
+
+Prune unused Docker resources to free disk space. Tengiz-managed containers (labeled `tengiz-app=<app>`) are never removed.
+
+| Flag | Description |
+|------|-------------|
+| `--all` | Remove all unused images, not just dangling ones |
+| `--volumes` | Prune unused volumes |
+| `--keep-images N` | Retain the N most recent versioned images per app (0 = do not prune images) |
+| `--app <app>` | Only prune images for this app (defaults to all apps) |
+
+Examples:
+```
+tengiz cleanup                    # prune dangling images
+tengiz cleanup --all --volumes    # full housekeeping
+tengiz cleanup --keep-images 5    # prune unused resources + retain 5 images per app
+```
+
 ### `tengiz domain`
 
 Manage custom domains for applications.

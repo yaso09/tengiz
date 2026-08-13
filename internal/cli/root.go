@@ -65,6 +65,7 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
@@ -86,6 +87,11 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("all", false, "remove all unused images, not just dangling ones")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Int("keep-images", 0, "retain the N most recent versioned images per app (0 = do not prune images)")
+	cleanupCmd.Flags().String("app", "", "only prune images for this app (defaults to all apps)")
+	cleanupCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 }
 
 var rootCmd = &cobra.Command{
@@ -596,6 +602,42 @@ var psCmd = &cobra.Command{
 			}
 			fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", a.Name, a.State, portStr, env, health)
 		}
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Prune unused Docker resources (disk housekeeping)",
+	Long:  "Removes unused Docker resources to free disk space. Tengiz-managed containers are never removed. Use --keep-images N to retain the N most recent versioned images per app.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		all, _ := cmd.Flags().GetBool("all")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		keep, _ := cmd.Flags().GetInt("keep-images")
+		app, _ := cmd.Flags().GetString("app")
+
+		opts := runtime.CleanupOptions{
+			All:        all,
+			Volumes:    volumes,
+			KeepImages: keep,
+			App:        app,
+		}
+
+		res, err := rt.Cleanup(context.Background(), opts)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println("[tengiz] Docker housekeeping complete.")
+		if keep > 0 {
+			fmt.Printf("[tengiz] retained the %d most recent image(s) per app.\n", keep)
+		}
+		_ = res
 		return nil
 	},
 }
