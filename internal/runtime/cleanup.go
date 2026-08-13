@@ -200,7 +200,69 @@ func (r *dockerRuntime) pruneCache(ctx context.Context, dryRun bool) (int64, err
 }
 
 func (r *dockerRuntime) Prune(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
-	return CleanupResult{}, nil
+	var res CleanupResult
+
+	for _, target := range opts.Targets {
+		switch target {
+		case CleanupContainers:
+			ids, err := r.listContainerIDs(ctx, opts.AppName)
+			if err != nil {
+				return res, err
+			}
+			res.Containers = ids
+			if !opts.DryRun && len(ids) > 0 {
+				if err := r.removeContainers(ctx, ids); err != nil {
+					return res, err
+				}
+			}
+		case CleanupImages:
+			ids, err := r.listDanglingImages(ctx)
+			if err != nil {
+				return res, err
+			}
+			res.Images = ids
+			if !opts.DryRun && len(ids) > 0 {
+				if err := r.removeImages(ctx, ids); err != nil {
+					return res, err
+				}
+			}
+			if opts.AppName != "" {
+				// Prune this app's old tagged images, keeping the newest 5.
+				if err := r.KeepLastNImages(ctx, opts.AppName, 5); err != nil {
+					log.Printf("[runtime] cleanup: failed to prune old images for %s: %v", opts.AppName, err)
+				}
+			}
+		case CleanupNetworks:
+			ids, err := r.listUnusedNetworks(ctx)
+			if err != nil {
+				return res, err
+			}
+			res.Networks = ids
+			if !opts.DryRun && len(ids) > 0 {
+				if err := r.removeNetworks(ctx, ids); err != nil {
+					return res, err
+				}
+			}
+		case CleanupVolumes:
+			ids, err := r.listUnusedVolumes(ctx)
+			if err != nil {
+				return res, err
+			}
+			res.Volumes = ids
+			if !opts.DryRun && len(ids) > 0 {
+				if err := r.removeVolumes(ctx, ids); err != nil {
+					return res, err
+				}
+			}
+		case CleanupCache:
+			bytes, err := r.pruneCache(ctx, opts.DryRun)
+			if err != nil {
+				return res, err
+			}
+			res.CacheBytes = bytes
+		}
+	}
+	return res, nil
 }
 
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
