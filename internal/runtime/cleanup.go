@@ -6,6 +6,7 @@ import (
 	"log"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -56,4 +57,110 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 		}
 	}
 	return nil
+}
+
+func containerPruneArgs() []string {
+	return []string{"container", "prune", "-f", "--filter", "label!=tengiz-app"}
+}
+
+func imagePruneArgs() []string {
+	return []string{"image", "prune", "-f", "--filter", "dangling=true"}
+}
+
+func volumePruneArgs() []string {
+	return []string{"volume", "prune", "-f"}
+}
+
+func networkPruneArgs() []string {
+	return []string{"network", "prune", "-f", "--filter", "label!=tengiz-app"}
+}
+
+func builderPruneArgs() []string {
+	return []string{"builder", "prune", "-f"}
+}
+
+// parsePruneOutput extracts the item lines between a docker prune's
+// "Deleted <X>:" header and the trailing "Total reclaimed space" line.
+func parsePruneOutput(output string) []string {
+	var ids []string
+	started := false
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case line == "":
+			if started {
+				return ids
+			}
+		case strings.HasPrefix(line, "Deleted "):
+			started = true
+		case strings.HasPrefix(line, "Total reclaimed"):
+			return ids
+		case started:
+			ids = append(ids, line)
+		}
+	}
+	return ids
+}
+
+// countPruned counts item lines, skipping any with the given prefix
+// (e.g. "untagged" so image output counts only actual deletions).
+func countPruned(lines []string, skipPrefix string) int {
+	n := 0
+	for _, l := range lines {
+		if skipPrefix != "" && strings.HasPrefix(l, skipPrefix) {
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+// parseReclaimedBytes parses "Total reclaimed space: <N><unit>" into bytes.
+func parseReclaimedBytes(output string) int64 {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "Total reclaimed space:") {
+			continue
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(line, "Total reclaimed space:"))
+		return parseSize(rest)
+	}
+	return 0
+}
+
+func parseSize(s string) int64 {
+	i := 0
+	for i < len(s) && (s[i] == '.' || (s[i] >= '0' && s[i] <= '9')) {
+		i++
+	}
+	if i == 0 {
+		return 0
+	}
+	num, err := strconv.ParseFloat(s[:i], 64)
+	if err != nil {
+		return 0
+	}
+	unit := strings.TrimSpace(s[i:])
+	switch unit {
+	case "", "B", "b":
+		return int64(num)
+	case "kB", "KB", "K", "k":
+		return int64(num * 1000)
+	case "KiB", "KIB":
+		return int64(num * 1024)
+	case "MB", "mB", "M", "m":
+		return int64(num * 1000 * 1000)
+	case "MiB", "MIB":
+		return int64(num * 1024 * 1024)
+	case "GB", "G", "g":
+		return int64(num * 1000 * 1000 * 1000)
+	case "GiB", "GIB":
+		return int64(num * 1024 * 1024 * 1024)
+	case "TB", "T":
+		return int64(num * 1000 * 1000 * 1000 * 1000)
+	case "TiB", "TIB":
+		return int64(num * 1024 * 1024 * 1024 * 1024)
+	default:
+		return 0
+	}
 }
