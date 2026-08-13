@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"reflect"
 	"testing"
 )
 
@@ -46,5 +47,52 @@ func TestAllCleanupTargetsIncludesAll(t *testing.T) {
 	targets := AllCleanupTargets()
 	if len(targets) != 5 {
 		t.Fatalf("expected 5 targets, got %d", len(targets))
+	}
+}
+
+func TestParseIDList(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   []string
+	}{
+		{"empty", "", nil},
+		{"single", "abc123\n", []string{"abc123"}},
+		{"multiple with blanks", "abc\n def\n\nghi\n", []string{"abc", "def", "ghi"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseIDList(tt.output)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("parseIDList(%q) = %v, want %v", tt.output, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestContainerListArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		appName string
+		want    []string
+	}{
+		{
+			name:    "no app excludes tengiz containers",
+			appName: "",
+			want:    []string{"ps", "-aq", "--filter", "status=exited", "--filter", "status=created", "--filter", "label!=tengiz-app"},
+		},
+		{
+			name:    "specific app",
+			appName: "myapp",
+			want:    []string{"ps", "-aq", "--filter", "status=exited", "--filter", "status=created", "--filter", "label=tengiz-app=myapp"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := containerListArgs(tt.appName)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("containerListArgs(%q) = %v, want %v", tt.appName, got, tt.want)
+			}
+		})
 	}
 }

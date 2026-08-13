@@ -9,6 +9,53 @@ import (
 	"strings"
 )
 
+func parseIDList(output string) []string {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	var ids []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			ids = append(ids, line)
+		}
+	}
+	return ids
+}
+
+// containerListArgs returns `docker ps -aq` filters for stopped/created
+// containers. Without appName, Tengiz-managed containers (label tengiz-app)
+// are excluded. With appName, only that app's containers are matched.
+func containerListArgs(appName string) []string {
+	args := []string{"ps", "-aq", "--filter", "status=exited", "--filter", "status=created"}
+	if appName != "" {
+		args = append(args, "--filter", fmt.Sprintf("label=%s=%s", labelKey, appName))
+	} else {
+		args = append(args, "--filter", fmt.Sprintf("label!=%s", labelKey))
+	}
+	return args
+}
+
+func (r *dockerRuntime) listContainerIDs(ctx context.Context, appName string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "docker", containerListArgs(appName)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps: %w\n%s", err, string(out))
+	}
+	return parseIDList(string(out)), nil
+}
+
+func (r *dockerRuntime) removeContainers(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	args := append([]string{"rm", "-f"}, ids...)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker rm: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
 func (r *dockerRuntime) Prune(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
 	return CleanupResult{}, nil
 }
