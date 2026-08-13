@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -63,6 +64,16 @@ func init() {
 	volumeCmd.AddCommand(volumeListCmd)
 	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(rollbackCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("containers", false, "remove stopped containers not managed by Tengiz")
+	cleanupCmd.Flags().Bool("images", false, "remove dangling build images and old deployment images")
+	cleanupCmd.Flags().Bool("volumes", false, "remove unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "remove unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "remove the Docker build cache")
+	cleanupCmd.Flags().Bool("all", false, "run all cleanup categories (default)")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without removing anything")
+	cleanupCmd.Flags().Bool("force", false, "skip the confirmation prompt")
+	cleanupCmd.Flags().Int("keep", 5, "number of deployment images to keep per app")
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
@@ -1013,6 +1024,129 @@ var rollbackCmd = &cobra.Command{
 		fmt.Printf("[tengiz] rolled back %s to deployment %s (port %d)\n", appName, prevDep.ID, newPort)
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources (housekeeping)",
+	Long: `Remove unused Docker resources to reclaim disk space.
+
+Safe by default: containers labeled tengiz-app=<name> (running, stopped
+scale-to-zero cold-start candidates, and blue/green versioned containers) are
+never removed. Only stopped containers without the tengiz-app label, dangling
+build images, unused volumes and networks, and the Docker build cache are
+pruned. Old deployment images are retained per app (--keep, default 5).`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		force, _ := cmd.Flags().GetBool("force")
+		all, _ := cmd.Flags().GetBool("all")
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		networks, _ := cmd.Flags().GetBool("networks")
+		buildCache, _ := cmd.Flags().GetBool("build-cache")
+		keep, _ := cmd.Flags().GetInt("keep")
+
+		if all || !(containers || images || volumes || networks || buildCache) {
+			containers, images, volumes, networks, buildCache = true, true, true, true, true
+		}
+
+		opts := runtime.CleanupOptions{
+			Containers: containers,
+			Images:     images,
+			Volumes:    volumes,
+			Networks:   networks,
+			BuildCache: buildCache,
+		}
+
+		if dryRun {
+			fmt.Println("[tengiz] dry-run: no changes made")
+			printCleanupCategories(opts)
+			return nil
+		}
+
+		if !force {
+			fmt.Print("[tengiz] this will remove unused Docker resources. Continue? [y/N] ")
+			reader := bufio.NewReader(os.Stdin)
+			resp, _ := reader.ReadString('\n')
+			resp = strings.TrimSpace(strings.ToLower(resp))
+			if resp != "y" && resp != "yes" {
+				fmt.Println("[tengiz] aborted")
+				return nil
+			}
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		report, err := runCleanup(cmd.Context(), rt, config.NewStoreWithEnv(dataDir, env), opts, keep)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println("[tengiz] cleanup complete")
+		fmt.Printf("  containers removed: %d\n", report.Containers)
+		fmt.Printf("  images removed:     %d\n", report.Images)
+		fmt.Printf("  volumes removed:    %d\n", report.Volumes)
+		fmt.Printf("  networks removed:   %d\n", report.Networks)
+		fmt.Printf("  build cache freed:  %s\n", humanBytes(report.BuildCache))
+		return nil
+	},
+}
+
+func runCleanup(ctx context.Context, rt runtime.Manager, store *config.Store, opts runtime.CleanupOptions, keep int) (runtime.CleanupReport, error) {
+	report, err := rt.Cleanup(ctx, opts)
+	if err != nil {
+		return report, err
+	}
+	if opts.Images {
+		apps, err := store.ListApps()
+		if err != nil {
+			return report, err
+		}
+		for _, app := range apps {
+			if err := rt.KeepLastNImages(ctx, app.Name, keep); err != nil {
+				log.Printf("[tengiz] warning: image retention for %s: %v", app.Name, err)
+			}
+		}
+	}
+	return report, nil
+}
+
+func printCleanupCategories(opts runtime.CleanupOptions) {
+	fmt.Println("[tengiz] would remove:")
+	if opts.Containers {
+		fmt.Println("  - stopped containers not managed by Tengiz")
+	}
+	if opts.Images {
+		fmt.Println("  - dangling build images and old deployment images")
+	}
+	if opts.Volumes {
+		fmt.Println("  - unused volumes")
+	}
+	if opts.Networks {
+		fmt.Println("  - unused networks")
+	}
+	if opts.BuildCache {
+		fmt.Println("  - Docker build cache")
+	}
+}
+
+func humanBytes(n int64) string {
+	if n < 0 {
+		return "0.00B"
+	}
+	units := []string{"B", "kB", "MB", "GB", "TB"}
+	val := float64(n)
+	i := 0
+	for val >= 1000 && i < len(units)-1 {
+		val /= 1000
+		i++
+	}
+	return fmt.Sprintf("%.2f%s", val, units[i])
 }
 
 var buildLogsCmd = &cobra.Command{
