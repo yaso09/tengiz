@@ -9,6 +9,30 @@ import (
 	"strings"
 )
 
+func buildCleanupArgs(opts CleanupOptions) []string {
+	args := []string{"system", "prune", "-f"}
+	if opts.All {
+		args = append(args, "-a")
+	}
+	args = append(args,
+		"--filter", "label=tengiz-app",
+		"--filter", "label=tengiz-env",
+	)
+	if opts.Volumes {
+		args = append(args, "--volumes")
+	}
+	return args
+}
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) error {
+	cmd := exec.CommandContext(ctx, "docker", buildCleanupArgs(opts)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker system prune: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()
