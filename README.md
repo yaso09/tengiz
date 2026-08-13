@@ -180,6 +180,18 @@ Show build logs from previous deployments.
 
 Without a deployment ID, lists all available build log IDs. With a deployment ID, shows the full build output. Use `--tail N` to show only the last N lines.
 
+### `tengiz cleanup`
+
+Remove unused Docker resources to reclaim disk space.
+
+| Flag | Description |
+|------|-------------|
+| `--volumes` | Also prune unused volumes (removes data — use with care) |
+| `--keep <n>` | Number of images to retain per app (default: 5) |
+| `--dry-run` | Show what would be removed without changing anything |
+
+Prunes stopped non-Tengiz containers, dangling images, unused networks, and (with `--volumes`) unused volumes. Containers labeled `tengiz-app` (all deployed apps, including stopped scale-to-zero containers) are protected by label-based filtering. Per-app image retention (`--keep`, default 5) reclaims space from old builds while keeping rollback working.
+
 ### `tengiz run <app> [--] <command> [args...]`
 
 Run a one-off command in a temporary container created from the app's deployed image. The container is automatically removed on exit — no port allocation needed.
