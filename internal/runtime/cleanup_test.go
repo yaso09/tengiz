@@ -77,14 +77,14 @@ func TestContainerListArgs(t *testing.T) {
 		want    []string
 	}{
 		{
-			name:    "no app excludes tengiz containers",
+			name:    "no app requests label for go-side filtering",
 			appName: "",
-			want:    []string{"ps", "-aq", "--filter", "status=exited", "--filter", "status=created", "--filter", "label!=tengiz-app"},
+			want:    []string{"ps", "--filter", "status=exited", "--filter", "status=created", "--format", "{{.ID}} {{.Label \"tengiz-app\"}}"},
 		},
 		{
 			name:    "specific app",
 			appName: "myapp",
-			want:    []string{"ps", "-aq", "--filter", "status=exited", "--filter", "status=created", "--filter", "label=tengiz-app=myapp"},
+			want:    []string{"ps", "--filter", "status=exited", "--filter", "status=created", "--filter", "label=tengiz-app=myapp", "--format", "{{.ID}} {{.Label \"tengiz-app\"}}"},
 		},
 	}
 	for _, tt := range tests {
@@ -92,6 +92,28 @@ func TestContainerListArgs(t *testing.T) {
 			got := containerListArgs(tt.appName)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("containerListArgs(%q) = %v, want %v", tt.appName, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFilterContainerLines(t *testing.T) {
+	tests := []struct {
+		name    string
+		lines   []string
+		appName string
+		want    []string
+	}{
+		{"empty", nil, "", nil},
+		{"no app keeps unlabeled only", []string{"abc123 ", "def456 myapp", "ghi789 "}, "", []string{"abc123", "ghi789"}},
+		{"specific app", []string{"abc123 ", "def456 myapp", "ghi789 myapp2"}, "myapp", []string{"def456"}},
+		{"no matches", []string{"abc123 other", "def456 "}, "myapp", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterContainerLines(tt.lines, tt.appName)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("filterContainerLines(%v, %q) = %v, want %v", tt.lines, tt.appName, got, tt.want)
 			}
 		})
 	}

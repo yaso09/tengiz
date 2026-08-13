@@ -22,17 +22,44 @@ func parseIDList(output string) []string {
 	return ids
 }
 
-// containerListArgs returns `docker ps -aq` filters for stopped/created
-// containers. Without appName, Tengiz-managed containers (label tengiz-app)
-// are excluded. With appName, only that app's containers are matched.
+// containerListArgs returns `docker ps` args for stopped/created containers.
+// Output lines are "<id> <tengiz-app label value>". The daemon rejects the
+// label!= negation filter on `ps`, so label-based inclusion/exclusion is done
+// in Go via filterContainerLines instead.
 func containerListArgs(appName string) []string {
-	args := []string{"ps", "-aq", "--filter", "status=exited", "--filter", "status=created"}
+	args := []string{"ps", "--filter", "status=exited", "--filter", "status=created"}
 	if appName != "" {
 		args = append(args, "--filter", fmt.Sprintf("label=%s=%s", labelKey, appName))
-	} else {
-		args = append(args, "--filter", fmt.Sprintf("label!=%s", labelKey))
 	}
+	args = append(args, "--format", fmt.Sprintf("{{.ID}} {{.Label %q}}", labelKey))
 	return args
+}
+
+// filterContainerLines parses `docker ps` lines of "<id> <label>" and keeps
+// the IDs matching the requested app, or (with no app) IDs that have no
+// tengiz-app label, i.e. containers not managed by Tengiz.
+func filterContainerLines(lines []string, appName string) []string {
+	var ids []string
+	for _, line := range lines {
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+			continue
+		}
+		id := strings.TrimSpace(parts[0])
+		label := ""
+		if len(parts) == 2 {
+			label = strings.TrimSpace(parts[1])
+		}
+		if appName != "" {
+			if label != appName {
+				continue
+			}
+		} else if label != "" {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 func (r *dockerRuntime) listContainerIDs(ctx context.Context, appName string) ([]string, error) {
@@ -41,7 +68,7 @@ func (r *dockerRuntime) listContainerIDs(ctx context.Context, appName string) ([
 	if err != nil {
 		return nil, fmt.Errorf("docker ps: %w\n%s", err, string(out))
 	}
-	return parseIDList(string(out)), nil
+	return filterContainerLines(parseIDList(string(out)), appName), nil
 }
 
 func (r *dockerRuntime) removeContainers(ctx context.Context, ids []string) error {
