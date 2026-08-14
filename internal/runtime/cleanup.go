@@ -9,6 +9,24 @@ import (
 	"strings"
 )
 
+type CleanupOptions struct {
+	DryRun     bool
+	Containers bool
+	Images     bool
+	BuildCache bool
+	Volumes    bool
+	Networks   bool
+	KeepImages int
+}
+
+type CleanupResult struct {
+	ContainersPruned int64
+	ImagesPruned     int64
+	BuildCacheFreed  int64
+	VolumesPruned    int64
+	NetworksPruned   int64
+}
+
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()
@@ -16,6 +34,10 @@ func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error 
 		return fmt.Errorf("docker rmi: %w\n%s", err, string(out))
 	}
 	return nil
+}
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
+	return CleanupResult{}, nil
 }
 
 func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error {
