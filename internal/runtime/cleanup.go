@@ -9,6 +9,37 @@ import (
 	"strings"
 )
 
+type CleanupOptions struct {
+	Containers bool
+	Images     bool
+	Volumes    bool
+	Networks   bool
+	DryRun     bool
+}
+
+type CleanupResult struct {
+	ContainersRemoved int
+	ImagesRemoved     int
+	VolumesRemoved    int
+	NetworksRemoved   int
+	Protected         int
+}
+
+func nonEmptyLines(s string) []string {
+	var lines []string
+	for _, l := range strings.Split(strings.TrimSpace(s), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines
+}
+
+func isTengizManaged(labels map[string]string) bool {
+	_, ok := labels["tengiz-app"]
+	return ok
+}
+
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()
