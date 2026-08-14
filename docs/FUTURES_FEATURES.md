@@ -1984,3 +1984,63 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** `ServiceManager.createPreDeployFunctionIfExist` loads a user-supplied JS function (`app.preDeployFunction`) and runs it just before the container spec is applied: signature `(captainAppObj, dockerUpdateObject) => Promise<dockerUpdateObject>`. The function can programmatically add/remove volumes, env vars, capabilities, or commands at deploy time based on app config — a code-based hook, not a shell command.
 - **Why add to Tengiz:** Existing "Pre-Deploy Hooks (#9)" and "Extended Hook System (#24)" run CLI commands but cannot mutate the container spec itself. A `.tengiz.yaml` `predeploy_function` (small embedded script executed by Tengiz's binary) could, e.g., auto-attach a volume when a flag is set, or inject runtime-computed env values. For Go, this maps to a sandboxed template/expression hook or a `goja`-based function as a lighter alternative to the full "TypeScript Action Automation (#156)". Medium effort, unlocks dynamic deploy-time configuration that no existing Tengiz feature covers.
 - **Detected:** 2026-08-14
+
+## Clean Git Clone Build (Uncommitted-Change Isolation)
+- **Source:** Kamal
+- **Description:** When `builder.context` is unset, Kamal clones the local git repo into a temp dir (`~/.kamal-clones/<service>-<pwd-sha>`) and builds from the clone, so the image contains only committed code. Before building it warns with the list of uncommitted and untracked files that will be excluded. `kamal build dev` is the inverse — it tags the dirty working tree as `<tag>-dirty` for local-only use.
+- **Why add to Tengiz:** `tengiz deploy` today builds the working directory as-is, so uncommitted edits and untracked files silently ship to production — the classic "works locally, not in prod" failure. A git-clone build guarantees reproducible builds from HEAD, surfaces dirty trees, and pairs with "Git-Based Image Version Tagging (#110)" for full source→container traceability. Low effort: `git clone` of the local repo into a temp dir + chdir before the existing `docker build` in the `builder` package. Complements "Git Submodules & Git LFS (#167)" which fixes clone completeness; this fixes clone purity.
+- **Detected:** 2026-08-14
+
+## Build Provenance & SBOM Attestations
+- **Source:** Kamal
+- **Description:** Kamal's `builder.provenance` (e.g. `mode=max`) and `builder.sbom` (boolean) pass `--provenance` and `--sbom` to `docker buildx build`, attaching attestations — build metadata (provenance) and a Software Bill of Materials (SBOM) — to the image manifest for supply-chain verification.
+- **Why add to Tengiz:** "Image Digest Pinning (#95)" makes deploys deterministic; attestations make them auditable. A production platform needs SBOMs for vulnerability scanning (Trivy, Grype) and provenance for SLSA-style policy checks, especially if Tengiz ever serves as a multi-tenant deploy target. Low effort: two builder config fields plumbed into the existing `docker buildx build` invocation. Distinct from "Registry Image Self-Healing" and build caches — this is about image *metadata* attestation.
+- **Detected:** 2026-08-14
+
+## Host-Tagged Environment Variables (Per-Host Env via Server Tags)
+- **Source:** Kamal
+- **Description:** Servers can carry tags (`servers: [ 172.0.0.2: experiments, 172.0.0.3: [experiments, three] ]`) and `env.tags.<tag>` defines extra environment (both clear and secret values) applied only to containers running on hosts bearing that tag.
+- **Why add to Tengiz:** Enables host-scoped env without duplicating config — a canary host gets `FEATURE_FLAG=on`, a monitoring host gets a read-only DB user, a GPU host gets `CUDA_VISIBLE_DEVICES`. No existing Tengiz feature covers this: "Shared Environment Variables (#170)" is team/project-scoped inheritance, and "Per-Environment-Variable Semantics (#168)" is build/runtime/preview scoping — neither is *host*-scoped. Low effort: a `tags` field on host entries plus a merge step in the deploy pipeline. Natural companion to host-tagged deployments and canary/rolling boot.
+- **Detected:** 2026-08-14
+
+## Secret Aliasing (Env Name → Secret Name Mapping)
+- **Source:** Kamal
+- **Description:** `env.secret` entries accept a `NAME:SOURCE` form (`- DB_PASSWORD:MAIN_DB_PASSWORD`), mapping an env var name to a differently-named secret from the store so the same secret can feed multiple containers under different env names (e.g. primary vs. replica DB credentials).
+- **Why add to Tengiz:** When a stored secret's name differs from the app's env name — or the same value must surface under two names — users currently duplicate secrets or hardcode values. A `:` alias in the existing `secrets` package's secret-list parser is a tiny change. Complements "Secret Interpolation System (#54)" (template-based `[[secret.NAME]]` in values) — this is store-level name aliasing and they compose cleanly. Also pairs with the new accessory registry-secret support.
+- **Detected:** 2026-08-14
+
+## Secrets File Command Substitution (`$(...)` in Secrets Files)
+- **Source:** Kamal
+- **Description:** Secrets files are parsed with inline command substitution enabled (Kamal's `Dotenv::InlineCommandSubstitution`), so lines like `RAILS_MASTER_KEY=$(cat config/master.key)` or `DB_PASSWORD=$(pass show db)` resolve files/CLIs at load time instead of storing literal values.
+- **Why add to Tengiz:** File-based secrets (Rails master key, CA certificates) and CLI-backed values (`pass`, `aws secretsmanager get-secret-value`) are common; forcing the literal value into `.tengiz.yaml` leaks it into config history and git. Command substitution in the secrets loader keeps generated values out of static files and works with the existing `LocalProvider`. Low effort (shell-command eval during parse, restricted to the secrets file), and it also enables the Kamal-style `kamal secrets fetch/extract` helper pattern on top of existing adapters.
+- **Detected:** 2026-08-14
+
+## ERB-Style Templated Config Files (Dynamic Deploy-Time Values)
+- **Source:** Kamal
+- **Description:** `config/deploy.yml` is rendered through ERB before YAML parsing, so config can embed computed values — e.g. `registry.password: <%= %x(aws ecr get-login-password) %>` or `env: <%= YAML.dump(load_dotenv) %>`. Resolved output (with secrets redacted) is shown by `kamal config`.
+- **Why add to Tengiz:** Short-lived cloud registry credentials (AWS/GCP tokens valid ~12h) cannot be hardcoded in config. An embedded template pass in the config loader (Go `text/template` + `os/exec` + env) lets users compute values at deploy time; "Config Display Command (#48)" already shows the resolved, redacted result. Distinct from "Variable Resource (#53)" (static shared values) — this is *computed* values. Low-medium effort, high ops value for ECR/GCR/Docker Hub logins.
+- **Detected:** 2026-08-14
+
+## Boot Barrier (Primary-Role-First Health Gating)
+- **Source:** Kamal
+- **Description:** During multi-role deploys Kamal boots the primary (web) role first; other roles (workers, jobs) block on a barrier (`Healthcheck::Barrier`) until the first primary container is confirmed healthy, then boot. If the primary fails, queued roles never start and the failed container's logs are dumped. `boot.limit`/`boot.wait` (already tracked) control *across-host* pacing; this controls *across-role* ordering.
+- **Why add to Tengiz:** Starting workers/jobs before the web app is healthy makes them crash-loop against a not-yet-migrated DB. For Tengiz's future "Role Tabanlı Sunucu Grupları (#20)" and "Rolling Boot / Canary (#50)", a barrier ensures safe boot order — secondary roles only start once the primary passes its health check. Medium effort, closely tied to role support; reusable as the health-gate primitive for canary promotion.
+- **Detected:** 2026-08-14
+
+## Accessory Config File/Directory Provisioning (ERB + Mode/Owner)
+- **Source:** Kamal
+- **Description:** Accessories declare `files:` and `directories:`. Local files (optionally rendered from ERB) are uploaded to the host and bind-mounted with configurable `mode`/`owner` and SELinux mount options (`ro`, `z`, `Z`); directories are created on the host with `chmod`/`chown` before being mounted into the container.
+- **Why add to Tengiz:** Databases and search servers need config files and data dirs with specific ownership (`mysql:mysql`, mode `0600`). "Accessory Services (#62)" covers sidecars generically but not file provisioning; "Storage Directory Ownership (#190)" covers host volume perms but not *uploaded config files*. This completes the accessory model with deploy-time file injection. Low-medium effort once accessories exist; reuses an `upload + chmod/chown` step similar to "File-Type Mounts (#177)".
+- **Detected:** 2026-08-14
+
+## Host/Role Wildcard Targeting (`--hosts` / `--roles` Globs)
+- **Source:** Kamal
+- **Description:** Global CLI flags `--hosts` and `--roles` accept comma-separated values supporting `*` wildcards (`kamal deploy --hosts "*.example.com" --roles "web*"`), filtering any command to a matching subset of servers/roles.
+- **Why add to Tengiz:** For fleets of similarly-named servers, targeting subsets by glob beats enumerating every hostname — a prerequisite when "SSH Tabanlı Remote Deployment (#20)" lands. Low effort: glob-match the configured host/role names in the Cobra CLI layer and filter downstream operations. Distinct from "Parallel Bulk Operations (#55)" (concurrency control) — this is *target selection*.
+- **Detected:** 2026-08-14
+
+## SSH Bastion / Jump Host Support
+- **Source:** Kamal
+- **Description:** SSH config supports a jump host (`proxy: root@bastion`), a custom `proxy_command` for older SSH, explicit `keys`/`key_data`, `keys_only` (ignore ssh-agent identities), `config` file handling, and `forward_agent` toggling — enabling deploy through bastion/relay hosts into locked-down networks.
+- **Why add to Tengiz:** Production servers are commonly reachable only through a bastion host. Without it, the planned "SSH Tabanlı Remote Deployment (#20)" cannot reach private networks. Low-medium effort in the SSH layer: `ssh -J` and `-o ProxyCommand` argument construction. Complements "SSH Key Management (#144)" and the existing SSH deploy plans; `forward_agent` is especially useful for remote builds that need git access.
+- **Detected:** 2026-08-14
