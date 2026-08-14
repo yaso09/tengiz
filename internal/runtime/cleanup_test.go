@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -83,6 +84,103 @@ func TestBuildCleanupCommands(t *testing.T) {
 						t.Errorf("cmd %d arg %d = %q, want %q", i, j, got[i][j], tt.expected[i][j])
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestParsePruneOutput(t *testing.T) {
+	tests := []struct {
+		name      string
+		output    string
+		wantCount int64
+		wantFreed int64
+	}{
+		{
+			name:      "nothing to delete",
+			output:    "Total reclaimed space: 0B\n",
+			wantCount: 0,
+			wantFreed: 0,
+		},
+		{
+			name: "containers",
+			output: "Deleted Containers:\n" +
+				"abc123\n" +
+				"def456\n" +
+				"\n" +
+				"Total reclaimed space: 12.5MB\n",
+			wantCount: 2,
+			wantFreed: 12500000,
+		},
+		{
+			name: "images",
+			output: "Deleted Images:\n" +
+				"deleted: sha256:abc\n" +
+				"untagged: tengiz-apps/foo:production-123\n" +
+				"deleted: sha256:def\n" +
+				"Total reclaimed space: 523MB\n",
+			wantCount: 3,
+			wantFreed: 523000000,
+		},
+		{
+			name: "empty deleted section",
+			output: "Deleted Networks:\n" +
+				"Total reclaimed space: 0B\n",
+			wantCount: 0,
+			wantFreed: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			count, freed := parsePruneOutput(tt.output)
+			if count != tt.wantCount {
+				t.Errorf("count = %d, want %d", count, tt.wantCount)
+			}
+			if freed != tt.wantFreed {
+				t.Errorf("freed = %d, want %d", freed, tt.wantFreed)
+			}
+		})
+	}
+}
+
+func TestParseBytes(t *testing.T) {
+	tests := []struct {
+		in   string
+		want int64
+	}{
+		{"", 0},
+		{"0B", 0},
+		{"100B", 100},
+		{"1.5MB", 1500000},
+		{"2GB", 2000000000},
+		{"1GiB", 1073741824},
+		{"512KiB", 524288},
+		{"garbage", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := parseBytes(tt.in); got != tt.want {
+				t.Errorf("parseBytes(%q) = %d, want %d", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		in   int64
+		want string
+	}{
+		{0, "0 B"},
+		{500, "500 B"},
+		{1024, "1.0 KiB"},
+		{1536, "1.5 KiB"},
+		{1048576, "1.0 MiB"},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%d", tt.in), func(t *testing.T) {
+			if got := FormatBytes(tt.in); got != tt.want {
+				t.Errorf("FormatBytes(%d) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}
