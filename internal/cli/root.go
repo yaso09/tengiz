@@ -39,6 +39,15 @@ func init() {
 	rootCmd.AddCommand(deployCmd)
 	rootCmd.AddCommand(proxyCmd)
 	rootCmd.AddCommand(psCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without deleting")
+	cleanupCmd.Flags().Bool("all", false, "remove all unused images, not just dangling")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped non-Tengiz containers")
+	cleanupCmd.Flags().Bool("images", false, "prune unused images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune build cache")
+	cleanupCmd.Flags().Duration("interval", 0, "run cleanup periodically (e.g. 24h); 0 = run once")
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(rmCmd)
@@ -597,6 +606,46 @@ var psCmd = &cobra.Command{
 			fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", a.Name, a.State, portStr, env, health)
 		}
 		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Prune unused Docker resources (containers, images, volumes, networks, build cache)",
+	Long: `Prunes unused Docker resources while protecting Tengiz-managed containers and
+rollback images via label-based filtering.
+
+By default all categories are pruned. Use category flags to limit scope:
+--containers, --images, --volumes, --networks, --build-cache.
+
+Use --dry-run to see what would be removed without deleting anything.
+Use --all to also remove all unused (non-dangling) images.
+Use --interval to run cleanup periodically (e.g. --interval 24h); Ctrl+C to stop.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts, err := pruneOptionsFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		interval, _ := cmd.Flags().GetDuration("interval")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return err
+		}
+
+		runOnce := func() error {
+			res, err := rt.Prune(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			printPruneResult(res)
+			return nil
+		}
+
+		if interval <= 0 {
+			return runOnce()
+		}
+		return runCleanupLoop(cmd.Context(), interval, runOnce)
 	},
 }
 
@@ -1771,6 +1820,63 @@ func getwd() string {
 		return "app"
 	}
 	return wd
+}
+
+func pruneOptionsFromFlags(cmd *cobra.Command) (runtime.PruneOptions, error) {
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	all, _ := cmd.Flags().GetBool("all")
+	containers, _ := cmd.Flags().GetBool("containers")
+	images, _ := cmd.Flags().GetBool("images")
+	volumes, _ := cmd.Flags().GetBool("volumes")
+	networks, _ := cmd.Flags().GetBool("networks")
+	buildCache, _ := cmd.Flags().GetBool("build-cache")
+
+	opts := runtime.PruneOptions{DryRun: dryRun, All: all}
+	if containers || images || volumes || networks || buildCache {
+		opts.Containers = containers
+		opts.Images = images
+		opts.Volumes = volumes
+		opts.Networks = networks
+		opts.BuildCache = buildCache
+	} else {
+		opts.Containers = true
+		opts.Images = true
+		opts.Volumes = true
+		opts.Networks = true
+		opts.BuildCache = true
+	}
+	return opts, nil
+}
+
+func printPruneResult(res *runtime.PruneResult) {
+	mode := "Pruned"
+	if res.DryRun {
+		mode = "Would prune"
+	}
+	for _, label := range []string{"containers", "images", "volumes", "networks", "build-cache"} {
+		if out, ok := res.Outputs[label]; ok && strings.TrimSpace(out) != "" {
+			fmt.Printf("[tengiz] %s %s:\n%s", mode, label, out)
+		}
+	}
+	fmt.Println("[tengiz] cleanup complete")
+}
+
+func runCleanupLoop(ctx context.Context, interval time.Duration, fn func() error) error {
+	if err := fn(); err != nil {
+		return err
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := fn(); err != nil {
+				log.Printf("[tengiz] cleanup: %v", err)
+			}
+		}
+	}
 }
 
 func addSecretProviderFlags(cmd *cobra.Command) {
