@@ -107,7 +107,7 @@ func pruneBuildCacheArgs() []string {
 }
 
 func systemDfArgs() []string {
-	return []string{"system", "df", "--format", "{{.Type}}\t{{.Total}}\t{{.Active}}\t{{.Size}}\t{{.Reclaimable}}"}
+	return []string{"system", "df", "--format", "{{.Type}}\t{{.TotalCount}}\t{{.Active}}\t{{.Size}}\t{{.Reclaimable}}"}
 }
 
 func pruneCommandArgs(cat PruneCategory, allImages bool) ([]string, bool) {

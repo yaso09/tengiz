@@ -80,3 +80,22 @@ func TestParseSystemDfEmpty(t *testing.T) {
 		t.Errorf("parseSystemDf(\"\") = %d rows, want 0", len(rows))
 	}
 }
+
+func TestPruneCommandArgsAllImages(t *testing.T) {
+	got, ok := pruneCommandArgs(PruneImages, true)
+	if !ok {
+		t.Fatal("pruneCommandArgs(PruneImages, true) ok = false, want true")
+	}
+	want := []string{"image", "prune", "-a", "-f"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("pruneCommandArgs(PruneImages, true) = %v, want %v", got, want)
+	}
+}
+
+func TestSystemDfArgs(t *testing.T) {
+	got := systemDfArgs()
+	want := []string{"system", "df", "--format", "{{.Type}}\t{{.TotalCount}}\t{{.Active}}\t{{.Size}}\t{{.Reclaimable}}"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("systemDfArgs() = %v, want %v", got, want)
+	}
+}
