@@ -415,6 +415,26 @@ List all secrets for an application. Values are masked for security.
 |----------|-------------|
 | `app` | Application name |
 
+### `tengiz cleanup`
+
+Prune unused Docker resources to reclaim disk space.
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Show reclaimable space via `docker system df` without removing anything |
+| `--all` | Prune all categories including volumes and all unused images |
+| `--containers` | Prune stopped Tengiz containers only (label-protected) |
+| `--images` | Prune unused images |
+| `--volumes` | Prune unused volumes (never pruned by default) |
+| `--networks` | Prune unused networks |
+| `--build-cache` | Prune the Docker build cache |
+
+With no category flags, `tengiz cleanup` prunes stopped containers, unused images,
+unused networks, and the build cache. Volumes are only pruned with `--volumes` or
+`--all`. Running containers are never touched, and only stopped containers carrying
+the `tengiz-app` label are considered for removal. Run `tengiz cleanup --dry-run`
+first to preview reclaimable space.
+
 ## Configuration
 
 Create a `.tengiz.yaml` in your project root:
