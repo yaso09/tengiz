@@ -125,3 +125,15 @@ func TestDiff(t *testing.T) {
 		t.Errorf("diff(2,2) = %d, want 0", got)
 	}
 }
+
+func TestCleanupNoCategoriesRunsNoCommands(t *testing.T) {
+	c := &dockerCleaner{}
+	report, err := c.Cleanup(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	want := Report{}
+	if *report != want {
+		t.Fatalf("Cleanup() = %+v, want %+v", *report, want)
+	}
+}

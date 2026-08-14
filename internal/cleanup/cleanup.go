@@ -2,6 +2,7 @@ package cleanup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os/exec"
@@ -36,7 +37,41 @@ func NewDocker() (Manager, error) {
 }
 
 func (c *dockerCleaner) Cleanup(ctx context.Context, opts Options) (*Report, error) {
-	return nil, fmt.Errorf("cleanup not implemented")
+	report := &Report{}
+	var errs []error
+	if opts.Containers {
+		n, err := c.cleanupContainers(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("containers: %w", err))
+		} else {
+			report.ContainersRemoved = n
+		}
+	}
+	if opts.Images {
+		n, err := c.cleanupImages(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("images: %w", err))
+		} else {
+			report.ImagesRemoved = n
+		}
+	}
+	if opts.Volumes {
+		n, err := c.cleanupVolumes(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("volumes: %w", err))
+		} else {
+			report.VolumesRemoved = n
+		}
+	}
+	if opts.Networks {
+		n, err := c.cleanupNetworks(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("networks: %w", err))
+		} else {
+			report.NetworksRemoved = n
+		}
+	}
+	return report, errors.Join(errs...)
 }
 
 func (c *dockerCleaner) cleanupContainers(ctx context.Context) (int, error) {
