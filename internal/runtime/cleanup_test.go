@@ -29,3 +29,61 @@ func TestStubCleanup(t *testing.T) {
 		t.Errorf("stub Cleanup() should return a zero result, got %+v", res)
 	}
 }
+
+func TestBuildCleanupCommands(t *testing.T) {
+	tests := []struct {
+		name     string
+		opts     CleanupOptions
+		expected [][]string
+	}{
+		{
+			name:     "nothing enabled",
+			opts:     CleanupOptions{},
+			expected: nil,
+		},
+		{
+			name: "containers only",
+			opts: CleanupOptions{Containers: true},
+			expected: [][]string{
+				{"container", "prune", "--force", "--filter", "label=tengiz-app"},
+			},
+		},
+		{
+			name: "all categories",
+			opts: CleanupOptions{Containers: true, Images: true, BuildCache: true, Volumes: true, Networks: true},
+			expected: [][]string{
+				{"container", "prune", "--force", "--filter", "label=tengiz-app"},
+				{"image", "prune", "--force"},
+				{"builder", "prune", "--force"},
+				{"volume", "prune", "--force"},
+				{"network", "prune", "--force"},
+			},
+		},
+		{
+			name: "images and networks",
+			opts: CleanupOptions{Images: true, Networks: true},
+			expected: [][]string{
+				{"image", "prune", "--force"},
+				{"network", "prune", "--force"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildCleanupCommands(tt.opts)
+			if len(got) != len(tt.expected) {
+				t.Fatalf("len = %d, want %d: %v", len(got), len(tt.expected), got)
+			}
+			for i := range got {
+				if len(got[i]) != len(tt.expected[i]) {
+					t.Fatalf("cmd %d len = %d, want %d: %v", i, len(got[i]), len(tt.expected[i]), got[i])
+				}
+				for j := range got[i] {
+					if got[i][j] != tt.expected[i][j] {
+						t.Errorf("cmd %d arg %d = %q, want %q", i, j, got[i][j], tt.expected[i][j])
+					}
+				}
+			}
+		})
+	}
+}

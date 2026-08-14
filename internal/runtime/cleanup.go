@@ -40,6 +40,28 @@ func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (Clean
 	return CleanupResult{}, nil
 }
 
+const cleanupLabelFilter = "label=" + labelKey
+
+func buildCleanupCommands(opts CleanupOptions) [][]string {
+	var cmds [][]string
+	if opts.Containers {
+		cmds = append(cmds, []string{"container", "prune", "--force", "--filter", cleanupLabelFilter})
+	}
+	if opts.Images {
+		cmds = append(cmds, []string{"image", "prune", "--force"})
+	}
+	if opts.BuildCache {
+		cmds = append(cmds, []string{"builder", "prune", "--force"})
+	}
+	if opts.Volumes {
+		cmds = append(cmds, []string{"volume", "prune", "--force"})
+	}
+	if opts.Networks {
+		cmds = append(cmds, []string{"network", "prune", "--force"})
+	}
+	return cmds
+}
+
 func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error {
 	cmd := exec.CommandContext(ctx, "docker", "images",
 		"--filter", fmt.Sprintf("reference=tengiz-apps/%s:*", appName),
