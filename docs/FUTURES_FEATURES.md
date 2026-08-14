@@ -1580,3 +1580,177 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Each datastore collection can be configured with a memory type: `Heap` (fast, volatile — data lost on canister upgrade) or `Stable` (persistent across upgrades, slightly slower). This lets developers make performance/cost trade-offs per collection: cache/session data goes in Heap for speed, user profiles go in Stable for durability. Collections default to Heap for maximum performance. The memory type affects both read/write latency and upgrade behavior — Stable collections survive platform upgrades, Heap collections are re-initialized.
 - **Why add to Tengiz:** Tengiz's planned Built-in NoSQL Datastore (#1) needs a similar performance/storage trade-off. Some data is ephemeral (sessions, cache, rate limit counters) — stored in-memory for speed and automatically reset on restart. Other data is persistent (user profiles, settings, content) — written to SQLite or disk-backed storage for durability. A `db.<collection>.memory: ephemeral | persistent` setting in `.tengiz.yaml` lets developers choose: ephemeral collections use Go maps (fast, lost on container restart), persistent collections use embedded SQLite tables (durable, survives restarts). This is particularly important for scale-to-zero — ephemeral collections naturally reset on cold start (good for session data that should force re-login), persistent collections survive scale-to-zero cycles (good for app state). Implementation: two store backends (`MemoryStore` and `SQLiteStore`) implementing the same `DocStore` interface, selected per-collection at deploy time. Low-medium effort, fits Tengiz's embedded database philosophy. Complements the NoSQL Datastore with production-grade configurability.
 - **Detected:** 2026-07-17
+
+## Server Transfer (Full-Instance Export/Import Bundle)
+- **Source:** Coolify
+- **Description:** Coolify `app/Services/ServerTransfer/` (`ServerTransferExporter.php`, `ServerTransferImporter.php`, `ServerTransferBundle.php`, `ServerTransferClaimer.php`, `ServerTransferMigrator.php`) exports an entire server + all its resources into a single encrypted, schema-versioned JSON bundle. The bundle includes: server config, private keys, git sources (GitHub/GitLab apps with credentials), S3 storages, cloud provider tokens, SSL certificates, shared env vars (server/project/environment scoped), projects → environments → applications → databases → services with all env vars, persistent/file volumes, scheduled tasks, tags, previews, and scheduled backups. Import supports dry-run validation, UUID preservation or adoption, claim-file ownership enforcement, FK remapping (destinations/sources/private keys re-linked by UUID), and runs in a single DB transaction.
+- **Why add to Tengiz:** Existing "Config Export/Import" (#18) only covers env vars. True instance migration/disaster-recovery for a self-hosted PaaS requires moving apps, volumes, domains, secrets, and schedules together. `tengiz export` / `tengiz import` — with `--dry-run`, encrypted output, and UUID remapping — gives users a one-shot path to move a whole Tengiz instance to a new host or clone a server. Implementation: `~/.tengiz/` state is already JSON; the exporter serializes all stores (apps, ports, domains, volumes, secrets, notifications) into a versioned, AES-GCM-encrypted bundle with FK remapping on import. Medium-high effort, high value for self-hosting users and server migration.
+- **Detected:** 2026-08-14
+
+## Deployment Configuration Snapshot + Diff / Drift Audit
+- **Source:** Coolify
+- **Description:** Coolify `app/Services/DeploymentConfiguration/` captures a structured configuration snapshot (`ApplicationConfigurationSnapshot.php`, SCHEMA_VERSION=1) of every app before each deployment — sections for source/build/runtime/domains/environment/storage. `ConfigurationDiffer.php` diffs the current snapshot against the previous one, classifies each change as build-impacting vs runtime-only (redeploy vs rebuild), ignores introduced-default noise, redacts sensitive values (`••••••••`), and renders a human-readable summary via `SummarizesDiffText`. The diff is stored with each deployment record for audit.
+- **Why add to Tengiz:** Complements "Config Display" (#48) and "Deploy Source Metadata" (#49) with a precise answer to "what exactly changed in this deploy?". This is a debugging and rollback aid: when a deploy behaves differently, `tengiz config diff <app>` shows env vars, build commands, domains, ports, and resource limits changed since the last deploy, and flags whether the change forced a rebuild. Implementation: a `Snapshot` struct serialized alongside each DeploymentEntry; a `Differ` that compares nested config maps with per-key ignore/redact rules. Low-medium effort, high operational value.
+- **Detected:** 2026-08-14
+
+## Managed Database Public-Port TCP Proxy (Temporary DB Exposure)
+- **Source:** Coolify
+- **Description:** Coolify `app/Actions/Database/StartDatabaseProxy.php` launches a dedicated `{uuid}-proxy` nginx TCP-stream container when a database is set `is_public`. The proxy forwards a host `public_port` to the database's internal port (Postgres 5432, MySQL/MariaDB 3306, Redis/KeyDB/Dragonfly 6379, Clickhouse 9000, Mongo 27017) on the app network. `public_port_timeout` (default 3600s) auto-disables public exposure via an nginx `proxy_timeout`; `StopDatabaseProxy.php` removes the proxy + shared network on timeout. `GetContainersStatus.php` auto-restarts the proxy if the container is missing. Non-transient errors (port already allocated) disable `is_public` and notify.
+- **Why add to Tengiz:** Managed DB provisioning (#63) and accessory services (#62) keep databases internal-only. Developers frequently need temporary external access for migrations, external tools, or debugging. A `tengiz db expose <app> --port 5432 --timeout 30m` command — implemented as a tiny Go port-forward container or an in-proxy TCP dialer goroutine with a timer — pairs perfectly with scale-to-zero. `public_port` range controlled by instance settings avoids host port conflicts. Low-medium effort, high utility.
+- **Detected:** 2026-08-14
+
+## Cloud Provider Server Provisioning (Hetzner / DigitalOcean / Vultr)
+- **Source:** Coolify
+- **Description:** Coolify `app/Services/HetznerService.php`, `DigitalOceanService.php`, `VultrService.php` provision, list, power-on/off, and destroy cloud VMs directly from the platform using stored provider API tokens. Features: SSH key upload before server creation, retry with rate-limit awareness honoring `RateLimit-Reset`, Vultr cursor pagination, firewall/network selection, and server backup enabling. Encrypted `CloudProviderToken` storage with live validation against provider APIs.
+- **Why add to Tengiz:** "Server Bootstrap" (#40) configures an existing server via SSH, but users still need to create the VM elsewhere. `tengiz server create --provider hetzner --size cx22 --token ...` would provision a droplet/server, upload Tengiz's SSH key, and then run the existing server-init bootstrap — a complete "one command to a running PaaS node". Provider APIs are plain HTTPS/JSON, so Go is a natural fit. Medium effort, high value for expanding deployments without leaving the CLI.
+- **Detected:** 2026-08-14
+
+## DNS Record Hints + DNS Validation for Custom Domains
+- **Source:** Coolify
+- **Description:** Coolify `app/Support/DnsRecordHints.php` generates deduped, sorted A/AAAA record hints for every hostname targeting a server's IPv4/IPv6. `bootstrap/helpers/shared.php` `validateDNSEntry()` checks each custom domain's DNS against configurable custom DNS servers (`custom_dns_servers` instance setting), accepts Cloudflare IPs, and produces targeted mismatch guidance ("Required DNS record type A pointing to 1.2.3.4"). Per-domain `dns_status` (ok/failed/skipped), `expected_ip`, and `checked_at` are persisted on the app (`domain_dns_statuses`). A `CloudflareDomainConnect` integration generates signed Domain Connect URLs for one-click DNS provisioning.
+- **Why add to Tengiz:** "Custom Domain Management" (implemented) stops at adding the domain; the #1 self-hosted support issue is "my domain doesn't work" because DNS points at the wrong IP. `tengiz domain check <app>` pre-deploy validation — a Go `net.Resolver` with custom DNS servers checking A/AAAA against the host's IP — eliminates that class of support tickets and pairs with the SSL/ACME flow (#51). Low effort (Go stdlib DNS), high value.
+- **Detected:** 2026-08-14
+
+## Domain Conflict Detection + `force_domain_override`
+- **Source:** Coolify
+- **Description:** `bootstrap/helpers/domains.php` `checkDomainUsage()` scans all apps, services, and compose services for FQDNs already claimed by another resource before adding a domain. Conflicting URLs return a clear API error with the conflicting resources listed; `force_domain_override=true` is an explicit escape hatch. `ServiceComposeUrl.php` detects duplicate URLs inside docker-compose services. Domain conflicts never silently hijack traffic.
+- **Why add to Tengiz:** Tengiz's proxy routes purely by hostname — a domain claimed by two apps silently routes traffic to the wrong container, a notoriously hard-to-debug failure. `tengiz domain add` should refuse by default when the domain is already assigned to another app, with `--force` as the override. Implementation: a domain→app index lookup in the store before adding, plus a scan of compose service URLs for multi-service apps. Low effort, prevents a serious production incident class.
+- **Detected:** 2026-08-14
+
+## Container Status Aggregation State Machine (Service-Level Health)
+- **Source:** Coolify
+- **Description:** Coolify `app/Services/ContainerStatusAggregator.php` aggregates per-container status strings into a single priority-based state machine with a machine-readable `state:health` grammar (`running:healthy`, `degraded:unhealthy`, `restarting`, `crashloop`, `paused`, `exited`). Priorities: degraded > restarting > crash-loop > mixed-running-exited > running > dead > paused > starting > exited. `ComplexStatusCheck.php` / `GetContainersStatus.php` feed per-container status + health + restart counts (crash-loop detection) + swarm labels into the aggregator.
+- **Why add to Tengiz:** "Container Health Check" (#4) reports per-container health only. For multi-container apps (accessory services #62, compose imports, process scaling #72), operators need a single roll-up: `tengiz ps` should show `myapp running:healthy` or `myapp degraded:unhealthy` when any dependency fails. Implementation: a small Go package that combines runtime container states (from `docker ps --format` + `--filter health=`) with the health package's check results and restart counts into a priority-ranked status string. Low effort, deterministic, directly improves `tengiz ps`.
+- **Detected:** 2026-08-14
+
+## Volume Clone / Host Path Clone (Data Migration Between Servers)
+- **Source:** Coolify
+- **Description:** Coolify `app/Jobs/VolumeCloneJob.php` clones a Docker named volume to a target server (local→local or local→remote) by running an alpine container that `cp -a`s source volume contents into the target volume; remote clones pipe tar over SSH. `HostPathCloneJob.php` clones a bind-mount host directory (`/data/uploads`) between servers. Both honor a 3600s timeout and are used by `MigrateResourceToDestination.php` to move a running resource (stop → clone volumes → redeploy on target destination).
+- **Why add to Tengiz:** "App Cloning" (#123) copies configuration only; persistent-volume data (uploads, SQLite files, generated assets) can't follow the app to a new host. `tengiz volume clone <app> --to <server>` and `tengiz app migrate <app> --destination <d>` (stop/clone/redeploy) complete the migration story for stateful apps. Implementation fits Tengiz's `os/exec` Docker model exactly (temp container + tar pipe). Medium effort, high value for server moves and environment promotion (copy prod volume → staging).
+- **Detected:** 2026-08-14
+
+## Volume Backup Scheduling with Stop-During-Backup & Recovery
+- **Source:** Coolify
+- **Description:** Coolify `app/Models/ScheduledVolumeBackup.php` schedules backups of Docker named volumes and file volumes (not just DBs) with frequency, `stop_during_backup` (stops containers for consistency-safe copies), retention (amount/days/max-storage, separate local vs S3), `save_s3`, and `disable_local_backup`. `VolumeBackupJob.php` stops containers, archives the volume, restarts them, uploads to S3; `VolumeBackupRecoveryJob.php` recovers containers afterward (tries=20, backoff=60s, `recoverContainers()`, `s3_cleanup_pending` flag). `DeleteScheduledVolumeBackup.php` blocks deletion while restore/cleanup is in flight.
+- **Why add to Tengiz:** Existing "Automated Database Backups" (#127) covers SQL dumps; apps storing uploads, SQLite data, or generated files on persistent volumes have no scheduled backup primitive. `tengiz volume backup schedule <app> --cron "0 3 * * *" --stop-during-backup` gives stateful apps crash-safe, S3-offloadable backups. Complements "Container Snapshot System" (#100) which is manual/point-in-time. Medium effort (tar volume → S3 upload → restore), fills a real gap for persistent-storage users.
+- **Detected:** 2026-08-14
+
+## Scheduled Task Execution Logging + Diagnostics + Manual Run
+- **Source:** Coolify
+- **Description:** Coolify records every cron run in `ScheduledTaskExecution` (status, message, retry_count, duration, started/finished timestamps, truncated error details) and sends TaskSuccess/TaskFailure notifications. `ScheduledJobDiagnostics.php` (`schedule:diagnostics`) inspects the dedup cache (locked/coalesced jobs) and heartbeats for all scheduler jobs; `RunScheduledJobsManually.php` triggers a specific job/frequency with `--dry-run`, `--chunk-size`, `--delay`, `--max-runs`; `ViewScheduledLogs.php` filters the scheduled-errors log channel by `--task/--backup/--errors/--date`.
+- **Why add to Tengiz:** "Scheduled Tasks / Cron Jobs" (#74) will run commands but operators need "did it run, how long, what failed" — the difference between a cron feature and an operational one. `tengiz schedule list <app> --verbose` showing skip reasons ("previous still running", "maintenance"), `tengiz schedule run <app> <id> --now`, and `tengiz schedule logs <app>` give the full observability story. Complements Event Logging (#7) and the notification system (#5). Low-medium effort on top of the cron infrastructure.
+- **Detected:** 2026-08-14
+
+## Deploy Queue Stuck-Job Watchdog
+- **Source:** Coolify
+- **Description:** `CheckApplicationDeploymentQueue.php` (`check:deployment-queue`) finds deployments stuck IN_PROGRESS/QUEUED older than N seconds (default 3600) and force-cancels them (marks failed, `docker rm -f` the helper container). `CleanupApplicationDeploymentQueue.php` does bulk cleanup per server. This is the safety net for lost SSH sessions, killed processes, and orphaned build containers.
+- **Why add to Tengiz:** Deploys can hang (dropped SSH, killed deploy process, orphaned buildx helper). Without a watchdog, the app stays stuck in "deploying" forever and blocks future deploys (deploy lock #15). A periodic `tengiz` background check that force-cancels deployments older than a timeout — built into the deployment queue worker or a scheduled goroutine — restores the queue automatically. Complements "Deploy Lock" (#15) and "Concurrency Control" (#95). Low effort, essential production hygiene.
+- **Detected:** 2026-08-14
+
+## Orphaned Preview Container Garbage Collection
+- **Source:** Coolify
+- **Description:** `CleanupOrphanedPreviewContainersJob.php` scans servers for containers labeled `coolify.pullRequestId` and force-removes any whose `ApplicationPreview` record no longer exists (including soft-deleted records). Acts as a safety net when PR-close webhooks are missed, events race, or cleanup jobs crash — orphaned preview containers never leak indefinitely.
+- **Why add to Tengiz:** "Preview Deployments" (#2) auto-cleanup relies on receiving the webhook; if GitHub's PR-closed event is missed or the cleanup job crashes mid-run, the preview container stays running forever, consuming ports and memory. A label-based GC sweep (list containers by `tengiz-preview-pr=<id>`, cross-check store, `docker rm -f` orphans) on a timer guarantees cleanup. Low effort, complements the preview lifecycle with a leak-proof safety net.
+- **Detected:** 2026-08-14
+
+## Server Disk-Usage Threshold Alerting (Rate-Limited)
+- **Source:** Coolify
+- **Description:** `ServerStorageCheckJob.php` periodically runs `df / --output=pcent` on each server; when usage exceeds a per-server threshold (default ~90%, configurable via `server_disk_usage_notification_threshold` and `server_disk_usage_check_frequency`), it sends a notification that is rate-limited so it doesn't spam. `ServerLimitCheckJob.php` enforces resource quotas (server/app/deployment counts) with `forceDisableServer()` / `forceEnableServer()`.
+- **Why add to Tengiz:** "Server Monitoring" (#73) lists disk among many signals but without the threshold + rate-limited alert mechanics. Disk filling up is the #1 silent killer of self-hosted PaaS instances (stops deploys, DB writes, backups). Implementation: a scheduled check (config `server.disk_threshold: 90`) running `df` on the host, comparing against the threshold, sending a rate-limited notification through the notify package. Low effort, high reliability value.
+- **Detected:** 2026-08-14
+
+## `[skip ci]` / `[skip cd]` Commit Detection (Skip Deploy)
+- **Source:** Coolify
+- **Description:** `DetectsSkipDeployCommits.php` trait: on push webhooks, if every non-empty commit message contains `[skip ci]` or `[skip cd]` (case-insensitive), the deployment is skipped entirely; on PR webhooks, if the PR title or latest commit contains the marker, preview deployment is skipped.
+- **Why add to Tengiz:** Standard PaaS behavior (GitHub Actions, Vercel, Netlify all support it). Docs-only, dependency-bump, or chore commits shouldn't trigger expensive rebuilds. Complements "Webhook Event Filtering" (#50) which filters by branch/path — this filters by commit intent. Implementation: string matching in the gitdeploy webhook handler before enqueuing. Trivial effort, immediately useful for docs/meta repos.
+- **Detected:** 2026-08-14
+
+## PR Webhook Security: Fork & Author-Association Gating + PR Status Comments
+- **Source:** Coolify
+- **Description:** `ProcessGithubPullRequestWebhook.php`: when public PR deployments are disabled, fork PRs are never auto-deployed, and same-repo PRs deploy only if `author_association` ∈ {OWNER, MEMBER, COLLABORATOR}; changed-files are fetched and `watch_paths` filtering applied. `ApplicationPullRequestUpdateJob.php` posts the deployment status as a human-readable **comment on the PR itself** (preview URL, commit SHA, environment) and updates/deletes it on close — distinct from the GitHub commit-status checkmark.
+- **Why add to Tengiz:** For "Preview Deployments" (#2) on public repos, without gating, arbitrary strangers can trigger builds via fork PRs (resource + security abuse). The author-association check is cheap and critical. The PR-thread comment ("Preview: https://pr-42.myapp.tengiz.local") is a direct, actionable developer affordance that complements "Commit Status Reporting" (#38). Low effort additions to the existing preview/gitdeploy pipeline.
+- **Detected:** 2026-08-14
+
+## Preview URL Template (`{{random}}`, `{{pr_id}}`, `{{domain}}`)
+- **Source:** Coolify
+- **Description:** `ApplicationPreview::generate_preview_fqdn()` builds preview URLs from a customizable `preview_url_template` on the Application model with placeholders `{{random}}` (random id), `{{pr_id}}`, and `{{domain}}`, supporting per-service domain generation for Docker Compose apps (`docker_compose_domains`).
+- **Why add to Tengiz:** Gives users control over preview URL format — e.g. `pr-{{pr_id}}-{{random}}.example.com` instead of the default `pr-42.myapp.tengiz.local` — which matters for custom-domain wildcards, subdomain availability, and branded CI links. Small addition to the existing preview deployment feature; a `preview_url_template` field in AppConfig + template expansion in `generatePreviewFQDN()`. Low effort.
+- **Detected:** 2026-08-14
+
+## Problematic Build Env Var Analyzer (Deploy-Time Lint)
+- **Source:** Coolify
+- **Description:** `EnvironmentVariableAnalyzer.php` trait detects env vars that break builds when set at build-time: `NODE_ENV=production` (skips devDependencies needed for webpack/TypeScript), `NPM_CONFIG_PRODUCTION`, `YARN_PRODUCTION`, `COMPOSER_NO_DEV`, `MIX_ENV`, and buildpack control prefixes (`NIXPACKS_`, `RAILPACK_`). Returns per-variable issues with affected toolchain and recommendations.
+- **Why add to Tengiz:** A whole class of confusing deploy failures ("npm install succeeds locally but build fails on the server") comes from build-time production flags. A `tengiz deploy --check` pre-flight lint that scans env vars and warns "NODE_ENV=production at build-time skips devDependencies" prevents them. Complements "Config Validation" (#142) and "Custom Build Commands" (#12). Low effort (static analysis of env var list + a rule table).
+- **Detected:** 2026-08-14
+
+## Per-Environment-Variable Semantics (runtime / buildtime / preview)
+- **Source:** Coolify
+- **Description:** Each env var on an application can be flagged `is_runtime`, `is_buildtime`, `is_preview` (injected only into preview deployments), plus `is_literal`, `is_multiline` (avoid YAML quoting bugs), `is_shown_once` (one-time reveal), `is_shared`, `is_required`, a `comment`, and a `version` field for audit.
+- **Why add to Tengiz:** Tengiz's `config`/`secrets` packages store env vars as a flat map. Vercel's model (and now Coolify's) distinguishes runtime vs build-time vs preview scoping — important for Next.js-style apps where `NEXT_PUBLIC_*` vars must be present at build and secrets only at runtime. Adding `runtime/buildtime/preview` classification to `AppConfig.Env` values (with `[[secret.NAME]]` interpolation aware of scope) is a direct mapping. Low-medium effort, high framework-compatibility value.
+- **Detected:** 2026-08-14
+
+## Shared Environment Variables (Team / Project / Environment Scoped Inheritance)
+- **Source:** Coolify
+- **Description:** `SharedEnvironmentVariable.php` defines env vars once at team, project, or environment scope (via a `type` discriminator + parent id) and merges them into every resource in scope, with cascade deletion when the parent is deleted. Values are masked for non-admin members; supports multiline, literal, and one-time-show flags. Server-scoped shared vars inject auto-generated `COOLIFY_SERVER_*` values.
+- **Why add to Tengiz:** "Variable Resource" (#53) covers global interpolation (`[[database_url]]`); this adds a scoping hierarchy (server → project → environment) with explicit merge semantics and per-scope inheritance. Defining `DATABASE_URL`, logging config, or common feature flags once at the project level and having every app inherit them eliminates massive duplication across apps. Implementation: a `shared` env store keyed by scope, merged into AppEntry.Config.Env at deploy/run time (env-specific scoping fits Tengiz's `--env` multi-env model well). Medium effort, high hygiene value for multi-app projects.
+- **Detected:** 2026-08-14
+
+## Noindex Domains (SEO Control for Staging/Preview)
+- **Source:** Coolify
+- **Description:** `HasNoindexDomains.php` trait lets operators flag specific domains as noindex; the proxy injects `<meta name="robots" content="noindex">` / `X-Robots-Tag: noindex` for those hostnames (normalized matching, stale flags auto-synced when domains are removed).
+- **Why add to Tengiz:** Staging and preview deployments must never appear in search results — an indexed staging environment leaks unfinished work and duplicates content (SEO penalty). `tengiz domain noindex <app> --domain staging.myapp.com` marking a domain in the proxy's hostname routing to emit `X-Robots-Tag: noindex` is a tiny Go middleware change. Complements Preview Deployments (#2) and custom domains. Low effort, real production concern.
+- **Detected:** 2026-08-14
+
+## Instance-Level IP Allowlist (Admin/API Lockdown)
+- **Source:** Coolify
+- **Description:** `InstanceSettings` `allowed_ips` restricts access to the whole Coolify instance (admin UI + API) to a comma-separated list of IPs/CIDRs (IPv4/IPv6), validated by `ValidIpOrCidr` rule. Empty = allow all. This is platform-level, distinct from per-app proxy IP rules.
+- **Why add to Tengiz:** The webhook server, admin API, and proxy are network-exposed. An instance-level IP/CIDR allowlist (`tengiz config set platform.allowed_ips 1.2.3.0/24`) locks the control plane to trusted networks — defense for the auth, webhook, and API surfaces. Complements "Proxy Security Middleware" (#135, per-app) and "Auth Rate Limiting" (#147). Implementation: middleware in the webhook/admin HTTP server checking `net.ParseCIDR` against the client IP. Low effort, high security value.
+- **Detected:** 2026-08-14
+
+## Outgoing Webhook SSRF Protection (Internal Host Allowlist)
+- **Source:** Coolify
+- **Description:** `InstanceSettings` `webhook_allowed_internal_hosts` restricts which internal hosts outgoing webhooks/notifications may target, mitigated by `SafeWebhookUrl` / `SafeExternalUrl` validation rules (no localhost, loopback, link-local, or private ranges unless explicitly allowlisted) — preventing SSRF where a compromised app could POST to internal services through the platform's webhook feature.
+- **Why add to Tengiz:** "Outgoing Webhook Payloads" (#121) will POST to URLs controlled by app config; without guards, a malicious app could target `http://127.0.0.1:9000` (the Docker API proxy) or internal metadata endpoints. A URL validator that rejects loopback/private/link-local ranges unless allowlisted, applied at webhook config time, is standard security hygiene. Low effort (Go `net/url` + `net.ParseIP` range checks), important for the outgoing-webhook feature.
+- **Detected:** 2026-08-14
+
+## SSL Certificate Expiration Notifications
+- **Source:** Coolify
+- **Description:** `SslExpirationNotification.php` aggregates SSL certificates across all resources (applications, services, databases, proxy) and notifies when any certificate is nearing expiration, with per-resource links and expiry metadata. `RegenerateSslCertJob.php` auto-regenerates expiring certs.
+- **Why add to Tengiz:** Certificate expiry is a silent production outage: expired TLS breaks every custom domain simultaneously, and Let's Encrypt 90-day certs make this a recurring risk. A `tengiz` scheduled check that scans `~/.tengiz/certs/` (and auto-provisioned LE certs from #51) and fires a rate-limited notification N days before expiry — through the existing notify system — prevents a whole class of incidents. Complements "Otomatik SSL/TLS" (#51) and the notification system (#5). Low effort.
+- **Detected:** 2026-08-14
+
+## API Token Expiration Warning Notifications
+- **Source:** Coolify
+- **Description:** `ApiTokenExpiringNotification.php` (`ApiTokenExpirationWarningJob.php`) warns ~24 hours before an API token expires, prompting rotation. Deploy tokens are commonly created with long expirations and forgotten until they silently break CI/CD.
+- **Why add to Tengiz:** "App Deploy Tokens" (#16) and "Scoped API Keys" (#97) will be used by CI/CD; an expired token breaks deployments with an opaque auth error. A background check that scans tokens expiring within 24h and notifies via the notify package is proactive ops. Complements scheduled deployments/background monitoring. Low effort.
+- **Detected:** 2026-08-14
+
+## Stop Grace Period (Per-App Graceful Shutdown)
+- **Source:** Coolify
+- **Description:** `ApplicationSetting.stop_grace_period` configures the per-app `docker stop --time` grace period (clamped between MIN and MAX constants), letting slow apps drain in-flight requests before the container is killed. `docker_images_to_keep` additionally controls per-app image retention for rollback.
+- **Why add to Tengiz:** "Readiness Delay & Deploy Timeouts" (#27) covers start-side waiting; the stop side (graceful shutdown draining connections) is equally important for zero-downtime deploys and scale-to-zero. `docker stop -t N` with a per-app `stop_grace_period` in AppConfig lets WebSocket/SSE apps drain cleanly before the idle timer or zero-downtime swap kills them. Low effort (one Docker flag + config field), complements scale-to-zero and #27.
+- **Detected:** 2026-08-14
+
+## Cloud-Init Provisioning Scripts (Reusable Server Templates)
+- **Source:** Coolify
+- **Description:** `CloudInitScript.php` stores reusable, validated cloud-init YAML templates per team; `CloudInitScriptsController.php` provides CRUD with `ValidCloudInitYaml` validation and sensitive-field masking. Scripts are applied automatically when provisioning cloud servers (firewall setup, package installs, custom Docker config).
+- **Why add to Tengiz:** Pairs with Cloud Provider Provisioning (above): before Tengiz's own server bootstrap runs, cloud-init can install packages, open firewall ports, configure networking, or set up custom storage. `tengiz server create --cloud-init <name>` applies a stored template during VM creation. Implementation: a validated `cloud-init` template store in `~/.tengiz/` + passing the YAML to provider APIs. Low-medium effort, useful for standardizing new nodes.
+- **Detected:** 2026-08-14
+
+## Image / Service Version Bump Checker (Registry Version Tracking)
+- **Source:** Coolify
+- **Description:** `UpdateServiceVersions.php` (`services:update-versions`) checks Docker Hub/GHCR/Quay/Codeberg for newer versions of each one-click template's images and updates the stored version with `--dry-run` support. `CheckHelperImageJob` similarly tracks the platform helper image. Service updates are driven by registry-version awareness rather than manual bumps.
+- **Why add to Tengiz:** For "One-Click Service Templates" (#64) and accessory images, knowing when a base image (Postgres minor, Redis, app images) has a newer tag enables `tengiz service update <app> --check` and automated redeploys on registry updates. Complements "Image Digest Change Detection" (#177). Implementation: a `RegistryChecker` (plain HTTP to registry APIs/tags endpoint) in Go. Low-medium effort, keeps deployed images current.
+- **Detected:** 2026-08-14
+
+## Database Init Scripts & Custom Config Files (First-Boot Provisioning)
+- **Source:** Coolify
+- **Description:** On first boot, Coolify's database startup actions write user-provided SQL/JS into `/docker-entrypoint-initdb.d` (Postgres: `StartPostgresql.php` `generate_init_scripts()`, Mongo: `01-default-database.js`, MySQL/MariaDB custom `my.cnf` into `/etc/mysql/conf.d`, Redis custom `redis.conf`), letting databases self-provision users, schemas, and settings. Includes SSL certificate support.
+- **Why add to Tengiz:** "Managed Database Provisioning" (#63) creates empty databases; first-boot init scripts make them actually usable — `tengiz db create postgres --name mydb --init-script ./schema.sql` writes the file into the container's entrypoint dir so the DB creates schemas/users automatically on first start. Simple with exec'd Docker (`docker cp` or bind-mount into the entrypoint dir). Low effort, high utility for the managed DB feature.
+- **Detected:** 2026-08-14
+
+## Database Backup File Security Validation (Safe Restore)
+- **Source:** Coolify
+- **Description:** `DatabaseBackupFileValidator.php` validates uploaded backup files before restore: allowed-extension whitelist (`sql`, `gz`, `zip`, `tar`, `bson`, etc.), dangerous-extension blocklist (`asp`, `exe`, `js`, `sh`, etc.), and content scanning of gzip-decompressed SQL for PostgreSQL restore directives that could lead to OS command execution (e.g. `program` COPY / `\!` shell). Chunked upload up to 10 GiB.
+- **Why add to Tengiz:** "Database Backup Import/Upload" (#184) opens a security surface: restoring an untrusted SQL file can execute arbitrary shell commands via Postgres `COPY ... PROGRAM` or `\!` meta-commands. A validator that checks extensions and scans decompressed dumps for dangerous directives — before piping to `psql`/`pg_restore` via `docker exec` — is essential hardening. Low effort (Go extension + content scanning), closes a real RCE-adjacent vector.
+- **Detected:** 2026-08-14
