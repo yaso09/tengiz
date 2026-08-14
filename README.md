@@ -18,6 +18,7 @@
 - **Multi-environment** — Isolate dev/staging/production with `--env` flag, env-scoped config overrides, and separate state files.
 - **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
+- **Docker housekeeping** — `tengiz cleanup` prunes unused containers, dangling images, unused volumes, and unused networks while never touching deployed apps (protected by Tengiz labels).
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
@@ -234,6 +235,28 @@ Rollback to the previous deployment. The previous active container is started on
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name (required) |
+
+### `tengiz cleanup`
+
+Prune unused Docker resources: stopped containers not managed by Tengiz, dangling (untagged) images, unused volumes, and unused networks.
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Prune stopped containers not managed by Tengiz |
+| `--images` | Prune dangling (untagged) images |
+| `--volumes` | Prune unused volumes |
+| `--networks` | Prune unused networks |
+| `--dry-run` | Show what would be removed without removing anything |
+| `-y`, `--yes` | Skip the confirmation prompt (for CI/headless runs) |
+
+With no category flag, all four categories are cleaned. Tengiz-managed objects (labeled `tengiz-app` / `tengiz-env`) are always protected and never removed. The command prints `docker system df` before and after cleanup. Use `--dry-run` to preview, then run again with `--yes` to perform the cleanup non-interactively.
+
+Example:
+```
+tengiz cleanup --dry-run            # preview only
+tengiz cleanup --containers --yes   # remove stopped non-Tengiz containers
+tengiz cleanup                      # interactive: preview + confirm
+```
 
 ### `tengiz domain`
 
