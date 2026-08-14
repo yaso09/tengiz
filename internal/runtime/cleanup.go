@@ -18,6 +18,93 @@ func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error 
 	return nil
 }
 
+type pruneCommand struct {
+	category string
+	label    string
+	args     []string
+}
+
+func buildPruneCommands(opts PruneOptions) []pruneCommand {
+	var cmds []pruneCommand
+	if opts.Containers {
+		cmds = append(cmds, pruneCommand{
+			category: "container",
+			label:    "containers",
+			args:     []string{"prune", "-f", "--filter", "label!=tengiz-app"},
+		})
+	}
+	if opts.Images {
+		args := []string{"prune", "-f"}
+		if opts.All {
+			args = append(args, "-a")
+		}
+		args = append(args, "--filter", "reference!=tengiz-apps/*")
+		cmds = append(cmds, pruneCommand{category: "image", label: "images", args: args})
+	}
+	if opts.Volumes {
+		cmds = append(cmds, pruneCommand{
+			category: "volume",
+			label:    "volumes",
+			args:     []string{"prune", "-f", "--filter", "label!=tengiz-app"},
+		})
+	}
+	if opts.Networks {
+		cmds = append(cmds, pruneCommand{
+			category: "network",
+			label:    "networks",
+			args:     []string{"prune", "-f", "--filter", "label!=tengiz-app"},
+		})
+	}
+	if opts.BuildCache {
+		cmds = append(cmds, pruneCommand{
+			category: "builder",
+			label:    "build-cache",
+			args:     []string{"prune", "-f"},
+		})
+	}
+	return cmds
+}
+
+func buildPruneListCommands(opts PruneOptions) []pruneCommand {
+	var cmds []pruneCommand
+	if opts.Containers {
+		cmds = append(cmds, pruneCommand{
+			category: "container",
+			label:    "containers",
+			args:     []string{"ls", "-a", "--filter", "status=exited", "--filter", "label!=tengiz-app"},
+		})
+	}
+	if opts.Images {
+		cmds = append(cmds, pruneCommand{
+			category: "image",
+			label:    "images",
+			args:     []string{"ls", "--filter", "dangling=true"},
+		})
+	}
+	if opts.Volumes {
+		cmds = append(cmds, pruneCommand{
+			category: "volume",
+			label:    "volumes",
+			args:     []string{"ls", "--filter", "label!=tengiz-app"},
+		})
+	}
+	if opts.Networks {
+		cmds = append(cmds, pruneCommand{
+			category: "network",
+			label:    "networks",
+			args:     []string{"ls", "--filter", "label!=tengiz-app"},
+		})
+	}
+	if opts.BuildCache {
+		cmds = append(cmds, pruneCommand{
+			category: "builder",
+			label:    "build-cache",
+			args:     []string{"du"},
+		})
+	}
+	return cmds
+}
+
 func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error {
 	cmd := exec.CommandContext(ctx, "docker", "images",
 		"--filter", fmt.Sprintf("reference=tengiz-apps/%s:*", appName),
