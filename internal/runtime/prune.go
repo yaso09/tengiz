@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"fmt"
+	"os/exec"
 	"strings"
 )
 
@@ -46,7 +48,39 @@ type SystemDfRow struct {
 }
 
 func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneReport, error) {
-	return PruneReport{}, nil
+	if opts.DryRun {
+		return r.pruneDryRun(ctx)
+	}
+	report := PruneReport{DryRun: false}
+	for _, cat := range opts.Categories {
+		args, ok := pruneCommandArgs(cat, opts.AllImages)
+		if !ok {
+			continue
+		}
+		report.Results = append(report.Results, r.runPrune(ctx, cat, args))
+	}
+	return report, nil
+}
+
+func (r *dockerRuntime) pruneDryRun(ctx context.Context) (PruneReport, error) {
+	report := PruneReport{DryRun: true}
+	out, err := exec.CommandContext(ctx, "docker", systemDfArgs()...).CombinedOutput()
+	if err != nil {
+		return report, fmt.Errorf("docker system df: %w\n%s", err, string(out))
+	}
+	report.DfRows = parseSystemDf(string(out))
+	return report, nil
+}
+
+func (r *dockerRuntime) runPrune(ctx context.Context, cat PruneCategory, args []string) PruneResult {
+	res := PruneResult{Category: cat}
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	if err != nil {
+		res.Err = fmt.Errorf("docker %s prune: %w\n%s", cat, err, string(out))
+		return res
+	}
+	res.Reclaimed = parseReclaimed(string(out))
+	return res
 }
 
 func pruneContainerArgs() []string {
