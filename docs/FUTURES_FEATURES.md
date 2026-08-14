@@ -1864,3 +1864,87 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** `lib/auth.ts` wires the `better-auth/passkey` plugin; the `passkey` table stores public key, credential ID, counter, device type, `backedUp`, transports, and AAGUID. Users log in passwordless with platform authenticators (Touch ID, Windows Hello, hardware keys) in addition to password/2FA — with `findPasskeysByUserId` for device management.
 - **Why add to Tengiz:** "Two-Factor Authentication" (#204) covers TOTP, and OIDC (#157) covers external IdPs — but passkeys offer passwordless phishing-resistant login for the platform's own admin/webhook surfaces. `tengiz auth passkey add/remove/list` (WebAuthn ceremony via `github.com/go-webauthn/webauthn`) stored in `~/.tengiz/auth/`. Medium effort, high-security-value addition to the platform auth model once #204 lands.
 - **Detected:** 2026-08-14
+
+## App-Declarative Healthchecks (Liveness/Readiness/Startup + Warn/OnFailure)
+- **Source:** Dokku
+- **Description:** Dokku's `app.json` `healthchecks.<proc>` array defines rich per-process healthchecks beyond HTTP path checks: `type` (liveness/readiness/startup), `command` (exec inside container), `listening` (TCP connect check), `uptime` (min container-alive time), `content` (body substring match), `httpHeaders`, `scheme`, `port`, `initialDelay`, `attempts`, `timeout`, `wait`, plus a `warn` flag (log the failure but do not fail the deploy) and an `onFailure` action (`command` to run or `url` to call on check failure). `checks:run` manually invokes checks against a specific app/process/container for external healthcheck integration, and `checks:skip`/`checks:disable` opt out per process type.
+- **Why add to Tengiz:** The recorded "Zero-Downtime Deploy Health Checks" (#73) covers HTTP path + content + attempts/timeout. The liveness/readiness/startup distinction (startup = long slow-boot grace, readiness = when to admit traffic, liveness = when to restart), command/TCP/uptime check types, and especially `warn` (don't fail a deploy over a flaky non-critical check) and `onFailure` (run a script or hit a webhook when a check fails) are all unrecorded. `warn` is critical: without it a single transient check failure aborts a whole deploy. `.tengiz.yaml`'da `healthchecks.web: [{path: /health/ready, type: readiness, warn: true}]` maps to the deploy pipeline's pre-route-verification step.
+- **Detected:** 2026-08-14
+
+## Non-Web Process Service Exposure (`formation.<proc>.service.exposed`)
+- **Source:** Dokku
+- **Description:** By default Dokku's proxy only routes to the `web` process. The `app.json` `formation` key accepts per-process `service: { exposed: true }` which publishes non-web process types (api, socket, grpc) to the network with their own port mapping, independent of the web process.
+- **Why add to Tengiz:** Tengiz's proxy routes by hostname to a single app/port, so a second process type (public API alongside web UI, WebSocket server, gRPC endpoint) cannot be independently exposed — the exact limitation "Process Scaling" and "Per-App Proxy Toggle" leave open. `formation.<proc>.service.exposed: true` gives each scaled process type its own stable host:port in the proxy route map. Medium effort (per-process port allocation in `types.AppConfig` + route key `<app>.<proc>`), unblocks polyglot multi-process apps.
+- **Detected:** 2026-08-14
+
+## Cron Task Concurrency Policies + Per-Task Suspend/Resume + Dedicated Cron Log Sink
+- **Source:** Dokku
+- **Description:** Dokku's `app.json` cron tasks support a `concurrency_policy` of `allow` (default), `forbid` (skip if a previous invocation is still running), or `replace` (kill the old invocation and start new). Tasks get stable IDs (`cron:list`) that support `cron:suspend <id>`/`cron:resume <id>` per-task maintenance toggles plus the app-level `cron:set <app> maintenance true`. `cron:run <app> <id> [--detach] [--ttl-seconds N]` triggers a task on the fly. Cron failure reporting uses `MAILTO`/`MAILFROM`, and `vector-cron-sink` routes cron output separately from app logs (with `dokku_cron_id` templating).
+- **Why add to Tengiz:** The recorded "Scheduled Tasks / Cron Jobs" (#74) and Coolify's "Scheduled Task Execution Logging + Diagnostics + Manual Run" cover scheduling and observability, but not the run-semantics controls: `forbid`/`replace` prevent overlapping runs of a long job (the classic "two backups at once" bug), per-task suspend lets operators pause one broken task without touching the rest, and a dedicated cron log sink keeps scheduled-job output out of the app log stream. Implementation: `concurrency_policy` field on the cron entry + a run-state check in the scheduler goroutine + `cron:suspend/resume` flags in the store.
+- **Detected:** 2026-08-14
+
+## Network Service-Discovery Aliases (`APP.PROC_TYPE` DNS + Custom TLD)
+- **Source:** Dokku
+- **Description:** When an app is attached to a non-default network, Dokku adds a resolvable DNS alias `APP.PROC_TYPE` (e.g. `node-js-app.web`) on that network for every container, enabling cross-app communication by name. A per-app `network:set <app> tld svc.cluster.local` appends a custom TLD to every alias (`node-js-app.web.svc.cluster.local`) for k8s-style discovery.
+- **Why add to Tengiz:** "Custom Docker Network" and "Docker Network & Volume CRUD" attach apps to networks but provide no way for one app to reach another by name — containers get random IPs that change on every redeploy. Stable `app.proc` DNS aliases (via `--network-alias` on `docker run`) give Tengiz true service discovery for web + db + redis stacks and multi-app internal APIs, with a `tld` config for cluster-style naming. Low effort (one `--network-alias` flag + config field), high value for multi-service apps.
+- **Detected:** 2026-08-14
+
+## Static Web Listener (Proxy Upstream for Stopped/Scale-to-Zero Apps)
+- **Source:** Dokku
+- **Description:** `network:set <app> static-web-listener <host:port>` supplies a static upstream that proxy templates use when no container is running. Traffic keeps flowing to a designated host:port (a maintenance page, an external service, another server) instead of failing, across cold starts and stopped apps.
+- **Why add to Tengiz:** Scale-to-zero means most of the time an app's container is stopped; today that yields a cold-start or an error page. A `static_web_listener` in `AppConfig` lets the proxy serve a static maintenance/landing endpoint (or forward to an external host) while the container is down — and the "Per-App Proxy Toggle" and "Maintenance Mode" features pair naturally with it. Implementation: one check in the proxy's route lookup (`if no running container && static listener set → dial it`). Low effort, directly improves the scale-to-zero experience.
+- **Detected:** 2026-08-14
+
+## Build-Time Resource Limits (Constraining the Build Container)
+- **Source:** Dokku
+- **Description:** `resource:limit --process-type build --memory 4g <app>` applies memory/CPU limits to the build container itself (via `docker-args-process-build`), separate from runtime process limits. Explicitly does NOT inherit runtime limits (builds often need more memory than runtime), so OOMs during `npm install`/`go build` are avoided and constrained.
+- **Why add to Tengiz:** Recorded features cover runtime limits ("Resource Limits" implemented, "Per-Process-Type Resource Limits") and build caching ("Persistent Docker BuildKit Cache") but nothing constrains the build phase. A runaway `npm install` or `docker build` can OOM the whole host and take down every app. `build.resources.memory: 4g` in `.tengiz.yaml` passes `--memory` to the `docker build` step. Low effort, high reliability value for single-server instances.
+- **Detected:** 2026-08-14
+
+## Storage Directory Ownership/Permissions Control (`--chown` / `--mode`)
+- **Source:** Dokku
+- **Description:** `storage:create <name> --chown <preset|uid>` and `--mode <octal>` manage the host volume directory's ownership and permission bits, with presets matching runtime users: `herokuish` (32767:32767), `heroku` (1000:1000), `paketo` (2000:2000), `root` (0:0), or a raw numeric UID. The value is stored on the entry and re-applied idempotently so declarative callers converge by re-running the command.
+- **Why add to Tengiz:** "Persistent Storage" is implemented but only mounts — the #1 real-world failure is "Permission denied writing to volume" because the host directory is owned by root while the container runs as an unprivileged user. `tengiz volume create --app myapp --chown heroku --mode 0770` ensures the mounted directory is writable by the app's runtime UID, matching the builder's user. Low effort (apply `chown`/`chmod` at volume creation, persist on the volume entry), fixes a common support issue.
+- **Detected:** 2026-08-14
+
+## Named Shared Storage Entries (Cross-App Volumes + `storage:exec`)
+- **Source:** Dokku
+- **Description:** The `storage` plugin registers globally-unique named entries (`storage:create <name>`, DNS-1123) that any number of apps can mount with per-app details (`--container-dir`, `--phase`, `--volume-subpath`, `--volume-readonly`, `--volume-options`, `--process-type`). Entries carry `annotations`/`labels` for backup tooling (Velero/Longhorn) and support `storage:exec <name> [-- <cmd>]`, which runs a command in a temporary container that mounts the entry (data migration, inspection, repair without an app).
+- **Why add to Tengiz:** Tengiz's implemented volume management is per-app `host:container` mounts; there is no way to attach one volume to several apps (e.g. a shared asset dir), declare metadata for external backup tools, or run a migration container against a volume without deploying an app. `tengiz volume create <name>` + `tengiz volume attach <name> <app> --readonly` + `tengiz volume exec <name> -- <cmd>` completes the story. The `--chown`/`--mode` feature (above) slots into the same entry model. Medium effort, high ops value.
+- **Detected:** 2026-08-14
+
+## Registry Image Self-Healing (Auto-Pull After Local Prune)
+- **Source:** Dokku
+- **Description:** With `registry:set <app> push-on-release true`, the remote registry is treated as the canonical image store: if a needed local image tag disappears (docker image prune cron, host reboot, manual removal), any subsequent operation that requires it (`ps:restart`, `ps:scale`, `run`, `domains:add`, `certs:add`) automatically pulls the missing tag back from the registry, honoring per-app registry credentials.
+- **Why add to Tengiz:** Tengiz's "Docker Housekeeping" and "Granular Docker Prune Operations" will clean images aggressively, and a pruned current image silently breaks `tengiz restart`/`rollback` ("no such image"). When `registry.push_on_release: true`, Tengiz should record the pushed tag and auto-`docker pull` it on any operation that finds the image missing locally — turning housekeeping from a foot-gun into a no-op. Low effort (missing-image detection + pull fallback in `runtime`), closes a real operational trap.
+- **Detected:** 2026-08-14
+
+## Image-Committed Pre-Deploy Phase + One-Time Post-Deploy (`scripts.dokku.*`)
+- **Source:** Dokku
+- **Description:** Dokku's deployment tasks add two distinct `app.json` phases beyond plain hooks: `scripts.dokku.predeploy` runs inside the built image AFTER the build and the resulting filesystem changes are **committed to the image** (bundling assets, installing a package, copying a binary that must ship in the artifact); `scripts.postdeploy` runs once after the app is created, NOT on subsequent deploys (setting up OAuth clients, seeding a test DB). `Procfile release` runs after build but before container scheduling with no image persistence. Failed tasks fail the deploy without touching running containers.
+- **Why add to Tengiz:** "Pre-Deploy Hooks" and "Extended Hook System" run commands but don't distinguish the phase semantics — none of them mutate-and-commit the built image (impossible today without a re-build), and none offer "run exactly once on first deploy". `scripts.dokku.predeploy` (image-commit step in the deploy pipeline) and `scripts.postdeploy` (one-shot, persisted as a flag on the AppEntry) are genuinely new capabilities. `.tengiz.yaml`'da `deploy.predeploy_commit: true` + a `once` flag on post-deploy hooks.
+- **Detected:** 2026-08-14
+
+## Proxy Config Rebuild on Container IP Change (Runtime Self-Healing)
+- **Source:** Dokku
+- **Description:** Dokku runs a background `dokku-event-listener` that watches container state and auto-rebuilds the app's proxy config whenever a web container's IP changes after a restart, and triggers an app rebuild if a process exceeds its restart count. Keeps routing accurate without operator intervention after crashes, restarts, or Docker-level IP reassignment.
+- **Why add to Tengiz:** Tengiz's proxy caches hostnames → container endpoints; after a container restart Docker may assign a new IP, and the cached route silently points at a dead address until the next deploy. "Stale Container Detection" and "Server Reboot Recovery" are deploy/reboot-time; this is continuous runtime reconciliation. Implementation: a goroutine subscribing to `docker events` (`type=container,event=start/stop/die`) that looks up affected apps and refreshes the proxy route map (and increments restart counters). Low-medium effort, high reliability value.
+- **Detected:** 2026-08-14
+
+## Sanitized Container Inspect (`ps:inspect`)
+- **Source:** Dokku
+- **Description:** `ps:inspect <app>` runs `docker inspect` across the app's containers with sensitive fields (env vars, mounted secrets, full command args) redacted, producing output safe to copy into tickets, logs, and support threads.
+- **Why add to Tengiz:** Debugging "why is this container broken" always starts with `docker inspect`, but a raw dump leaks `DATABASE_URL`, API keys, and secrets to anyone the output is shared with. `tengiz ps inspect <app>` sanitizing `Config.Env`, `Config.Cmd`, and mounts before printing gives operators a shareable diagnostic. Complements "App Report (Detailed Status)" which shows platform metadata, not raw container state. Low effort (recursive redaction of known sensitive keys), meaningful security value.
+- **Detected:** 2026-08-14
+
+## Private Repository Cloning Auth (netrc + SSH Host Allowlisting)
+- **Source:** Dokku
+- **Description:** For `git:sync` from private repos, Dokku manages HTTPS auth via `git:auth <host> <username> <password>` writing a `.netrc` entry, exposes `git:auth-status <host>` (idempotent state check without reading the file), and allows cloning over SSH by adding host keys with `git:allow-host <host>` to `known_hosts` plus `git:generate-deploy-key` / `git:public-key` for creating and sharing a dedicated ed25519 deploy key.
+- **Why add to Tengiz:** "Git-Sync Deployment" records the pull model, but without auth it only works on public repos — the private-repo case (the norm) is left as manual `.netrc`/`known_hosts` surgery on the host. `tengiz git auth add <host> <user>` (credential stored via the existing `secrets` encryption), `tengiz git auth-status <host>`, and `tengiz git allow-host <host>` make private-repo sync a first-class, auditable feature. Low effort (`.netrc`/`known_hosts` file management + `ssh-keygen`), unblocks the primary git-sync use case.
+- **Detected:** 2026-08-14
+
+## gRPC/HTTP-2 Proxy Support (`grpc`/`grpcs` Port Schemes)
+- **Source:** Dokku
+- **Description:** Dokku's port-mapping scheme supports `grpc`/`grpcs` as first-class schemes (`ports:add <app> grpc:50051:50051`), and the nginx proxy terminates/forwards gRPC (HTTP/2) traffic to the container accordingly — distinct from plain TCP/UDP exposure.
+- **Why add to Tengiz:** "Port Mapping Protocol Selection (TCP/UDP)" covers TCP/UDP passthrough but gRPC needs HTTP/2-aware proxying that a Go `httputil.ReverseProxy` must configure explicitly (`http2.ConfigureServer`, `h2c` upstream via `DialTLSContext`, no port rewrites in gRPC headers). Microservices and proto APIs on Tengiz today require running outside the proxy. A `scheme: grpc` port mapping teaching the proxy to handle HTTP/2 + h2c upstreams makes Tengiz usable for gRPC backends. Low-medium effort, distinct from existing TCP/UDP and HTTP support.
+- **Detected:** 2026-08-14
