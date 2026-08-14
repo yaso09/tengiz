@@ -86,6 +86,14 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("dry-run", false, "show reclaimable space without removing anything")
+	cleanupCmd.Flags().Bool("all", false, "prune all categories including volumes and all unused images")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped Tengiz containers")
+	cleanupCmd.Flags().Bool("images", false, "prune unused images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune the Docker build cache")
 }
 
 var rootCmd = &cobra.Command{
@@ -1159,6 +1167,109 @@ Examples:
 
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Prune unused Docker resources to reclaim disk space",
+	Long: `Prune unused Docker resources (stopped containers, images, volumes, networks,
+and build cache) to reclaim disk space.
+
+Tengiz-managed containers are protected: only stopped containers carrying the
+tengiz-app label are removed, and running containers are never touched.
+
+Categories (default: containers, images, networks, build-cache):
+  --containers  prune stopped Tengiz containers
+  --images      prune unused images (add --all to remove all unused images)
+  --volumes     prune unused volumes (never pruned by default)
+  --networks    prune unused networks
+  --build-cache prune the Docker build cache
+
+Use --dry-run to preview reclaimable space without removing anything.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts := parseCleanupOptions(cmd)
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+		_, err = executeCleanup(cmd.Context(), rt, opts)
+		return err
+	},
+}
+
+func parseCleanupOptions(cmd *cobra.Command) runtime.PruneOptions {
+	all, _ := cmd.Flags().GetBool("all")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	containers, _ := cmd.Flags().GetBool("containers")
+	images, _ := cmd.Flags().GetBool("images")
+	volumes, _ := cmd.Flags().GetBool("volumes")
+	networks, _ := cmd.Flags().GetBool("networks")
+	buildCache, _ := cmd.Flags().GetBool("build-cache")
+
+	var cats []runtime.PruneCategory
+	switch {
+	case all:
+		cats = runtime.AllPruneCategories
+	case containers || images || volumes || networks || buildCache:
+		if containers {
+			cats = append(cats, runtime.PruneContainers)
+		}
+		if images {
+			cats = append(cats, runtime.PruneImages)
+		}
+		if volumes {
+			cats = append(cats, runtime.PruneVolumes)
+		}
+		if networks {
+			cats = append(cats, runtime.PruneNetworks)
+		}
+		if buildCache {
+			cats = append(cats, runtime.PruneBuildCache)
+		}
+	default:
+		cats = []runtime.PruneCategory{
+			runtime.PruneContainers,
+			runtime.PruneImages,
+			runtime.PruneNetworks,
+			runtime.PruneBuildCache,
+		}
+	}
+
+	return runtime.PruneOptions{
+		Categories: cats,
+		AllImages:  all,
+		DryRun:     dryRun,
+	}
+}
+
+func executeCleanup(ctx context.Context, rt runtime.Manager, opts runtime.PruneOptions) (runtime.PruneReport, error) {
+	report, err := rt.Prune(ctx, opts)
+	if err != nil {
+		return report, err
+	}
+	printCleanupReport(report)
+	return report, nil
+}
+
+func printCleanupReport(report runtime.PruneReport) {
+	if report.DryRun {
+		fmt.Println("[tengiz] dry-run: nothing was removed")
+		fmt.Printf("%-12s %-8s %-8s %-12s %-12s\n", "TYPE", "TOTAL", "ACTIVE", "SIZE", "RECLAIMABLE")
+		for _, row := range report.DfRows {
+			fmt.Printf("%-12s %-8s %-8s %-12s %-12s\n", row.Type, row.Total, row.Active, row.Size, row.Reclaimable)
+		}
+		fmt.Println("[tengiz] run 'tengiz cleanup' to reclaim this space")
+		return
+	}
+	for _, res := range report.Results {
+		if res.Err != nil {
+			fmt.Printf("[tengiz] %-12s error: %v\n", res.Category+":", res.Err)
+			continue
+		}
+		fmt.Printf("[tengiz] %-12s reclaimed %s\n", res.Category+":", res.Reclaimed)
+	}
+	fmt.Println("[tengiz] cleanup complete")
 }
 
 var gitCmd = &cobra.Command{
