@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"reflect"
 	"testing"
 )
@@ -110,4 +111,22 @@ func TestExtractTotalSpaceNoTotal(t *testing.T) {
 	if got != "1.5GB" {
 		t.Errorf("extractTotalSpace = %q, want %q", got, "1.5GB")
 	}
+}
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	result, err := m.Cleanup(context.Background(), CleanupOptions{})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if result == nil {
+		t.Fatal("Cleanup() returned nil result")
+	}
+	if result.DryRun {
+		t.Error("DryRun = true, want false")
+	}
+}
+
+func TestDockerRuntimeImplementsManager(t *testing.T) {
+	var _ Manager = (*dockerRuntime)(nil)
 }
