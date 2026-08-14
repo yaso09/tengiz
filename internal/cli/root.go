@@ -65,6 +65,16 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("dry-run", false, "preview cleanup actions without deleting anything")
+	cleanupCmd.Flags().Bool("containers", true, "remove stale stopped Tengiz containers")
+	cleanupCmd.Flags().Bool("images", true, "remove dangling and old per-app images")
+	cleanupCmd.Flags().Bool("build-cache", true, "prune BuildKit build cache")
+	cleanupCmd.Flags().Bool("volumes", true, "prune dangling volumes")
+	cleanupCmd.Flags().Bool("networks", true, "prune unused networks")
+	cleanupCmd.Flags().Int("keep", 5, "number of images to keep per app")
+	cleanupCmd.Flags().Bool("full", false, "run full docker system prune -a -f --volumes (removes ALL unused resources)")
+	cleanupCmd.Flags().Bool("yes", false, "skip confirmation prompt")
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
@@ -1013,6 +1023,163 @@ var rollbackCmd = &cobra.Command{
 		fmt.Printf("[tengiz] rolled back %s to deployment %s (port %d)\n", appName, prevDep.ID, newPort)
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Reclaim disk space by pruning stale containers, images, build cache, volumes, and networks",
+	Long: `Reclaim disk space on the Docker host. By default this:
+  - removes stopped Tengiz containers that are not the currently deployed version
+  - removes dangling images and old per-app images beyond --keep N
+  - prunes the BuildKit build cache
+  - prunes dangling volumes and unused networks
+
+Everything is scoped to Tengiz-managed resources via labels. Running containers
+and the container backing the current deployment are always protected.
+
+Use --dry-run to preview what would be removed without deleting anything.
+Use --full to run "docker system prune -a -f --volumes", which removes ALL
+unused resources on the host including non-Tengiz ones (requires confirmation).`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		doContainers, _ := cmd.Flags().GetBool("containers")
+		doImages, _ := cmd.Flags().GetBool("images")
+		doBuildCache, _ := cmd.Flags().GetBool("build-cache")
+		doVolumes, _ := cmd.Flags().GetBool("volumes")
+		doNetworks, _ := cmd.Flags().GetBool("networks")
+		keepN, _ := cmd.Flags().GetInt("keep")
+		full, _ := cmd.Flags().GetBool("full")
+		yes, _ := cmd.Flags().GetBool("yes")
+		if keepN <= 0 {
+			keepN = 5
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+		store := config.NewStoreWithEnv(dataDir, env)
+
+		if !dryRun && !yes {
+			fmt.Print("[tengiz] This will delete stale containers, old images, build cache, and unused volumes/networks. Continue? [y/N] ")
+			var resp string
+			fmt.Scanln(&resp)
+			resp = strings.ToLower(strings.TrimSpace(resp))
+			if resp != "y" && resp != "yes" {
+				fmt.Println("[tengiz] cleanup cancelled")
+				return nil
+			}
+		}
+
+		if df, err := rt.SystemDF(cmd.Context()); err != nil {
+			log.Printf("[tengiz] warning: docker system df failed: %v", err)
+		} else {
+			fmt.Println(df)
+		}
+
+		if full {
+			if dryRun {
+				fmt.Println("[tengiz] [dry-run] would run: docker system prune -a -f --volumes")
+			} else {
+				out, err := rt.Prune(cmd.Context(), runtime.PruneSystem)
+				if err != nil {
+					return fmt.Errorf("system prune: %w", err)
+				}
+				fmt.Print(out)
+			}
+			fmt.Println("[tengiz] cleanup complete")
+			return nil
+		}
+
+		if doContainers {
+			containers, err := rt.ListTengizContainers(cmd.Context())
+			if err != nil {
+				return fmt.Errorf("list containers: %w", err)
+			}
+			protected := protectedContainerNames(store, env)
+			cleanable := runtime.FilterCleanableContainers(containers, protected)
+			for _, c := range cleanable {
+				if dryRun {
+					fmt.Printf("[tengiz] [dry-run] would remove stale container: %s\n", c.Name)
+					continue
+				}
+				fmt.Printf("[tengiz] removing stale container: %s\n", c.Name)
+				if err := rt.Remove(cmd.Context(), c.Name); err != nil {
+					log.Printf("[tengiz] warning: remove %s: %v", c.Name, err)
+				}
+			}
+		}
+
+		if doImages {
+			apps, _ := store.ListApps()
+			for _, app := range apps {
+				if dryRun {
+					fmt.Printf("[tengiz] [dry-run] would keep last %d images for %s\n", keepN, app.Name)
+					continue
+				}
+				if err := rt.KeepLastNImages(cmd.Context(), app.Name, keepN); err != nil {
+					log.Printf("[tengiz] warning: image cleanup for %s: %v", app.Name, err)
+				}
+			}
+			if dryRun {
+				fmt.Println("[tengiz] [dry-run] would prune dangling images")
+			} else {
+				out, err := rt.Prune(cmd.Context(), runtime.PruneDanglingImages)
+				if err != nil {
+					log.Printf("[tengiz] warning: dangling image prune: %v", err)
+				} else {
+					fmt.Print(out)
+				}
+			}
+		}
+
+		pruneStep := func(label string, target runtime.PruneTarget) {
+			if dryRun {
+				fmt.Printf("[tengiz] [dry-run] would prune %s\n", label)
+				return
+			}
+			out, err := rt.Prune(cmd.Context(), target)
+			if err != nil {
+				log.Printf("[tengiz] warning: %s prune: %v", label, err)
+				return
+			}
+			fmt.Printf("[tengiz] %s pruned:\n", label)
+			fmt.Print(out)
+		}
+
+		if doBuildCache {
+			pruneStep("build cache", runtime.PruneBuildCache)
+		}
+		if doVolumes {
+			pruneStep("dangling volumes", runtime.PruneVolumes)
+		}
+		if doNetworks {
+			pruneStep("unused networks", runtime.PruneNetworks)
+		}
+
+		fmt.Println("[tengiz] cleanup complete")
+		return nil
+	},
+}
+
+func protectedContainerNames(store *config.Store, env string) map[string]bool {
+	protected := make(map[string]bool)
+	apps, _ := store.ListApps()
+	for _, app := range apps {
+		name := runtime.ContainerName(app.Name, env)
+		protected[name] = true
+		if app.DeploymentSuffix != "" {
+			protected[fmt.Sprintf("%s-%s", name, app.DeploymentSuffix)] = true
+		}
+	}
+	previews, _ := store.ListAllPreviews()
+	for _, p := range previews {
+		if p.ContainerName != "" {
+			protected[p.ContainerName] = true
+		}
+	}
+	return protected
 }
 
 var buildLogsCmd = &cobra.Command{

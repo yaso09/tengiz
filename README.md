@@ -235,6 +235,24 @@ Rollback to the previous deployment. The previous active container is started on
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup`
+
+Reclaim disk space on the Docker host by pruning stale containers, images, build cache, volumes, and networks. All operations are label-scoped to Tengiz-managed resources; running containers and the container backing the current deployment are always protected.
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Preview what would be removed without deleting anything |
+| `--containers` | Remove stale stopped Tengiz containers (default: `true`) |
+| `--images` | Remove dangling images and old per-app images beyond `--keep` (default: `true`) |
+| `--build-cache` | Prune the BuildKit build cache (default: `true`) |
+| `--volumes` | Prune dangling volumes (default: `true`) |
+| `--networks` | Prune unused networks (default: `true`) |
+| `--keep N` | Number of images to keep per app (default: `5`) |
+| `--full` | Run `docker system prune -a -f --volumes` — removes ALL unused resources including non-Tengiz ones (off by default) |
+| `--yes` | Skip the confirmation prompt |
+
+Asks for confirmation before deleting anything unless `--dry-run` or `--yes` is passed. Also prints a `docker system df` disk-usage report. Cleanup is env-scoped via the global `--env` flag.
+
 ### `tengiz domain`
 
 Manage custom domains for applications.

@@ -515,7 +515,7 @@ func (r *dockerRuntime) CreateVersioned(ctx context.Context, cfg *types.AppConfi
 		"--name", containerName,
 		"--label", fmt.Sprintf("%s=%s", labelKey, cfg.Name),
 		"--label", fmt.Sprintf("%s=%s", envLabelKey, cfg.Environment),
-		"--label", fmt.Sprintf("tengiz-deployment=%s", suffix),
+		"--label", fmt.Sprintf("%s=%s", deploymentLabelKey, suffix),
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", port, internalPort),
 		"--restart", "no",
 	}
