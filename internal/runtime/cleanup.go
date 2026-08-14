@@ -38,7 +38,6 @@ func buildPruneCommands(opts PruneOptions) []pruneCommand {
 		if opts.All {
 			args = append(args, "-a")
 		}
-		args = append(args, "--filter", "reference!=tengiz-apps/*")
 		cmds = append(cmds, pruneCommand{category: "image", label: "images", args: args})
 	}
 	if opts.Volumes {
@@ -52,7 +51,7 @@ func buildPruneCommands(opts PruneOptions) []pruneCommand {
 		cmds = append(cmds, pruneCommand{
 			category: "network",
 			label:    "networks",
-			args:     []string{"prune", "-f", "--filter", "label!=tengiz-app"},
+			args:     []string{"prune", "-f"},
 		})
 	}
 	if opts.BuildCache {
@@ -71,7 +70,7 @@ func buildPruneListCommands(opts PruneOptions) []pruneCommand {
 		cmds = append(cmds, pruneCommand{
 			category: "container",
 			label:    "containers",
-			args:     []string{"ls", "-a", "--filter", "status=exited", "--filter", "label!=tengiz-app"},
+			args:     []string{"ls", "-a", "--filter", "status=exited"},
 		})
 	}
 	if opts.Images {
@@ -85,14 +84,14 @@ func buildPruneListCommands(opts PruneOptions) []pruneCommand {
 		cmds = append(cmds, pruneCommand{
 			category: "volume",
 			label:    "volumes",
-			args:     []string{"ls", "--filter", "label!=tengiz-app"},
+			args:     []string{"ls"},
 		})
 	}
 	if opts.Networks {
 		cmds = append(cmds, pruneCommand{
 			category: "network",
 			label:    "networks",
-			args:     []string{"ls", "--filter", "label!=tengiz-app"},
+			args:     []string{"ls"},
 		})
 	}
 	if opts.BuildCache {
@@ -146,5 +145,21 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 }
 
 func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (*PruneResult, error) {
-	return &PruneResult{DryRun: opts.DryRun}, nil
+	var cmds []pruneCommand
+	if opts.DryRun {
+		cmds = buildPruneListCommands(opts)
+	} else {
+		cmds = buildPruneCommands(opts)
+	}
+	result := &PruneResult{DryRun: opts.DryRun, Outputs: make(map[string]string, len(cmds))}
+	for _, c := range cmds {
+		args := append([]string{c.category}, c.args...)
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("docker %s: %w\n%s", c.label, err, string(out))
+		}
+		result.Outputs[c.label] = string(out)
+	}
+	return result, nil
 }
