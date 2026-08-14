@@ -23,6 +23,7 @@
 | `encrypt` | AES-256-GCM encrypt/decrypt, key generation, key file load/save |
 | `secrets` | `Manager` struct: encrypted per-app secrets storage in `secrets-{env}.json`. `Provider` interface with `LocalProvider` (file-based), `VaultProvider`, `DopplerProvider` backends. `NewManagerFromConfig` for provider selection. `ResolveInterpolations` for `[[secret.NAME]]` env var expansion. `RotateKey` on `LocalProvider` for re-encryption. |
 | `notify` | Multi-channel notification system. `Notifier` interface with Discord/Slack/Email backends. `Manager` with `Send`/`SendAsync`, `LoadConfig`/`SaveConfig`. Per-environment config in `notifications-{env}.json`. |
+| `cleanup` | Docker housekeeping. `Manager` interface with `Cleanup(ctx, opts) (*Report, error)`. `NewDocker()` = exec-based impl, `NewStub()` = test mock. Removes stopped containers (Tengiz containers protected via `tengiz-app` label), dangling images, unused volumes, and unused networks. |
 | `types` | Shared: `AppConfig`, `AppStatus`, `AppEntry`, `PortEntry`, `DeploymentEntry`, `DeploymentStatus`. `AppConfig.Environment` field, `AppConfig.Secrets` field. |
 
 ## Commands
@@ -41,6 +42,7 @@ tengiz init [name]    → create .tengiz.yaml
 tengiz deploy [dir]   → detect, build, run container
 tengiz proxy [-a app] → start reverse proxy on :8080 (use -a to route all traffic to one app)
 tengiz ps             → list apps from Docker
+tengiz cleanup [--containers|--images|--volumes|--networks] → remove unused Docker resources (Tengiz containers protected)
 tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] app  → stream logs with filtering
 tengiz build-logs <app> [deployment-id] → show build logs from previous deployments (--tail N)
 tengiz run <app> <cmd> [-i] [-e KEY=VALUE] → one-off command in temporary container
