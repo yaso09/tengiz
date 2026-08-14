@@ -1754,3 +1754,113 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** `DatabaseBackupFileValidator.php` validates uploaded backup files before restore: allowed-extension whitelist (`sql`, `gz`, `zip`, `tar`, `bson`, etc.), dangerous-extension blocklist (`asp`, `exe`, `js`, `sh`, etc.), and content scanning of gzip-decompressed SQL for PostgreSQL restore directives that could lead to OS command execution (e.g. `program` COPY / `\!` shell). Chunked upload up to 10 GiB.
 - **Why add to Tengiz:** "Database Backup Import/Upload" (#184) opens a security surface: restoring an untrusted SQL file can execute arbitrary shell commands via Postgres `COPY ... PROGRAM` or `\!` meta-commands. A validator that checks extensions and scans decompressed dumps for dangerous directives — before piping to `psql`/`pg_restore` via `docker exec` — is essential hardening. Low effort (Go extension + content scanning), closes a real RCE-adjacent vector.
 - **Detected:** 2026-08-14
+
+---
+
+## File-Type Mounts (Inline Config File Injection into Containers)
+- **Source:** Dokploy
+- **Description:** A third mount kind beyond bind/volume: `mount.type = "file"`. Users manage a config file's inline `content` (stored in DB), which is written to `<appDir>/files/<filePath>` and bind-mounted into the container at `mountPath` at deploy time (`services/mount.ts` — `createFileMount`/`updateFileMount`/`deleteFileMount`, content base64-piped over SSH for remote servers). One mount row covers all 8 service types.
+- **Why add to Tengiz:** Tengiz's implemented "Persistent Storage (Volume Management)" covers bind and named-volume mounts but has no way to manage a config file's *content* and inject it into the container. This is distinct from "Patches" (#118) which modifies files at build time — file mounts inject files at runtime (nginx.conf, `.env`, `application.yml`, `/etc/*.conf`). `tengiz mount add-file <app> --path /etc/app/config.yml --from ./local.yml` writes the managed file and bind-mounts it on `docker run`. Low effort (one extra mount type in `types.AppEntry.Mounts` + file write in the deploy pipeline), high value for config-driven apps.
+- **Detected:** 2026-08-14
+
+## Full-Context Rollback (Configuration Snapshot Restore)
+- **Source:** Dokploy
+- **Description:** Dokploy's `rollbacks.ts` captures a **`fullContext` JSONB snapshot** at deploy time — the complete Application + Environment + Project + Mounts + Ports + Registry (with resolved vault refs and registry credentials). `rollback()` re-creates/updates the Docker service from that snapshot, including `docker login` to the rollback registry and a forced `ForceUpdate`. Rollback restores not just the image but the entire configuration state.
+- **Why add to Tengiz:** The implemented "Rollback Sistemi" is image-based only — rolling back to a previous image while keeping *current* env vars/domains/mounts can produce a broken mix (e.g. new `DATABASE_URL` with old code, or a domain that no longer maps). A config-aware rollback restores the full AppEntry (env, domains, volumes, resource limits, secrets refs) alongside the image. Implementation: snapshot the serialized AppEntry + deployment record at each deploy into `~/.tengiz/rollbacks/<app>/<version>.json`, and have `tengiz rollback` restore both image tag and config atomically. Complements "Container Snapshot System" (#80) which is runtime-state; this is configuration-state.
+- **Detected:** 2026-08-14
+
+## Volume & Container File Manager (Browse / Edit / Upload Files)
+- **Source:** Dokploy
+- **Description:** A mini file manager for named volumes and running containers. Volume operations (`services/docker-volume.ts`) mount the volume into a throwaway **busybox container**: `listVolumeFiles` (`ls -1Ap`), `readVolumeFile` (`cat | head -c 512KB | base64`, returns truncated flag), `writeVolumeFile` (base64 pipe → `printf | base64 -d >`), `deleteVolumeFile` (`rm -rf`). Container operations (`services/docker.ts` — `listContainerFiles`/`readContainerFile`/`writeContainerFile`/`deleteContainerFile` via `docker exec`) plus `uploadFileToContainer` (base64 → temp file → `docker cp`, with destination-path regex validation to block shell metacharacters and graceful "no shell utilities" detection for exit codes 126/127).
+- **Why add to Tengiz:** Tengiz has `tengiz volume` CRUD (#102) but zero file-level access — operators must hand-run `docker run --rm -v ... busybox` or `docker cp` to inspect logs, fix a config, or copy files. `tengiz volume ls <vol>`, `tengiz volume read <vol> <path>`, `tengiz volume write <vol> <path>`, and `tengiz cp <app> <src> <dst>` complete the operational story with the same `os/exec` busybox pattern. Low effort, very high ops value for debugging and hot-fixes.
+- **Detected:** 2026-08-14
+
+## DNS Provider API Integration (Automatic Record Provisioning)
+- **Source:** Dokploy
+- **Description:** `services/dns-provider.ts` + `utils/dns/` manage first-class DNS provider entities (Cloudflare, Route53) with a unified `DnsClient` interface: `testDnsProviderConnection`, `listZones`, `listRecords`, `createDnsProviderRecord` (via `upsertRecord` — looks up by type+name then PUT or POST), `updateDnsProviderRecord`, `deleteDnsProviderRecord`. Secrets are masked on read (`********`) and idempotently preserved on update. Org-scoped uniqueness on provider names.
+- **Why add to Tengiz:** The recorded "DNS Record Hints + DNS Validation" (#? Coolify, 2026-08-14) is *read-only* validation. Dokploy goes further: **actually creating/updating A/CNAME records** via provider APIs so a custom domain is fully provisioned end-to-end. `tengiz domain add myapp.com --dns-provider cloudflare` would add the domain AND create the DNS record pointing at the server — eliminating the manual DNS step that trips every self-hoster. Implementation: a `DnsProvider` interface (Cloudflare first, Route53 second) with token storage in `~/.tengiz/providers.json` (reusing the existing encryption). Medium effort, high value.
+- **Detected:** 2026-08-14
+
+## Service-Level Forward-Auth SSO (OAuth2-Proxy Style App Protection)
+- **Source:** Dokploy
+- **Description:** `services/proprietary/forward-auth.ts` + `setup/forward-auth-setup.ts` + `utils/traefik/forward-auth.ts` deploy a per-server OAuth2-proxy style forward-auth container. Any app domain can set `forwardAuthEnabled: true`, which wires a `forward-auth-<app>-<key>` Traefik middleware proxying to the forward-auth service. Users hitting a protected app are redirected through OIDC login; on success the proxy injects identity headers before forwarding to the app.
+- **Why add to Tengiz:** "OIDC/OAuth SSO" (#157) covers platform-admin authentication, and Juno's auth-as-a-service covers building auth into apps — but neither protects *existing* apps that don't implement auth themselves. Forward-auth adds SSO in front of any legacy/internal app without code changes. Implementation: a small `tengiz forward-auth enable <app> --oidc-issuer ... --client-id ...` that runs an OAuth2-proxy container and adds a proxy middleware checking the session cookie + injecting `X-Auth-*` headers. Distinct from #157 (platform login) and #81 (app-embedded auth).
+- **Detected:** 2026-08-14
+
+## SAML Single Sign-On (Enterprise IdP Support)
+- **Source:** Dokploy
+- **Description:** `services/proprietary/sso.ts` supports **SAML** providers in addition to OIDC: entryPoint, certificate, callbackUrl, full IdP/SP metadata, assertion encryption, signature/digest algorithms, and attribute mapping (`overrideUserInfo`). Paired with SCIM (below) it gives enterprise identity lifecycle.
+- **Why add to Tengiz:** "OIDC/OAuth Single Sign-On" (#157) covers OIDC only. SAML is the standard for corporate identity providers (Okta, Azure AD, Google Workspace in enterprise mode) — a hard requirement for enterprise adoption. Tengiz's proxy could terminate SAML assertions at `/auth/saml/callback` and issue platform session tokens. Implementation via `github.com/crewjam/saml` or `github.com/auth0/go-jwt-middleware`-style assertion parsing. Medium-high effort, unblocks enterprise sales.
+- **Detected:** 2026-08-14
+
+## SCIM User Provisioning (Automated Identity Sync)
+- **Source:** Dokploy
+- **Description:** `lib/auth.ts` wires the `better-auth/scim` plugin (SCIM 2.0 server endpoints). Combined with SAML/OIDC SSO it automatically provisions, updates, and deprovisions users/groups in the platform from the IdP's SCIM bridge (Okta, Entra ID, Google Workspace) using a per-org `scim_token` (`scim_provider` table). No manual user management once connected.
+- **Why add to Tengiz:** When SSO (#157) is enabled, users still need to be onboarded manually — a scaling problem for teams. SCIM automates the lifecycle: a new hire granted access in Okta is automatically a user with the right role; a deactivated employee loses access on the next sync. `tengiz sso enable --scim` exposes a SCIM endpoint on the platform HTTP server; the token is stored encrypted. Medium effort (SCIM 2.0 resource endpoints: Users/Groups CRUD + token auth), high enterprise value.
+- **Detected:** 2026-08-14
+
+## Compose Isolation & Name Randomization (Blueprint-Style Stack Deploys)
+- **Source:** Dokploy
+- **Description:** `utils/docker/compose.ts` implements two mechanisms: (1) `randomizeComposeFile`/`randomizeSpecificationFile` — appends a random 8-hex suffix to every service, volume, network, secret, and config name (handling `depends_on`, `links`, `volumes_from`, `extends`, bind-mount strings with `:ro/:z/:Z`) so multiple instances of the same compose can coexist without collisions; (2) `isolatedDeployment` + `isolatedDeploymentsVolume` — each deployment runs in isolation with volume-name prefixing, enabling blue-green style stack redeploys (`addAppNameToPreventCollision`, `randomizeIsolatedDeploymentComposeFile`).
+- **Why add to Tengiz:** Tengiz's "Docker Compose Import" (#91) deploys a single compose as-is; two apps importing the same compose (or re-deploying with shared service names) collide on container/volume/network names. Randomized suffixes give per-instance isolation, and isolated deployments bring zero-downtime swap semantics (implemented for single apps) to compose stacks. Implementation: a Go `compose/randomize.go` that rewrites the parsed YAML tree before `docker compose up`. Medium effort, high value for multi-instance and blue-green compose workflows.
+- **Detected:** 2026-08-14
+
+## Docker Daemon Contention Management (Wait-for-Idle Execution)
+- **Source:** Dokploy
+- **Description:** `dockerSafeExec()` in `utils/docker/utils.ts` wraps every Docker command in a shell loop that polls `ps -eo args | awk '$1 ~ /docker$/'` every 10s (max 300s) and waits until the Docker daemon is idle before executing — avoiding daemon contention when many builds/deploys run concurrently on a single host.
+- **Why add to Tengiz:** Tengiz's exec-based runtime (`os/exec`) issues Docker CLI commands directly with no backpressure; simultaneous deploys, health restarts, and cleanups can overwhelm the daemon (timeouts, `cannot connect` flakes). A shared `dockerSafeExec` wrapper around `runtime` command execution — wait-if-busy with a configurable timeout — makes concurrent operations predictable on single-node instances. Complements "Build Queue with Dedup" (#124) at the daemon level. Low effort, high reliability value.
+- **Detected:** 2026-08-14
+
+## Network Subnet IP Exhaustion Monitoring (Docker "No Available IP" Detection)
+- **Source:** Dokploy
+- **Description:** `server-health.ts` `getNetworksIpUsage` computes per-network capacity (`2^(32-prefix) - 2` via `getSubnetCapacity`), counts attached containers (with `verbose:true` inspect for overlay networks), and returns utilization % sorted descending — surfacing the classic Docker failure mode where the default bridge/overlay subnet runs out of IPs and new containers fail with "could not find an available IP".
+- **Why add to Tengiz:** As Tengiz hosts accumulate apps, the default `docker0`/overlay subnets fill up and deploys start failing intermittently — a notoriously hard-to-diagnose error. `tengiz network usage` lists each network with capacity/utilization and alerts (through the alert system, #197) when a network exceeds ~80%. Implementation: parse `docker network inspect` subnets + count attached containers via `docker network inspect <net>`. Low effort, prevents a silent production outage class.
+- **Detected:** 2026-08-14
+
+## Server Health Audit & Security Posture Check
+- **Source:** Dokploy
+- **Description:** Two complementary diagnostics. `server-health.ts` `buildHealthScript` — a single read-only bash script capturing in one SSH round-trip: container/service counts, memory/CPU, **inotify limits** (`/proc/sys/fs/inotify/max_user_watches/instances/queued_events` + current usage), disk, Docker daemon config, and **journalctl -u docker error mining** (oom, conntrack, no space, address already in use, no available ip). `setup/server-audit.ts` — validates server security posture: UFW installed/active/default-incoming, SSH config (`PermitRootLogin`, `PasswordAuthentication`, `PubkeyAuthentication`).
+- **Why add to Tengiz:** "Server Monitoring" (#73) tracks usage over time and "Pre-Install Env Validation" (#114) checks prerequisites — neither explains *why* deploys suddenly fail. inotify exhaustion (file-watcher apps on many containers) and daemon error patterns are the top silent killers on single-server hosts. `tengiz server audit` runs the read-only script, prints an actionable report, and feeds the alert system. Low effort (pure bash + parsing), high diagnostic value.
+- **Detected:** 2026-08-14
+
+## Deploy from Archive (Zip/Tar Upload)
+- **Source:** Dokploy
+- **Description:** The `drop` source type (`utils/builders/drop.ts` — `unzipDrop`) lets users upload a `.zip` containing their app; Dokploy extracts it with AdmZip (filtering `__MACOSX` entries, detecting a single-root folder), writes the code to the app dir (SFTP for remote servers), and builds normally. Complements the git-based and local-directory sources.
+- **Why add to Tengiz:** Not every user has git (or wants a repo) for a deploy — designers uploading a build artifact, or CI exporting a zip. `tengiz deploy app.zip` (and the existing tar path already referenced by #89's "For tar deploy, falls back to SHA256 of archive") gives a source-type-agnostic entry point alongside the current directory deploy. Implementation: an `archive` extract step in the deploy pipeline (`archive/zip` + `archive/tar` stdlib). Low effort, fills the non-git deploy gap.
+- **Detected:** 2026-08-14
+
+## Preview Deployment TTL (Auto-Expiry Without Webhook)
+- **Source:** Dokploy
+- **Description:** `preview_deployments` carries an `expiresAt` field — preview environments can be set to expire after a TTL, not only when the PR-close webhook fires. Combined with `previewLimit` (max concurrent previews, default 3) and `previewRequireCollaboratorPermissions` for access gating.
+- **Why add to Tengiz:** Tengiz's implemented "Preview Deployments" clean up only on PR-close webhook receipt — if the event is missed (recorded "Orphaned Preview Container Garbage Collection" addresses that) or a preview is simply long-lived, it consumes ports/memory indefinitely. `preview.ttl: 72h` in AppConfig auto-expires previews on a timer, complementing webhook cleanup with time-based cleanup. Low effort (store `expiresAt` on the preview entry + a ticker sweep), complements #2 and the orphan GC.
+- **Detected:** 2026-08-14
+
+## SPA Fallback Routing (Client-Side Routing Support for Static Builds)
+- **Source:** Dokploy
+- **Description:** `utils/builders/static.ts` — when deploying a static SPA, writes an nginx `try_files $uri $uri/ /index.html` config so client-side routes (React Router, Vue Router, SvelteKit fallback) work after a hard refresh/deep link instead of returning 404. Also writes `.dockerignore` excluding `.git`/`.env` and uses `nginx:alpine`.
+- **Why add to Tengiz:** Tengiz's `static` framework detection serves files but a deep link like `/dashboard` on a client-side-routed app returns 404 unless the framework build outputs a pre-rendered file. A `static.spa: true` option generating a `try_files ... /index.html` nginx config makes SPA deployments just work. Complements "Build Precompression" (#86) and the existing static builder. Very low effort (one nginx config branch), high correctness value.
+- **Detected:** 2026-08-14
+
+## Docker Event Audit Feed (`docker events`)
+- **Source:** Dokploy
+- **Description:** `services/docker.ts` `getDockerEvents(minutes=15)` — runs `docker events --since/--until --format '{{json .}}'` and returns the recent engine event stream (container create/start/stop/die, image pull, network events) reversed chronologically with a `fetchedAt` timestamp. A live audit view of what Docker has been doing.
+- **Why add to Tengiz:** "Event Logging & Audit Trail" (#7) covers Tengiz-initiated operations, but not events from *outside* Tengiz — manual `docker` CLI use, third-party containers, health-restart noise. `tengiz events [--minutes 60]` surfaces engine-level activity for debugging "why did my container restart" and detecting unauthorized Docker access. Implementation: wrap `docker events --since ... --until ... --format json`. Very low effort, complements #7.
+- **Detected:** 2026-08-14
+
+## Port Conflict Detection (Host-Level Listener Check)
+- **Source:** Dokploy
+- **Description:** `settings.ts` `checkPortInUse(port)` — a two-stage check: (1) iterate `docker ps -a`, run `docker port <name>` and grep for the target port (excluding Dokploy's own proxy); (2) spawn an ephemeral `docker run --rm --net=host busybox nc -z 0.0.0.0 <port>` to detect **host-level, non-Docker listeners** that no Docker container would reveal. Returns the conflicting container name or host service.
+- **Why add to Tengiz:** Tengiz allocates ports from 9000-9999 persisted in `ports-{env}.json`, but a host process (or a container outside Tengiz) squatting on a port causes an opaque "port already allocated" failure. A pre-deploy/`tengiz doctor` port check using the busybox `nc` trick catches host listeners Docker can't see. Low effort, prevents a confusing failure class and complements "Config Validation" (#147).
+- **Detected:** 2026-08-14
+
+## Whitelabeling Configuration (Branded Platform UI)
+- **Source:** Dokploy
+- **Description:** `services/proprietary/whitelabeling.ts` + `web_server_settings` JSONB — customizable `appName`, `appDescription`, `logoUrl`, `loginLogoUrl`, `faviconUrl`, `customCss`, `metaTitle`, `errorPageTitle/Description`, `footerText`, `supportUrl`, `docsUrl`. The entire platform surface can be rebranded without forking.
+- **Why add to Tengiz:** For SaaS resellers and internal platforms, a Vercel-style alternative needs to appear under the customer's brand. Once the "Web Dashboard (Admin UI)" (#150) and proxy error pages (#21) exist, whitelabeling is the polish layer: `tengiz config set platform.whitelabel.app_name "Acme Deploy"` drives the dashboard title, logos, custom CSS, and branded error pages served by the proxy. Low effort (config-driven string substitution), meaningful for commercial adoption.
+- **Detected:** 2026-08-14
+
+## Passkey (WebAuthn) Admin Login
+- **Source:** Dokploy
+- **Description:** `lib/auth.ts` wires the `better-auth/passkey` plugin; the `passkey` table stores public key, credential ID, counter, device type, `backedUp`, transports, and AAGUID. Users log in passwordless with platform authenticators (Touch ID, Windows Hello, hardware keys) in addition to password/2FA — with `findPasskeysByUserId` for device management.
+- **Why add to Tengiz:** "Two-Factor Authentication" (#204) covers TOTP, and OIDC (#157) covers external IdPs — but passkeys offer passwordless phishing-resistant login for the platform's own admin/webhook surfaces. `tengiz auth passkey add/remove/list` (WebAuthn ceremony via `github.com/go-webauthn/webauthn`) stored in `~/.tengiz/auth/`. Medium effort, high-security-value addition to the platform auth model once #204 lands.
+- **Detected:** 2026-08-14
