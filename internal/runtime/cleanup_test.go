@@ -49,3 +49,19 @@ func TestIsTengizManaged(t *testing.T) {
 		t.Error("expected nil labels to not be managed")
 	}
 }
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	res, err := m.Cleanup(context.Background(), CleanupOptions{
+		Containers: true,
+		Images:     true,
+		Volumes:    true,
+		Networks:   true,
+	})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if res.ContainersRemoved != 1 || res.ImagesRemoved != 1 || res.VolumesRemoved != 1 || res.NetworksRemoved != 1 {
+		t.Fatalf("Cleanup() = %+v, want all counts = 1", res)
+	}
+}

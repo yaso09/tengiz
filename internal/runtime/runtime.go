@@ -34,6 +34,7 @@ type Manager interface {
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
 	RemoveImage(ctx context.Context, imageTag string) error
 	KeepLastNImages(ctx context.Context, appName string, n int) error
+	Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error)
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
@@ -116,6 +117,23 @@ func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
 
 func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
 	return nil
+}
+
+func (m *stubManager) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
+	res := CleanupResult{}
+	if opts.Containers {
+		res.ContainersRemoved = 1
+	}
+	if opts.Images {
+		res.ImagesRemoved = 1
+	}
+	if opts.Volumes {
+		res.VolumesRemoved = 1
+	}
+	if opts.Networks {
+		res.NetworksRemoved = 1
+	}
+	return res, nil
 }
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
