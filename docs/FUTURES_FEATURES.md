@@ -1948,3 +1948,39 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Dokku's port-mapping scheme supports `grpc`/`grpcs` as first-class schemes (`ports:add <app> grpc:50051:50051`), and the nginx proxy terminates/forwards gRPC (HTTP/2) traffic to the container accordingly — distinct from plain TCP/UDP exposure.
 - **Why add to Tengiz:** "Port Mapping Protocol Selection (TCP/UDP)" covers TCP/UDP passthrough but gRPC needs HTTP/2-aware proxying that a Go `httputil.ReverseProxy` must configure explicitly (`http2.ConfigureServer`, `h2c` upstream via `DialTLSContext`, no port rewrites in gRPC headers). Microservices and proto APIs on Tengiz today require running outside the proxy. A `scheme: grpc` port mapping teaching the proxy to handle HTTP/2 + h2c upstreams makes Tengiz usable for gRPC backends. Low-medium effort, distinct from existing TCP/UDP and HTTP support.
 - **Detected:** 2026-08-14
+
+## File-Based Docker Secrets (Mounts at `/run/secrets/`)
+- **Source:** CapRover
+- **Description:** CapRover's `DockerSecret` model mounts secrets as files into containers at `/run/secrets/<secretName>` (file mode 0444) rather than as environment variables. Each secret entry maps `{ secretName, targetFile }`. This is the Docker-native pattern for 12-factor apps that read credentials from the filesystem (e.g. Nginx htpasswd, DB CA certificates, SSH keys, `.npmrc`), and it guarantees secrets never leak into `docker inspect` output.
+- **Why add to Tengiz:** Tengiz's existing `secrets` package interpolates `[[secret.NAME]]` into env vars at deploy/run time — but many tools require a mounted credential file, and env vars are visible in `docker inspect` and container metadata. Adding `secrets.files: [{ name: "db-ca", mount: "/run/secrets/db-ca.pem" }]` in `.tengiz.yaml` lets the runtime write decrypted secrets to a temp dir mounted read-only into the container. Complements `docker run --secret`-style behavior via exec-based Docker (bind-mount a per-app secrets dir). Low effort, closes a real security/UX gap.
+- **Detected:** 2026-08-14
+
+## Deploy Job Registry with Step-Based Progress (Detached Builds)
+- **Source:** CapRover
+- **Description:** `OneClickDeploymentJobRegistry` tracks in-flight deployments as jobs (`deploy_<timestamp>_<rand>`), each with a named step list (`Registering X`, `Configuring X`, `Deploying X`), `currentStep`, `successMessage`, and `error`. A progress endpoint (`/oneclick/deploy/progress?jobId=`) lets clients poll state without holding the connection. `isDetachedBuild` lets the API return a job ID immediately while the build continues in the background. Stale jobs are pruned (24h cleanup interval).
+- **Why add to Tengiz:** Today `tengiz deploy` blocks the terminal for the entire build; `Build Tracking` records history but there is no live, pollable job object with named pipeline steps. A `~/.tengiz/jobs/` JSON registry + `tengiz deploy --detach` (returns job ID immediately) + `tengiz job status <id>` / `tengiz job logs <id>` gives CI systems and future web UIs a clean progress contract. Distinct from build logs (#46, streaming) and build queue (#124, dedup) — this is the step-level state machine. Low effort on top of existing deployment records.
+- **Detected:** 2026-08-14
+
+## Remote Feature Flags / Kill-Switch System
+- **Source:** CapRover
+- **Description:** CapRover's `FeatureFlags.ts` fetches feature flags from a remote endpoint (`https://api-v1.caprover.com/v2/featureflags`), caches them in the datastore, and uses them to toggle platform behaviors without a code release. Flags are versioned/remote-driven so the operator can remotely enable or disable risky features per installation.
+- **Why add to Tengiz:** A kill-switch capability lets operators (or a hosted Tengiz operator) disable a newly-shipped feature globally — e.g. "turn off preview deployments fleet-wide" — without rebuilding/redeploying the binary. For Tengiz, a simpler offline-first design fits better: flags stored in `~/.tengiz/flags.json` (JSON Lines), locally overrideable via `tengiz config set`, with an optional remote fetch hook. Complements "Config Display Command" (#48). Low effort, high operational value for production instances.
+- **Detected:** 2026-08-14
+
+## Anonymized Usage Analytics Emitter (Opt-Out Telemetry)
+- **Source:** CapRover
+- **Description:** `AnalyticsLogger.ts` emits anonymized platform events (`InstanceStarted`, `OneClickAppDeployStarted`, etc.) to an analytics endpoint; sensitive events (`UserLoggedIn`, `AppBuildSuccessful/Failed`) are deliberately excluded. Disabled entirely via `CAPROVER_DISABLE_ANALYTICS` env var. `ProEmitter` selectively forwards events to subscribed instances.
+- **Why add to Tengiz:** A Vercel-alternative maintainer needs data on framework adoption, deploy frequency, and failure modes to prioritize roadmap work (e.g. which frameworks to auto-detect). An opt-out-by-default `TENGIZ_DISABLE_ANALYTICS` env var, a `telemetry.enabled` config key, and a single `analytics.track(event)` call site in the deploy pipeline give this without harming privacy — never send app names, env vars, or secret data, only counters. Distinguished from "Output/Telemetry Loggers (#158)" which ships the platform's own operational logs externally; this is product usage insight. Low effort (`net/http` POST + batched JSON).
+- **Detected:** 2026-08-14
+
+## Scheduled Automated Image Cleanup (Cron + Per-App Keep-N)
+- **Source:** CapRover
+- **Description:** `DiskCleanupManager.ts` runs `getUnusedImages(mostRecentLimit)` on a cron schedule with timezone support. It keeps the N most recent image versions per app (from `deployedVersion` down to `deployedVersion - mostRecentLimit`), marks everything else unused, and deletes those images. Config sanitized by `AutomatedCleanupConfigsCleaner` (valid cron, non-negative limit); schedule disabled when empty.
+- **Why add to Tengiz:** Existing "#9 Docker Housekeeping" is a label-based `docker system prune` and "#56 Granular Prune" is manual/surgical — neither implements a scheduled, per-app version retention policy. A `~/.tengiz/cleanup.json` config (`cron_schedule`, `timezone`, `most_recent_limit`) + a background scheduler (reusing `robfig/cron` from the cron feature) automates "keep last 5 images per app" without risking deletion of images in use by rollback. Directly complements "Rollback Sistemi" (implemented) — retention must protect rollback targets. Low effort, high ops value.
+- **Detected:** 2026-08-14
+
+## Programmatic Pre-Deploy Function Hook (Container Spec Mutation)
+- **Source:** CapRover
+- **Description:** `ServiceManager.createPreDeployFunctionIfExist` loads a user-supplied JS function (`app.preDeployFunction`) and runs it just before the container spec is applied: signature `(captainAppObj, dockerUpdateObject) => Promise<dockerUpdateObject>`. The function can programmatically add/remove volumes, env vars, capabilities, or commands at deploy time based on app config — a code-based hook, not a shell command.
+- **Why add to Tengiz:** Existing "Pre-Deploy Hooks (#9)" and "Extended Hook System (#24)" run CLI commands but cannot mutate the container spec itself. A `.tengiz.yaml` `predeploy_function` (small embedded script executed by Tengiz's binary) could, e.g., auto-attach a volume when a flag is set, or inject runtime-computed env values. For Go, this maps to a sandboxed template/expression hook or a `goja`-based function as a lighter alternative to the full "TypeScript Action Automation (#156)". Medium effort, unlocks dynamic deploy-time configuration that no existing Tengiz feature covers.
+- **Detected:** 2026-08-14
