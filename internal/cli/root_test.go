@@ -379,3 +379,83 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupCmdRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCmdFlags(t *testing.T) {
+	for _, flag := range []string{"dry-run", "containers", "images", "build-cache", "volumes", "networks", "keep", "full", "yes"} {
+		if cleanupCmd.Flags().Lookup(flag) == nil {
+			t.Errorf("cleanupCmd missing --%s flag", flag)
+		}
+	}
+}
+
+func TestProtectedContainerNames(t *testing.T) {
+	dir := t.TempDir()
+	store := config.NewStore(dir)
+	if err := store.SaveApp(types.AppEntry{Name: "web", DeploymentSuffix: "1700000000", Config: types.AppConfig{Name: "web"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveApp(types.AppEntry{Name: "api", Config: types.AppConfig{Name: "api"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddPreview(types.PreviewEntry{AppName: "web", PRNumber: 42, ContainerName: "tengiz-web-pr-42"}); err != nil {
+		t.Fatal(err)
+	}
+
+	protected := protectedContainerNames(store, "production")
+	for _, name := range []string{"tengiz-web", "tengiz-web-1700000000", "tengiz-api", "tengiz-web-pr-42"} {
+		if !protected[name] {
+			t.Errorf("expected %q to be protected", name)
+		}
+	}
+	if protected["tengiz-other"] {
+		t.Error("unexpected protected container")
+	}
+}
+
+func TestCleanupCmdFlagParsing(t *testing.T) {
+	var called bool
+	originalRunE := cleanupCmd.RunE
+	defer func() { cleanupCmd.RunE = originalRunE }()
+	cleanupCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		containers, _ := cmd.Flags().GetBool("containers")
+		keep, _ := cmd.Flags().GetInt("keep")
+		full, _ := cmd.Flags().GetBool("full")
+		yes, _ := cmd.Flags().GetBool("yes")
+		if !dryRun {
+			t.Error("dry-run = false, want true")
+		}
+		if containers {
+			t.Error("containers = true, want false")
+		}
+		if keep != 10 {
+			t.Errorf("keep = %d, want 10", keep)
+		}
+		if !full {
+			t.Error("full = false, want true")
+		}
+		if !yes {
+			t.Error("yes = false, want true")
+		}
+		called = true
+		return nil
+	}
+	rootCmd.SetArgs([]string{"cleanup", "--dry-run", "--containers=false", "--keep", "10", "--full", "--yes"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !called {
+		t.Fatal("cleanupCmd.RunE was not called")
+	}
+}
