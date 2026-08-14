@@ -93,3 +93,35 @@ func TestHasTengizLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestCountLines(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   int
+	}{
+		{"empty", "", 0},
+		{"whitespace only", "  \n\t\n", 0},
+		{"single line", "abc\n", 1},
+		{"multiple with blank", "a\n\nb\nc\n", 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := countLines(tt.output); got != tt.want {
+				t.Errorf("countLines(%q) = %d, want %d", tt.output, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDiff(t *testing.T) {
+	if got := diff(3, 1); got != 2 {
+		t.Errorf("diff(3,1) = %d, want 2", got)
+	}
+	if got := diff(1, 3); got != 0 {
+		t.Errorf("diff(1,3) = %d, want 0", got)
+	}
+	if got := diff(2, 2); got != 0 {
+		t.Errorf("diff(2,2) = %d, want 0", got)
+	}
+}
