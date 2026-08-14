@@ -126,3 +126,107 @@ func countLines(out []byte) int {
 	}
 	return len(strings.Split(trimmed, "\n"))
 }
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
+	var result CleanupResult
+	if opts.Containers {
+		n, err := r.cleanupContainers(ctx, opts.DryRun)
+		if err != nil {
+			return result, err
+		}
+		result.ContainersRemoved = n
+	}
+	if opts.Images {
+		n, err := r.cleanupImages(ctx, opts.DryRun)
+		if err != nil {
+			return result, err
+		}
+		result.ImagesRemoved = n
+	}
+	if opts.Volumes {
+		n, err := r.cleanupVolumes(ctx, opts.DryRun)
+		if err != nil {
+			return result, err
+		}
+		result.VolumesRemoved = n
+	}
+	if opts.Networks {
+		n, err := r.cleanupNetworks(ctx, opts.DryRun)
+		if err != nil {
+			return result, err
+		}
+		result.NetworksRemoved = n
+	}
+	return result, nil
+}
+
+// cleanupContainers counts matching stopped containers, then prunes them unless
+// dryRun. Tengiz containers are excluded via the label!= filters.
+func (r *dockerRuntime) cleanupContainers(ctx context.Context, dryRun bool) (int, error) {
+	out, err := exec.CommandContext(ctx, "docker", containerListArgs()...).CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("docker ps: %w", err)
+	}
+	count := countLines(out)
+	if dryRun || count == 0 {
+		return count, nil
+	}
+	if _, err := exec.CommandContext(ctx, "docker", containerPruneArgs()...).CombinedOutput(); err != nil {
+		return 0, fmt.Errorf("docker container prune: %w", err)
+	}
+	return count, nil
+}
+
+func (r *dockerRuntime) cleanupImages(ctx context.Context, dryRun bool) (int, error) {
+	out, err := exec.CommandContext(ctx, "docker", imageListArgs()...).CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("docker images: %w", err)
+	}
+	count := countLines(out)
+	if dryRun || count == 0 {
+		return count, nil
+	}
+	if _, err := exec.CommandContext(ctx, "docker", imagePruneArgs()...).CombinedOutput(); err != nil {
+		return 0, fmt.Errorf("docker image prune: %w", err)
+	}
+	return count, nil
+}
+
+func (r *dockerRuntime) cleanupVolumes(ctx context.Context, dryRun bool) (int, error) {
+	out, err := exec.CommandContext(ctx, "docker", volumeListArgs()...).CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("docker volume ls: %w", err)
+	}
+	count := countLines(out)
+	if dryRun || count == 0 {
+		return count, nil
+	}
+	if _, err := exec.CommandContext(ctx, "docker", volumePruneArgs()...).CombinedOutput(); err != nil {
+		return 0, fmt.Errorf("docker volume prune: %w", err)
+	}
+	return count, nil
+}
+
+func (r *dockerRuntime) cleanupNetworks(ctx context.Context, dryRun bool) (int, error) {
+	out, err := exec.CommandContext(ctx, "docker", networkListArgs()...).CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("docker network ls: %w", err)
+	}
+	count := countLines(out)
+	if dryRun || count == 0 {
+		return count, nil
+	}
+	if _, err := exec.CommandContext(ctx, "docker", networkPruneArgs()...).CombinedOutput(); err != nil {
+		return 0, fmt.Errorf("docker network prune: %w", err)
+	}
+	return count, nil
+}
+
+// DiskUsage returns the raw `docker system df` output for disk reporting.
+func (r *dockerRuntime) DiskUsage(ctx context.Context) (string, error) {
+	out, err := exec.CommandContext(ctx, "docker", "system", "df").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker system df: %w", err)
+	}
+	return string(out), nil
+}

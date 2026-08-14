@@ -103,3 +103,39 @@ func TestCleanupPruneArgs(t *testing.T) {
 		})
 	}
 }
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	res, err := m.Cleanup(context.Background(), CleanupOptions{
+		DryRun:     true,
+		Containers: true,
+		Images:     true,
+		Volumes:    true,
+		Networks:   true,
+	})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if res.ContainersRemoved != 0 || res.ImagesRemoved != 0 || res.VolumesRemoved != 0 || res.NetworksRemoved != 0 {
+		t.Errorf("stub Cleanup() should return zero result, got %+v", res)
+	}
+}
+
+func TestStubDiskUsage(t *testing.T) {
+	m := NewStub()
+	out, err := m.DiskUsage(context.Background())
+	if err != nil {
+		t.Fatalf("DiskUsage() error = %v", err)
+	}
+	if out != "" {
+		t.Errorf("stub DiskUsage() = %q, want empty string", out)
+	}
+}
+
+func TestStubSatisfiesCleanupInterface(t *testing.T) {
+	m := NewStub()
+	var _ interface {
+		Cleanup(context.Context, CleanupOptions) (CleanupResult, error)
+		DiskUsage(context.Context) (string, error)
+	} = m
+}
