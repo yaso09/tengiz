@@ -185,3 +185,21 @@ func TestFormatBytes(t *testing.T) {
 		})
 	}
 }
+
+func TestDockerCleanupDryRun(t *testing.T) {
+	r := &dockerRuntime{}
+	res, err := r.Cleanup(context.Background(), CleanupOptions{
+		DryRun:     true,
+		Containers: true,
+		Images:     true,
+		BuildCache: true,
+		Volumes:    true,
+		Networks:   true,
+	})
+	if err != nil {
+		t.Fatalf("Cleanup(dry-run) error = %v", err)
+	}
+	if res.ContainersPruned != 0 || res.ImagesPruned != 0 || res.BuildCacheFreed != 0 {
+		t.Errorf("dry-run should not prune anything, got %+v", res)
+	}
+}

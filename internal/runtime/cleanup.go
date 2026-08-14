@@ -38,7 +38,33 @@ func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error 
 }
 
 func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
-	return CleanupResult{}, nil
+	var result CleanupResult
+	for _, args := range buildCleanupCommands(opts) {
+		desc := strings.Join(args, " ")
+		if opts.DryRun {
+			log.Printf("[tengiz] dry-run: docker %s", desc)
+			continue
+		}
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return result, fmt.Errorf("docker %s: %w\n%s", desc, err, string(out))
+		}
+		count, freed := parsePruneOutput(string(out))
+		switch args[0] {
+		case "container":
+			result.ContainersPruned += count
+		case "image":
+			result.ImagesPruned += count
+		case "builder":
+			result.BuildCacheFreed += freed
+		case "volume":
+			result.VolumesPruned += count
+		case "network":
+			result.NetworksPruned += count
+		}
+	}
+	return result, nil
 }
 
 const cleanupLabelFilter = "label=" + labelKey
