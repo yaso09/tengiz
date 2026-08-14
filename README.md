@@ -149,6 +149,19 @@ List all deployed applications and their status.
 
 Output: `NAME`, `STATE` (running/stopped), `PORT`, `ENVIRONMENT`, `HEALTH`.
 
+### `tengiz cleanup [--containers] [--images] [--volumes] [--networks]`
+
+Remove unused Docker resources to reclaim disk space.
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Remove stopped containers not managed by Tengiz |
+| `--images` | Remove dangling images (no tag, not referenced) |
+| `--volumes` | Remove unused volumes (not referenced by any container) |
+| `--networks` | Remove unused networks (not referenced by any container) |
+
+With no flags, all four categories run. Containers labeled `tengiz-app=*` (all Tengiz-managed apps) are always protected and never removed. A per-category count of removed resources is printed on completion.
+
 ### `tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] <app>`
 
 Show application logs.
