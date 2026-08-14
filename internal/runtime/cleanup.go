@@ -140,3 +140,52 @@ func FilterCleanableContainers(containers []ContainerInfo, protected map[string]
 	}
 	return cleanable
 }
+
+type PruneTarget int
+
+const (
+	PruneDanglingImages PruneTarget = iota
+	PruneBuildCache
+	PruneVolumes
+	PruneNetworks
+	PruneSystem
+)
+
+func pruneCommandArgs(target PruneTarget) ([]string, error) {
+	switch target {
+	case PruneDanglingImages:
+		return []string{"image", "prune", "-f"}, nil
+	case PruneBuildCache:
+		return []string{"builder", "prune", "-f"}, nil
+	case PruneVolumes:
+		return []string{"volume", "prune", "-f"}, nil
+	case PruneNetworks:
+		return []string{"network", "prune", "-f"}, nil
+	case PruneSystem:
+		return []string{"system", "prune", "-a", "-f", "--volumes"}, nil
+	default:
+		return nil, fmt.Errorf("unknown prune target: %d", target)
+	}
+}
+
+func (r *dockerRuntime) Prune(ctx context.Context, target PruneTarget) (string, error) {
+	args, err := pruneCommandArgs(target)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker %s: %w\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return string(out), nil
+}
+
+func (r *dockerRuntime) SystemDF(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "system", "df")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker system df: %w\n%s", err, string(out))
+	}
+	return string(out), nil
+}

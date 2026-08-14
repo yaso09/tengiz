@@ -98,6 +98,8 @@ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppCon
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) ListTengizContainers(ctx context.Context) ([]runtime.ContainerInfo, error) { return nil, nil }
+func (m *mockRTForDeploy) Prune(ctx context.Context, target runtime.PruneTarget) (string, error) { return "", nil }
+func (m *mockRTForDeploy) SystemDF(ctx context.Context) (string, error) { return "", nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {

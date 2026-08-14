@@ -101,3 +101,61 @@ func TestStubListTengizContainers(t *testing.T) {
 		t.Fatalf("expected nil, got %v", containers)
 	}
 }
+
+func TestPruneCommandArgs(t *testing.T) {
+	tests := []struct {
+		name   string
+		target PruneTarget
+		want   []string
+	}{
+		{"dangling images", PruneDanglingImages, []string{"image", "prune", "-f"}},
+		{"build cache", PruneBuildCache, []string{"builder", "prune", "-f"}},
+		{"volumes", PruneVolumes, []string{"volume", "prune", "-f"}},
+		{"networks", PruneNetworks, []string{"network", "prune", "-f"}},
+		{"system", PruneSystem, []string{"system", "prune", "-a", "-f", "--volumes"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := pruneCommandArgs(tt.target)
+			if err != nil {
+				t.Fatalf("pruneCommandArgs() error = %v", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %v (len=%d), want %v (len=%d)", got, len(got), tt.want, len(tt.want))
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("arg[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestPruneCommandArgsUnknown(t *testing.T) {
+	if _, err := pruneCommandArgs(PruneTarget(99)); err == nil {
+		t.Fatal("expected error for unknown target")
+	}
+}
+
+func TestStubPrune(t *testing.T) {
+	m := NewStub()
+	out, err := m.Prune(context.Background(), PruneDanglingImages)
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if out != "" {
+		t.Fatalf("expected empty output, got %q", out)
+	}
+}
+
+func TestStubSystemDF(t *testing.T) {
+	m := NewStub()
+	out, err := m.SystemDF(context.Background())
+	if err != nil {
+		t.Fatalf("SystemDF() error = %v", err)
+	}
+	if out != "" {
+		t.Fatalf("expected empty output, got %q", out)
+	}
+}

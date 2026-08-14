@@ -35,6 +35,8 @@ type Manager interface {
 	RemoveImage(ctx context.Context, imageTag string) error
 	KeepLastNImages(ctx context.Context, appName string, n int) error
 	ListTengizContainers(ctx context.Context) ([]ContainerInfo, error)
+	Prune(ctx context.Context, target PruneTarget) (string, error)
+	SystemDF(ctx context.Context) (string, error)
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
@@ -121,6 +123,14 @@ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int
 
 func (m *stubManager) ListTengizContainers(ctx context.Context) ([]ContainerInfo, error) {
 	return nil, nil
+}
+
+func (m *stubManager) Prune(ctx context.Context, target PruneTarget) (string, error) {
+	return "", nil
+}
+
+func (m *stubManager) SystemDF(ctx context.Context) (string, error) {
+	return "", nil
 }
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
