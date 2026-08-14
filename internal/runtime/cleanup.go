@@ -57,3 +57,72 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	}
 	return nil
 }
+
+// CleanupOptions configures which Docker resource categories are cleaned.
+type CleanupOptions struct {
+	DryRun     bool
+	Containers bool
+	Images     bool
+	Volumes    bool
+	Networks   bool
+}
+
+// CleanupResult reports how many objects were removed per category.
+type CleanupResult struct {
+	ContainersRemoved int
+	ImagesRemoved     int
+	VolumesRemoved    int
+	NetworksRemoved   int
+}
+
+// Tengiz-managed objects carry the tengiz-app / tengiz-env labels. The
+// label!= filters exclude them so cleanup never touches deployed apps.
+func containerPruneArgs() []string {
+	return []string{
+		"container", "prune", "-f",
+		"--filter", "label!=tengiz-app",
+		"--filter", "label!=tengiz-env",
+	}
+}
+
+func containerListArgs() []string {
+	return []string{
+		"ps", "-aq",
+		"--filter", "label!=tengiz-app",
+		"--filter", "label!=tengiz-env",
+	}
+}
+
+func imagePruneArgs() []string {
+	return []string{"image", "prune", "-f"}
+}
+
+func imageListArgs() []string {
+	return []string{"images", "-q", "--filter", "dangling=true"}
+}
+
+func volumePruneArgs() []string {
+	return []string{"volume", "prune", "-f", "--filter", "label!=tengiz-app"}
+}
+
+func volumeListArgs() []string {
+	return []string{"volume", "ls", "-q", "--filter", "label!=tengiz-app"}
+}
+
+func networkPruneArgs() []string {
+	return []string{"network", "prune", "-f"}
+}
+
+func networkListArgs() []string {
+	return []string{"network", "ls", "-q", "--filter", "dangling=true"}
+}
+
+// countLines counts non-empty lines. Docker list commands print one object ID
+// per line, so this tallies how many objects a category contains.
+func countLines(out []byte) int {
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
+		return 0
+	}
+	return len(strings.Split(trimmed, "\n"))
+}
