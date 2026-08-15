@@ -13,22 +13,21 @@ Sıralama kuralı: **I birincil** (yüksek önce) → **E ikincil** (düşük ö
 
 | # | Feature | I | E | A | Rationale |
 |---|---------|---|---|---|-----------|
-| 1 | **Docker Housekeeping** ⬜ | Yüksek | Düşük | Mükemmel | Disk alanı single-server deploy'ların #1 üretim sorunu. Label-based `docker system prune`. `tengiz cleanup`. |
-| 2 | **Event Logging & Audit Trail** ⬜ | Yüksek | Düşük | Mükemmel | Kim neyi, ne zaman deploy etti? `log/slog` + JSON Lines ile multi-developer audit trail. |
-| 3 | **Pre-Deploy Hooks** ⬜ | Yüksek | Düşük | Mükemmel | Deploy öncesi migration runner table stakes. `.tengiz.yaml` `pre_deploy` listesi; başarısız hook deploy'u iptal eder. |
-| 4 | **App Report (Detailed Status)** ⬜ | Yüksek | Düşük | Mükemmel | `tengiz ps` çok minimal. Deploy history, image tag, env, resource limits, domain tek komutta. |
-| 5 | **Monorepo Support (Base Directory)** ⬜ | Yüksek | Düşük | Mükemmel | Turborepo/Nx/Lerna kullanıcıları büyük segment. `base_dir` override ile framework detection. |
-| 6 | **Custom Build Commands** ⬜ | Yüksek | Düşük | Mükemmel | Framework detection override edilebilir olmalı. `commands.install/build/start`. Özel toolchain'ler için zorunlu. |
-| 7 | **One-Line Install Script** ⬜ | Yüksek | Düşük | Mükemmel | `curl -fsSL https://tengiz.dev/install.sh | bash`. Cross-compile, platform algılama, checksum doğrulama. |
-| 8 | **Commit Status Reporting** ⬜ | Yüksek | Düşük | Mükemmel | Deploy sonucunu GitHub/GitLab commit status API'ye raporla. PR'da yeşil checkmark/kırmızı X. |
-| 9 | **Auto-Generated Wildcard Domains (sslip.io)** ⬜ | Orta-Yüksek | Çok Düşük | Mükemmel | DNS kurmadan global erişilebilir URL (`myapp-<hash>-<ip>.sslip.io`). Preview/demo/webhook için. Neredeyse sıfır maliyet. |
-| 10 | **Config-Diff Based Redeploy Suppression** ⬜ | Orta-Yüksek | Düşük | Mükemmel | Değişmeyen config'te build/restart'ı atla. SHA-256 karşılaştırma; rapid-fire CI/CD israfını bitirir. |
-| 11 | **Custom Domain Ownership/DNS Verification** ⬜ | Orta-Yüksek | Düşük | Mükemmel | Domain'i kabul etmeden bu host'a resolve ettiğini doğrula. Yanlış yönlendirme/hijack riskini kapatır. |
-| 12 | **Inline Dockerfile & Base Image Template Library** ⬜ | Orta-Yüksek | Düşük | Mükemmel | `.tengiz.yaml` içinde inline Dockerfile (`dockerfile_lines`) + `node/20-alpine` tarzı şablonlar. Detector'ı tamamlar. |
-| 13 | **Resource Disable State** ⬜ | Orta-Yüksek | Düşük | Mükemmel | `enabled:false` health/idle'ı dondurur, `disabled/unknown` gösterir. Kasıtlı durdurulan app'in ghost restart'ını önler. |
-| 14 | **Skip-Deploy Commit Markers (`[skip ci]`)** ⬜ | Orta | Çok Düşük | Mükemmel | Standart CI konvansiyonu; doc commit'leri ve versiyon bump'ları build tetiklemesin. Regex eşleşmesi. |
-| 15 | **Query-String Partial Config Updates** ⬜ | Orta | Çok Düşük | Mükemmel | Tek komutla multi-field config değişimi + typed diff (`tengiz config set myapp "ports=8080:80"`). CLI-first'e ideal. |
-| 16 | **System User Identities** ⬜ | Orta | Çok Düşük | Mükemmel | Webhook/Idle/Health/Preview operasyonlarına sabit operator kimliği ("Webhook", "Idle Timeout"). Audit trail'in temeli. |
+| 1 | **Event Logging & Audit Trail** ⬜ | Yüksek | Düşük | Mükemmel | Kim neyi, ne zaman deploy etti? `log/slog` + JSON Lines ile multi-developer audit trail. |
+| 2 | **Pre-Deploy Hooks** ⬜ | Yüksek | Düşük | Mükemmel | Deploy öncesi migration runner table stakes. `.tengiz.yaml` `pre_deploy` listesi; başarısız hook deploy'u iptal eder. |
+| 3 | **App Report (Detailed Status)** ⬜ | Yüksek | Düşük | Mükemmel | `tengiz ps` çok minimal. Deploy history, image tag, env, resource limits, domain tek komutta. |
+| 4 | **Monorepo Support (Base Directory)** ⬜ | Yüksek | Düşük | Mükemmel | Turborepo/Nx/Lerna kullanıcıları büyük segment. `base_dir` override ile framework detection. |
+| 5 | **Custom Build Commands** ⬜ | Yüksek | Düşük | Mükemmel | Framework detection override edilebilir olmalı. `commands.install/build/start`. Özel toolchain'ler için zorunlu. |
+| 6 | **One-Line Install Script** ⬜ | Yüksek | Düşük | Mükemmel | `curl -fsSL https://tengiz.dev/install.sh | bash`. Cross-compile, platform algılama, checksum doğrulama. |
+| 7 | **Commit Status Reporting** ⬜ | Yüksek | Düşük | Mükemmel | Deploy sonucunu GitHub/GitLab commit status API'ye raporla. PR'da yeşil checkmark/kırmızı X. |
+| 8 | **Auto-Generated Wildcard Domains (sslip.io)** ⬜ | Orta-Yüksek | Çok Düşük | Mükemmel | DNS kurmadan global erişilebilir URL (`myapp-<hash>-<ip>.sslip.io`). Preview/demo/webhook için. Neredeyse sıfır maliyet. |
+| 9 | **Config-Diff Based Redeploy Suppression** ⬜ | Orta-Yüksek | Düşük | Mükemmel | Değişmeyen config'te build/restart'ı atla. SHA-256 karşılaştırma; rapid-fire CI/CD israfını bitirir. |
+| 10 | **Custom Domain Ownership/DNS Verification** ⬜ | Orta-Yüksek | Düşük | Mükemmel | Domain'i kabul etmeden bu host'a resolve ettiğini doğrula. Yanlış yönlendirme/hijack riskini kapatır. |
+| 11 | **Inline Dockerfile & Base Image Template Library** ⬜ | Orta-Yüksek | Düşük | Mükemmel | `.tengiz.yaml` içinde inline Dockerfile (`dockerfile_lines`) + `node/20-alpine` tarzı şablonlar. Detector'ı tamamlar. |
+| 12 | **Resource Disable State** ⬜ | Orta-Yüksek | Düşük | Mükemmel | `enabled:false` health/idle'ı dondurur, `disabled/unknown` gösterir. Kasıtlı durdurulan app'in ghost restart'ını önler. |
+| 13 | **Skip-Deploy Commit Markers (`[skip ci]`)** ⬜ | Orta | Çok Düşük | Mükemmel | Standart CI konvansiyonu; doc commit'leri ve versiyon bump'ları build tetiklemesin. Regex eşleşmesi. |
+| 14 | **Query-String Partial Config Updates** ⬜ | Orta | Çok Düşük | Mükemmel | Tek komutla multi-field config değişimi + typed diff (`tengiz config set myapp "ports=8080:80"`). CLI-first'e ideal. |
+| 15 | **System User Identities** ⬜ | Orta | Çok Düşük | Mükemmel | Webhook/Idle/Health/Preview operasyonlarına sabit operator kimliği ("Webhook", "Idle Timeout"). Audit trail'in temeli. |
 
 ### P1 — High (Production-Ready Platform)
 
@@ -281,6 +280,7 @@ Sıralama kuralı: **I birincil** (yüksek önce) → **E ikincil** (düşük ö
 | # | Feature | I | E | A | Status |
 |---|---------|---|---|---|--------|
 | — | **Rollback Sistemi** | Çok Yüksek | Orta | Mükemmel | ✅ Implemented (2026-07-16) |
+| — | **Docker Housekeeping** | Yüksek | Düşük | Mükemmel | ✅ Implemented (2026-08-15) |
 | — | **Build Logs** | Çok Yüksek | Çok Düşük | Mükemmel | ✅ Implemented (2026-07-16) |
 | — | **Log Filtering** | Çok Yüksek | Çok Düşük | Mükemmel | ✅ Implemented (2026-07-16) |
 | — | **One-off Process Execution** | Yüksek | Düşük | Mükemmel | ✅ Implemented (2026-07-16) |
@@ -420,6 +420,7 @@ Sıralama kuralı: **I birincil** (yüksek önce) → **E ikincil** (düşük ö
 - **Source:** Coolify
 - **Description:** `DockerCleanupJob` ile kullanılmayan volume, network, container ve image'leri periyodik temizleme. `CleanupHelperContainersJob` ile yardımcı container'ları temizler.
 - **Why add to Tengiz:** Sürekli deploy ve scale-to-zero ortamında atık container/image'ler disk alanını tüketir. Label-based filtreleme ile Tengiz yönetimindeki container'lar korunur. `tengiz cleanup` komutu eklenebilir.
+- **Status:** ✅ Implemented (2026-08-15)
 - **Detected:** 2026-07-14
 
 ## Nixpacks Build Sistemi (Heroku-Style Buildpacks)
