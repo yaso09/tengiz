@@ -9,6 +9,52 @@ import (
 	"strings"
 )
 
+func (o PruneOptions) effective() PruneOptions {
+	e := o
+	if !e.Containers && !e.Images && !e.Networks && !e.BuildCache {
+		e.Containers = true
+		e.Images = true
+		e.BuildCache = true
+	}
+	return e
+}
+
+func pruneCommands(opts PruneOptions) [][]string {
+	opts = opts.effective()
+	var cmds [][]string
+	add := func(args ...string) {
+		cmds = append(cmds, args)
+	}
+	if opts.Containers {
+		a := []string{"container", "prune", "-f"}
+		if !opts.All {
+			a = append(a, "--filter", "label!=tengiz-app")
+		}
+		add(a...)
+	}
+	if opts.Networks {
+		add("network", "prune", "-f")
+	}
+	if opts.Images {
+		a := []string{"image", "prune", "-f"}
+		if opts.All {
+			a = append(a, "--all")
+		}
+		add(a...)
+	}
+	if opts.BuildCache {
+		a := []string{"builder", "prune", "-f"}
+		if opts.All {
+			a = append(a, "--all")
+		}
+		add(a...)
+	}
+	if opts.Volumes {
+		add("volume", "prune", "-f")
+	}
+	return cmds
+}
+
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()
