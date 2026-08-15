@@ -76,6 +76,12 @@ func TestStubPrune(t *testing.T) {
 	}
 }
 
+func TestDockerPruneCompiles(t *testing.T) {
+	// Not a real docker invocation — verifies the dockerRuntime implements Manager
+	// after the interface change. Real exec behavior is covered by pruneCommands tests.
+	var _ Manager = &dockerRuntime{}
+}
+
 func TestStubRemoveImage(t *testing.T) {
 	m := NewStub()
 	if err := m.RemoveImage(context.Background(), "tengiz-apps/testapp:v1"); err != nil {
