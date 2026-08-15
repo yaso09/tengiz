@@ -97,12 +97,21 @@ func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *ty
 func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) Prune(ctx context.Context, opts runtime.PruneOptions) (string, error) { return "", nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}
 	if m == nil {
 		t.Fatal("mockRTForDeploy does not implement Manager")
+	}
+}
+
+func TestMockRTForDeployImplementsPrune(t *testing.T) {
+	var m runtime.Manager = &mockRTForDeploy{}
+	_, err := m.Prune(context.Background(), runtime.PruneOptions{})
+	if err != nil {
+		t.Fatalf("mock Prune() error = %v", err)
 	}
 }
 
