@@ -63,6 +63,10 @@ func init() {
 	volumeCmd.AddCommand(volumeListCmd)
 	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(rollbackCmd)
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without removing anything")
+	cleanupCmd.Flags().BoolP("yes", "y", false, "execute the cleanup without confirmation")
+	cleanupCmd.Flags().Int("keep", 5, "number of recent images to retain per app")
+	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
@@ -1013,6 +1017,124 @@ var rollbackCmd = &cobra.Command{
 		fmt.Printf("[tengiz] rolled back %s to deployment %s (port %d)\n", appName, prevDep.ID, newPort)
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Reclaim disk space by removing stale containers, images, and build cache",
+	Long: `Removes resources that are no longer needed while protecting all currently
+deployed apps:
+  - stale versioned containers (leftovers from zero-downtime deploys)
+  - dangling (untagged) images
+  - old app images beyond the retention limit (default 5)
+  - Docker build cache
+
+Running containers, active deployments, volumes, networks, and the latest
+image tag are never touched. Use --dry-run to preview, or -y to execute.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		yes, _ := cmd.Flags().GetBool("yes")
+		keep, _ := cmd.Flags().GetInt("keep")
+		if keep <= 0 {
+			keep = 5
+		}
+		if !dryRun && !yes {
+			return fmt.Errorf("cleanup is destructive: pass --dry-run to preview or -y to execute")
+		}
+
+		env := getEnv(cmd)
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+		store := config.NewStoreWithEnv(dataDir, env)
+		ctx := cmd.Context()
+
+		keepMap := make(map[string]string)
+		apps, _ := store.ListApps()
+		for _, app := range apps {
+			if app.DeploymentSuffix != "" {
+				keepMap[app.Name] = app.DeploymentSuffix
+			}
+		}
+
+		stale, err := rt.ListStaleContainers(ctx, env, keepMap)
+		if err != nil {
+			return fmt.Errorf("list stale containers: %w", err)
+		}
+
+		dangling, err := rt.ListDanglingImages(ctx)
+		if err != nil {
+			return fmt.Errorf("list dangling images: %w", err)
+		}
+
+		var oldImages []string
+		for _, app := range apps {
+			old, err := rt.ListOldImages(ctx, app.Name, keep)
+			if err != nil {
+				log.Printf("[tengiz] warning: list old images for %s: %v", app.Name, err)
+				continue
+			}
+			oldImages = append(oldImages, old...)
+		}
+
+		buildCacheNote := "Build cache would be pruned."
+		if dryRun {
+			fmt.Print(formatCleanupSummary(true, stale, dangling, oldImages, buildCacheNote))
+			return nil
+		}
+
+		for _, c := range stale {
+			if err := rt.Remove(ctx, c); err != nil {
+				log.Printf("[tengiz] warning: failed to remove container %s: %v", c, err)
+			}
+		}
+		for _, id := range dangling {
+			if err := rt.RemoveImage(ctx, id); err != nil {
+				log.Printf("[tengiz] warning: failed to remove image %s: %v", id, err)
+			}
+		}
+		for _, tag := range oldImages {
+			if err := rt.RemoveImage(ctx, tag); err != nil {
+				log.Printf("[tengiz] warning: failed to remove image %s: %v", tag, err)
+			}
+		}
+		freed, pruneErr := rt.PruneBuildCache(ctx)
+		if pruneErr != nil {
+			log.Printf("[tengiz] warning: build cache prune: %v", pruneErr)
+		} else if freed != "" {
+			buildCacheNote = fmt.Sprintf("Build cache pruned (%s)", freed)
+		} else {
+			buildCacheNote = "Build cache pruned."
+		}
+
+		fmt.Print(formatCleanupSummary(false, stale, dangling, oldImages, buildCacheNote))
+		return nil
+	},
+}
+
+func formatCleanupSummary(dryRun bool, stale, dangling, oldImages []string, buildCacheNote string) string {
+	var b strings.Builder
+	action := "Removed"
+	if dryRun {
+		action = "Would remove"
+	}
+	fmt.Fprintf(&b, "%s %d stale container(s):\n", action, len(stale))
+	for _, c := range stale {
+		fmt.Fprintf(&b, "  %s\n", c)
+	}
+	fmt.Fprintf(&b, "%s %d dangling image(s)\n", action, len(dangling))
+	if len(oldImages) > 0 {
+		fmt.Fprintf(&b, "%s %d old image(s):\n", action, len(oldImages))
+		for _, img := range oldImages {
+			fmt.Fprintf(&b, "  %s\n", img)
+		}
+	}
+	if buildCacheNote != "" {
+		fmt.Fprintf(&b, "%s\n", buildCacheNote)
+	}
+	return b.String()
 }
 
 var buildLogsCmd = &cobra.Command{
