@@ -73,6 +73,14 @@ func init() {
 	notificationCmd.AddCommand(notificationSetChannelCmd)
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("all", false, "also remove Tengiz-managed stopped containers and all unused images/build cache")
+	cleanupCmd.Flags().Bool("volumes", false, "also prune anonymous volumes")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers")
+	cleanupCmd.Flags().Bool("images", false, "prune unused images")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune build cache")
+	cleanupCmd.Flags().Bool("dry-run", false, "print the docker commands without executing them")
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -88,6 +96,41 @@ func init() {
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
 }
 
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Prune unused Docker resources (containers, images, networks, volumes, build cache)",
+	Long: `Prune unused Docker resources to reclaim disk space.
+
+By default prunes stopped containers (protecting Tengiz-managed ones via the
+tengiz-app label), dangling images, and build cache. Use flags to select
+specific categories or --all to also remove Tengiz-managed stopped containers
+and all unused images.
+
+Use --dry-run to print the exact docker commands without executing them.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts, err := pruneOptionsFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+		out, err := rt.Prune(cmd.Context(), opts)
+		if err != nil {
+			return err
+		}
+		if opts.DryRun {
+			fmt.Println("[tengiz] dry run — no resources removed. Commands:")
+		} else {
+			fmt.Println("[tengiz] docker housekeeping complete:")
+		}
+		fmt.Print(out)
+		return nil
+	},
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "tengiz",
 	Short: "Tengiz - Serverless deployment platform",
@@ -100,6 +143,33 @@ func getEnv(cmd *cobra.Command) string {
 		return "production"
 	}
 	return env
+}
+
+func pruneOptionsFromFlags(cmd *cobra.Command) (runtime.PruneOptions, error) {
+	var opts runtime.PruneOptions
+	var err error
+	if opts.All, err = cmd.Flags().GetBool("all"); err != nil {
+		return opts, err
+	}
+	if opts.Volumes, err = cmd.Flags().GetBool("volumes"); err != nil {
+		return opts, err
+	}
+	if opts.Containers, err = cmd.Flags().GetBool("containers"); err != nil {
+		return opts, err
+	}
+	if opts.Images, err = cmd.Flags().GetBool("images"); err != nil {
+		return opts, err
+	}
+	if opts.Networks, err = cmd.Flags().GetBool("networks"); err != nil {
+		return opts, err
+	}
+	if opts.BuildCache, err = cmd.Flags().GetBool("build-cache"); err != nil {
+		return opts, err
+	}
+	if opts.DryRun, err = cmd.Flags().GetBool("dry-run"); err != nil {
+		return opts, err
+	}
+	return opts, nil
 }
 
 var initCmd = &cobra.Command{

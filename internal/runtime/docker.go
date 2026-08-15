@@ -85,6 +85,27 @@ func NewDocker() (Manager, error) {
 	return &dockerRuntime{}, nil
 }
 
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (string, error) {
+	var out strings.Builder
+	for _, args := range pruneCommands(opts) {
+		cmdStr := strings.Join(args, " ")
+		if opts.DryRun {
+			out.WriteString("docker " + cmdStr + "\n")
+			continue
+		}
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		o, err := cmd.CombinedOutput()
+		out.Write(o)
+		if !strings.HasSuffix(out.String(), "\n") && len(o) > 0 {
+			out.WriteByte('\n')
+		}
+		if err != nil {
+			return out.String(), fmt.Errorf("docker %s: %w\n%s", cmdStr, err, string(o))
+		}
+	}
+	return out.String(), nil
+}
+
 func (r *dockerRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error {
 	internalPort := cfg.Port
 	if internalPort == 0 {

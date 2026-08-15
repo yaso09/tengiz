@@ -97,12 +97,66 @@ func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *ty
 func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) Prune(ctx context.Context, opts runtime.PruneOptions) (string, error) { return "", nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}
 	if m == nil {
 		t.Fatal("mockRTForDeploy does not implement Manager")
+	}
+}
+
+func TestMockRTForDeployImplementsPrune(t *testing.T) {
+	var m runtime.Manager = &mockRTForDeploy{}
+	_, err := m.Prune(context.Background(), runtime.PruneOptions{})
+	if err != nil {
+		t.Fatalf("mock Prune() error = %v", err)
+	}
+}
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCommandFlags(t *testing.T) {
+	for _, flag := range []string{"all", "volumes", "dry-run", "containers", "images", "networks", "build-cache"} {
+		if cleanupCmd.Flags().Lookup(flag) == nil {
+			t.Errorf("cleanupCmd missing --%s flag", flag)
+		}
+	}
+}
+
+func TestCleanupCmdPassesOptions(t *testing.T) {
+	var got runtime.PruneOptions
+	var called bool
+	originalRunE := cleanupCmd.RunE
+	defer func() { cleanupCmd.RunE = originalRunE }()
+	cleanupCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		opts, err := pruneOptionsFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		got = opts
+		called = true
+		return nil
+	}
+
+	rootCmd.SetArgs([]string{"cleanup", "--all", "--volumes", "--dry-run"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !called {
+		t.Fatal("cleanupCmd.RunE was not called")
+	}
+	if !got.All || !got.Volumes || !got.DryRun {
+		t.Errorf("prune options = %+v, want All, Volumes, DryRun all true", got)
 	}
 }
 

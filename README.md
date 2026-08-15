@@ -235,6 +235,28 @@ Rollback to the previous deployment. The previous active container is started on
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup [--all] [--volumes] [--dry-run] [--containers] [--images] [--networks] [--build-cache]`
+
+Prune unused Docker resources to reclaim disk space. By default prunes stopped containers (protecting Tengiz-managed ones via the `tengiz-app` label), dangling images, and build cache. Use flags to select specific categories or `--all` to also remove Tengiz-managed stopped containers and all unused images. `--volumes` is always opt-in (destructive to anonymous volumes).
+
+| Flag | Description |
+|------|-------------|
+| `--all` | Also remove Tengiz-managed stopped containers and all unused images/build cache |
+| `--volumes` | Also prune anonymous volumes (opt-in) |
+| `--containers` | Prune stopped containers |
+| `--images` | Prune unused images |
+| `--networks` | Prune unused networks |
+| `--build-cache` | Prune build cache |
+| `--dry-run` | Print the exact docker commands without executing them |
+
+Examples:
+```
+tengiz cleanup            → prune stopped containers (non-Tengiz), dangling images, build cache
+tengiz cleanup --all      → also remove Tengiz-managed stopped containers and all unused images
+tengiz cleanup --volumes  → additionally prune anonymous volumes
+tengiz cleanup --dry-run  → show the docker commands without running them
+```
+
 ### `tengiz domain`
 
 Manage custom domains for applications.
