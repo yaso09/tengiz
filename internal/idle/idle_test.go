@@ -31,6 +31,10 @@ func (m *mockRuntime) Restart(ctx context.Context, name string) error { return n
 func (m *mockRuntime) WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error { return nil }
 func (m *mockRuntime) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRuntime) ListStaleContainers(ctx context.Context, env string, keep map[string]string) ([]string, error) { return nil, nil }
+func (m *mockRuntime) ListDanglingImages(ctx context.Context) ([]string, error) { return nil, nil }
+func (m *mockRuntime) ListOldImages(ctx context.Context, appName string, keepN int) ([]string, error) { return nil, nil }
+func (m *mockRuntime) PruneBuildCache(ctx context.Context) (string, error) { return "", nil }
 func (m *mockRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestResetExtendsTimer(t *testing.T) {

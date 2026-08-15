@@ -34,6 +34,10 @@ type Manager interface {
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
 	RemoveImage(ctx context.Context, imageTag string) error
 	KeepLastNImages(ctx context.Context, appName string, n int) error
+	ListStaleContainers(ctx context.Context, env string, keep map[string]string) ([]string, error)
+	ListDanglingImages(ctx context.Context) ([]string, error)
+	ListOldImages(ctx context.Context, appName string, keepN int) ([]string, error)
+	PruneBuildCache(ctx context.Context) (string, error)
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
@@ -116,6 +120,22 @@ func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
 
 func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
 	return nil
+}
+
+func (m *stubManager) ListStaleContainers(ctx context.Context, env string, keep map[string]string) ([]string, error) {
+	return nil, nil
+}
+
+func (m *stubManager) ListDanglingImages(ctx context.Context) ([]string, error) {
+	return nil, nil
+}
+
+func (m *stubManager) ListOldImages(ctx context.Context, appName string, keepN int) ([]string, error) {
+	return nil, nil
+}
+
+func (m *stubManager) PruneBuildCache(ctx context.Context) (string, error) {
+	return "", nil
 }
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {

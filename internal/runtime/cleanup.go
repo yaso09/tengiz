@@ -152,3 +152,45 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	}
 	return nil
 }
+
+func (r *dockerRuntime) ListStaleContainers(ctx context.Context, env string, keep map[string]string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-a",
+		"--filter", fmt.Sprintf("label=%s", labelKey),
+		"--format", "{{json .}}")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps: %w", err)
+	}
+	return filterStaleContainers(parseContainerLines(string(out)), env, keep), nil
+}
+
+func (r *dockerRuntime) ListDanglingImages(ctx context.Context) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "images",
+		"--filter", "dangling=true",
+		"--format", "{{.ID}}")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker images: %w", err)
+	}
+	return parseImageIDLines(string(out)), nil
+}
+
+func (r *dockerRuntime) ListOldImages(ctx context.Context, appName string, keepN int) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "images",
+		"--filter", fmt.Sprintf("reference=tengiz-apps/%s:*", appName),
+		"--format", "{{.Repository}}:{{.Tag}}|{{.CreatedAt}}")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker images: %w", err)
+	}
+	return oldImageTags(string(out), keepN), nil
+}
+
+func (r *dockerRuntime) PruneBuildCache(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "builder", "prune", "-f")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker builder prune: %w\n%s", err, string(out))
+	}
+	return parseReclaimedSpace(string(out)), nil
+}

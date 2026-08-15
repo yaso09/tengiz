@@ -135,3 +135,47 @@ func TestParseReclaimedSpace(t *testing.T) {
 		})
 	}
 }
+
+func TestStubListStaleContainers(t *testing.T) {
+	m := NewStub()
+	got, err := m.ListStaleContainers(context.Background(), "production", map[string]string{"myapp": "100"})
+	if err != nil {
+		t.Fatalf("ListStaleContainers() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %v, want empty", got)
+	}
+}
+
+func TestStubListDanglingImages(t *testing.T) {
+	m := NewStub()
+	got, err := m.ListDanglingImages(context.Background())
+	if err != nil {
+		t.Fatalf("ListDanglingImages() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %v, want empty", got)
+	}
+}
+
+func TestStubListOldImages(t *testing.T) {
+	m := NewStub()
+	got, err := m.ListOldImages(context.Background(), "myapp", 5)
+	if err != nil {
+		t.Fatalf("ListOldImages() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %v, want empty", got)
+	}
+}
+
+func TestStubPruneBuildCache(t *testing.T) {
+	m := NewStub()
+	got, err := m.PruneBuildCache(context.Background())
+	if err != nil {
+		t.Fatalf("PruneBuildCache() error = %v", err)
+	}
+	if got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}
