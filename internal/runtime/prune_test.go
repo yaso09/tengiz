@@ -1,6 +1,31 @@
 package runtime
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
+
+func TestCleanupCommand(t *testing.T) {
+	tests := []struct {
+		target         CleanupTarget
+		pruneAllImages bool
+		want           []string
+	}{
+		{TargetContainers, false, []string{"container", "prune", "-f", "--filter", "label!=tengiz-app"}},
+		{TargetImages, false, []string{"image", "prune", "-f"}},
+		{TargetImages, true, []string{"image", "prune", "-f", "-a", "--filter", "reference!=tengiz-apps/*"}},
+		{TargetVolumes, false, []string{"volume", "prune", "-f"}},
+		{TargetNetworks, false, []string{"network", "prune", "-f", "--filter", "label!=tengiz-app"}},
+		{TargetBuilder, false, []string{"builder", "prune", "-f"}},
+		{CleanupTarget("unknown"), false, nil},
+	}
+	for _, tc := range tests {
+		got := cleanupCommand(tc.target, tc.pruneAllImages)
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("cleanupCommand(%q, %v) = %v, want %v", tc.target, tc.pruneAllImages, got, tc.want)
+		}
+	}
+}
 
 func TestParseReclaimedSpace(t *testing.T) {
 	tests := []struct {

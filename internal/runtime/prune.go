@@ -36,3 +36,45 @@ func parseReclaimedSpace(output string) (uint64, bool) {
 	}
 	return uint64(val * factor), true
 }
+
+type CleanupTarget string
+
+const (
+	TargetContainers CleanupTarget = "containers"
+	TargetImages     CleanupTarget = "images"
+	TargetVolumes    CleanupTarget = "volumes"
+	TargetNetworks   CleanupTarget = "networks"
+	TargetBuilder    CleanupTarget = "builder"
+)
+
+type CleanupOptions struct {
+	DryRun         bool
+	PruneAllImages bool
+	PruneVolumes   bool
+}
+
+type CleanupStats struct {
+	SpaceReclaimed uint64
+	Detail         string
+}
+
+func cleanupCommand(t CleanupTarget, pruneAllImages bool) []string {
+	switch t {
+	case TargetContainers:
+		return []string{"container", "prune", "-f", "--filter", "label!=tengiz-app"}
+	case TargetImages:
+		args := []string{"image", "prune", "-f"}
+		if pruneAllImages {
+			args = append(args, "-a", "--filter", "reference!=tengiz-apps/*")
+		}
+		return args
+	case TargetVolumes:
+		return []string{"volume", "prune", "-f"}
+	case TargetNetworks:
+		return []string{"network", "prune", "-f", "--filter", "label!=tengiz-app"}
+	case TargetBuilder:
+		return []string{"builder", "prune", "-f"}
+	default:
+		return nil
+	}
+}
