@@ -65,6 +65,7 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
@@ -86,6 +87,13 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("containers", false, "remove stopped containers not managed by Tengiz")
+	cleanupCmd.Flags().Bool("images", false, "remove dangling images and prune old app images")
+	cleanupCmd.Flags().Bool("volumes", false, "remove unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "remove unused networks")
+	cleanupCmd.Flags().Bool("cache", false, "prune the Docker build cache")
+	cleanupCmd.Flags().Bool("all", false, "clean all categories (default when none selected)")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without removing anything")
 }
 
 var rootCmd = &cobra.Command{
@@ -657,6 +665,87 @@ var rmCmd = &cobra.Command{
 		}
 
 		fmt.Printf("[tengiz] removed: %s\n", appName)
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources",
+	Long: `Remove unused Docker resources to reclaim disk space.
+
+By default (or with --all) cleans: stopped containers not managed by Tengiz,
+dangling images, unused volumes, unused networks, and the Docker build cache.
+Tengiz-managed containers (labeled tengiz-app) and volumes mounted by apps are
+always protected. Tagged app images are pruned to the latest 5 per app.
+
+Use --dry-run to see what would be removed without removing anything.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		networks, _ := cmd.Flags().GetBool("networks")
+		cache, _ := cmd.Flags().GetBool("cache")
+		all, _ := cmd.Flags().GetBool("all")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		if all || (!containers && !images && !volumes && !networks && !cache) {
+			containers, images, volumes, networks, cache = true, true, true, true, true
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		opts := runtime.CleanOptions{
+			Containers: containers,
+			Images:     images,
+			Volumes:    volumes,
+			Networks:   networks,
+			Cache:      cache,
+			DryRun:     dryRun,
+		}
+
+		result, err := rt.Clean(cmd.Context(), opts)
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+
+		if images {
+			store := config.NewStoreWithEnv(dataDir, env)
+			apps, listErr := store.ListApps()
+			if listErr == nil {
+				for _, app := range apps {
+					if err := rt.KeepLastNImages(cmd.Context(), app.Name, 5); err != nil {
+						log.Printf("[tengiz] warning: image retention for %s: %v", app.Name, err)
+					}
+				}
+			}
+		}
+
+		if len(result.Items) == 0 {
+			fmt.Printf("[tengiz] nothing to clean\n")
+			return nil
+		}
+
+		mode := "removed"
+		if dryRun {
+			mode = "would be removed"
+		}
+		fmt.Printf("[tengiz] %d item(s) %s:\n", len(result.Items), mode)
+		byKind := make(map[string][]string)
+		for _, item := range result.Items {
+			byKind[item.Kind] = append(byKind[item.Kind], item.ID)
+		}
+		for _, kind := range []string{"container", "image", "volume", "network", "cache"} {
+			ids := byKind[kind]
+			if len(ids) == 0 {
+				continue
+			}
+			fmt.Printf("  %s (%d): %s\n", kind, len(ids), strings.Join(ids, ", "))
+		}
 		return nil
 	},
 }
