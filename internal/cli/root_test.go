@@ -115,6 +115,51 @@ func TestMockRTForDeployImplementsPrune(t *testing.T) {
 	}
 }
 
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCommandFlags(t *testing.T) {
+	for _, flag := range []string{"all", "volumes", "dry-run", "containers", "images", "networks", "build-cache"} {
+		if cleanupCmd.Flags().Lookup(flag) == nil {
+			t.Errorf("cleanupCmd missing --%s flag", flag)
+		}
+	}
+}
+
+func TestCleanupCmdPassesOptions(t *testing.T) {
+	var got runtime.PruneOptions
+	var called bool
+	originalRunE := cleanupCmd.RunE
+	defer func() { cleanupCmd.RunE = originalRunE }()
+	cleanupCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		opts, err := pruneOptionsFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		got = opts
+		called = true
+		return nil
+	}
+
+	rootCmd.SetArgs([]string{"cleanup", "--all", "--volumes", "--dry-run"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !called {
+		t.Fatal("cleanupCmd.RunE was not called")
+	}
+	if !got.All || !got.Volumes || !got.DryRun {
+		t.Errorf("prune options = %+v, want All, Volumes, DryRun all true", got)
+	}
+}
+
 func TestDeployZeroDowntimeCreatesVersionedContainer(t *testing.T) {
 	var m interface{} = &mockRTForDeploy{}
 	if m == nil {
