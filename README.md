@@ -18,6 +18,7 @@
 - **Multi-environment** — Isolate dev/staging/production with `--env` flag, env-scoped config overrides, and separate state files.
 - **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
+- **Docker housekeeping** — `tengiz cleanup` reclaims disk space: stale versioned containers, dangling images, old images beyond retention, and build cache — while protecting deployed apps.
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
@@ -148,6 +149,31 @@ The proxy also starts an **admin API** on `127.0.0.1:9099` for dynamic route man
 List all deployed applications and their status.
 
 Output: `NAME`, `STATE` (running/stopped), `PORT`, `ENVIRONMENT`, `HEALTH`.
+
+### `tengiz cleanup [--dry-run] [-y] [--keep N]`
+
+Reclaim disk space on the Docker host. Removes resources that are no longer
+needed while protecting every currently deployed app:
+
+- **Stale versioned containers** — leftovers from zero-downtime deploys whose
+  `tengiz-deployment` label no longer matches the app's active deployment
+- **Dangling (untagged) images** — intermediate build artifacts
+- **Old app images** beyond the retention limit (default 5 per app)
+- **Docker build cache**
+
+Running containers, the active deployment of every app, the `-latest` image
+tag, volumes, and networks are never touched.
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Show what would be removed without removing anything |
+| `-y`, `--yes` | Execute without confirmation (one of `--dry-run` or `-y` is required) |
+| `--keep N` | Number of recent images to retain per app (default 5) |
+
+```bash
+tengiz cleanup --dry-run   # preview
+tengiz cleanup -y          # execute
+```
 
 ### `tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] <app>`
 
