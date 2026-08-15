@@ -1,9 +1,21 @@
 package runtime
 
 import (
+	"context"
 	"reflect"
 	"testing"
 )
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	stats, err := m.Cleanup(context.Background(), CleanupOptions{DryRun: true})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if stats.SpaceReclaimed != 0 || stats.Detail != "" {
+		t.Fatalf("Cleanup() = %+v, want zero-value stats", stats)
+	}
+}
 
 func TestCleanupCommand(t *testing.T) {
 	tests := []struct {

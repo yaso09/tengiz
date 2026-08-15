@@ -1,8 +1,12 @@
 package runtime
 
 import (
+	"context"
+	"fmt"
+	"os/exec"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 var reclaimedSpaceRe = regexp.MustCompile(`Total reclaimed space:\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z]+)`)
@@ -77,4 +81,37 @@ func cleanupCommand(t CleanupTarget, pruneAllImages bool) []string {
 	default:
 		return nil
 	}
+}
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupStats, error) {
+	if opts.DryRun {
+		cmd := exec.CommandContext(ctx, "docker", "system", "df")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return CleanupStats{}, fmt.Errorf("docker system df: %w\n%s", err, string(out))
+		}
+		return CleanupStats{Detail: string(out)}, nil
+	}
+
+	targets := []CleanupTarget{TargetContainers, TargetImages, TargetNetworks, TargetBuilder}
+	if opts.PruneVolumes {
+		targets = append(targets, TargetVolumes)
+	}
+
+	var stats CleanupStats
+	var detail strings.Builder
+	for _, t := range targets {
+		args := cleanupCommand(t, opts.PruneAllImages)
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return CleanupStats{}, fmt.Errorf("docker %s prune: %w\n%s", t, err, string(out))
+		}
+		if n, ok := parseReclaimedSpace(string(out)); ok {
+			stats.SpaceReclaimed += n
+		}
+		detail.Write(out)
+	}
+	stats.Detail = detail.String()
+	return stats, nil
 }
