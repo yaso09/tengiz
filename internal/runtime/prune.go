@@ -118,12 +118,33 @@ func (r *dockerRuntime) Clean(ctx context.Context, opts CleanOptions) (CleanResu
 func (r *dockerRuntime) orphanStoppedContainers(ctx context.Context) ([]string, error) {
 	out, err := r.dockerOutput(ctx, "ps", "-a", "-q",
 		"--filter", "status=exited",
-		"--filter", "status=created",
-		"--filter", "label!=tengiz-app")
+		"--filter", "status=created")
 	if err != nil {
 		return nil, err
 	}
-	return parseIDList(out), nil
+	protected, err := r.dockerOutput(ctx, "ps", "-a", "-q",
+		"--filter", "status=exited",
+		"--filter", "status=created",
+		"--filter", "label=tengiz-app")
+	if err != nil {
+		return nil, err
+	}
+	return excludeIDs(parseIDList(out), parseIDList(protected)), nil
+}
+
+// excludeIDs returns ids with any id present in excluded removed.
+func excludeIDs(ids, excluded []string) []string {
+	set := make(map[string]struct{}, len(excluded))
+	for _, id := range excluded {
+		set[id] = struct{}{}
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := set[id]; !ok {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func (r *dockerRuntime) danglingImages(ctx context.Context) ([]string, error) {

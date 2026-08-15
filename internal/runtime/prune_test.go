@@ -13,7 +13,7 @@ func writeFakeDocker(t *testing.T, dir, logPath string) {
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "$TENGIZ_TEST_DOCKER_LOG"
 case "$*" in
-  "ps -a -q --filter status=exited --filter status=created --filter label!=tengiz-app")
+  "ps -a -q --filter status=exited --filter status=created")
     printf 'abc123\nxyz789\n'
     ;;
   "images --filter dangling=true -q")
@@ -135,5 +135,58 @@ func TestCleanNoSelectionDoesNothing(t *testing.T) {
 	}
 	if len(result.Items) != 0 {
 		t.Fatalf("Clean() Items = %d, want 0", len(result.Items))
+	}
+}
+
+func TestCleanProtectsTengizContainers(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "calls.log")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$TENGIZ_TEST_DOCKER_LOG"
+case "$*" in
+  "ps -a -q --filter status=exited --filter status=created")
+    printf 'abc123\nxyz789\n'
+    ;;
+  "ps -a -q --filter status=exited --filter status=created --filter label=tengiz-app")
+    printf 'abc123\n'
+    ;;
+esac
+exit 0
+`
+	path := filepath.Join(dir, "docker")
+	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("TENGIZ_TEST_DOCKER_LOG", logPath)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	r := &dockerRuntime{}
+	result, err := r.Clean(context.Background(), CleanOptions{Containers: true})
+	if err != nil {
+		t.Fatalf("Clean() error = %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("Clean() Items = %d, want 1 (protected container excluded): %+v", len(result.Items), result.Items)
+	}
+	if result.Items[0].ID != "xyz789" {
+		t.Fatalf("Clean() Items[0] = %+v, want container xyz789", result.Items[0])
+	}
+
+	calls := readDockerCalls(t, logPath)
+	if !strings.Contains(calls, "rm -f xyz789") {
+		t.Errorf("docker log missing removal of xyz789 in:\n%s", calls)
+	}
+	if strings.Contains(calls, "rm -f abc123") {
+		t.Errorf("protected container abc123 must not be removed, log:\n%s", calls)
+	}
+}
+
+func TestExcludeIDs(t *testing.T) {
+	got := excludeIDs([]string{"a", "b", "c"}, []string{"b"})
+	if len(got) != 2 || got[0] != "a" || got[1] != "c" {
+		t.Fatalf("excludeIDs() = %v, want [a c]", got)
+	}
+	if empty := excludeIDs([]string{"a"}, nil); len(empty) != 1 {
+		t.Fatalf("excludeIDs(no excludes) = %v, want [a]", empty)
 	}
 }
