@@ -99,6 +99,10 @@ func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) erro
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
+func (m *mockRTForDeploy) Cleanup(ctx context.Context, opts runtime.CleanupOptions) (runtime.CleanupResult, error) {
+	return runtime.CleanupResult{}, nil
+}
+
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}
 	if m == nil {
