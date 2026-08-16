@@ -180,6 +180,33 @@ Show build logs from previous deployments.
 
 Without a deployment ID, lists all available build log IDs. With a deployment ID, shows the full build output. Use `--tail N` to show only the last N lines.
 
+### `tengiz cleanup`
+
+Prune unused Docker resources to reclaim disk space on the host. By default
+prunes all four categories (containers, images, volumes, build cache) in
+**dry-run** mode — pass `--yes` to actually execute.
+
+Tengiz-managed containers (labeled `tengiz-app=*`) and volumes mounted by
+deployed apps are preserved, so running apps and their data are never touched.
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Prune stopped containers not managed by Tengiz |
+| `--images` | Prune dangling (untagged) images |
+| `--volumes` | Prune unused volumes not mounted by Tengiz apps |
+| `--build-cache` | Prune the BuildKit build cache |
+| `--all` | Prune all categories (the default behavior) |
+| `--yes` | Actually execute the prune (without this, shows a dry run) |
+| `--env` | Deployment environment (default `production`) |
+
+Example:
+
+```bash
+tengiz cleanup                  # show what would be pruned (dry run)
+tengiz cleanup --yes            # prune everything
+tengiz cleanup --images --yes   # only prune dangling images
+```
+
 ### `tengiz run <app> [--] <command> [args...]`
 
 Run a one-off command in a temporary container created from the app's deployed image. The container is automatically removed on exit — no port allocation needed.
