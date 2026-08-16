@@ -63,6 +63,13 @@ func init() {
 	volumeCmd.AddCommand(volumeListCmd)
 	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(rollbackCmd)
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped non-Tengiz containers")
+	cleanupCmd.Flags().Bool("images", false, "prune dangling images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune Docker build cache")
+	cleanupCmd.Flags().Bool("dry-run", false, "print commands without executing")
+	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
@@ -1475,6 +1482,74 @@ var notificationShowCmd = &cobra.Command{
 		}
 		if cfg.Email != nil {
 			fmt.Printf("Email: configured (%s -> %s, server: %s:%d)\n", cfg.Email.From, cfg.Email.To, cfg.Email.SMTPServer, cfg.Email.SMTPPort)
+		}
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources (containers, images, networks, build cache, volumes)",
+	Long: `Removes unused Docker resources while protecting Tengiz-managed containers.
+
+By default runs: stopped non-Tengiz containers, dangling images, unused networks, and the Docker build cache.
+Use --volumes to also prune unused volumes. Passing any category flag runs ONLY those categories.
+
+Use --dry-run to print the exact docker commands that would run without executing them.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return err
+		}
+
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		cats := []runtime.CleanupCategory{}
+		for _, f := range []struct {
+			flag string
+			cat  runtime.CleanupCategory
+		}{
+			{"containers", runtime.CleanupContainers},
+			{"images", runtime.CleanupImages},
+			{"volumes", runtime.CleanupVolumes},
+			{"networks", runtime.CleanupNetworks},
+			{"build-cache", runtime.CleanupBuildCache},
+		} {
+			set, _ := cmd.Flags().GetBool(f.flag)
+			if set {
+				cats = append(cats, f.cat)
+			}
+		}
+
+		reports, err := rt.Cleanup(cmd.Context(), runtime.CleanupOptions{
+			Categories: cats,
+			DryRun:     dryRun,
+		})
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+
+		if len(reports) == 0 {
+			fmt.Println("[tengiz] nothing to clean")
+			return nil
+		}
+
+		for _, r := range reports {
+			if dryRun {
+				fmt.Printf("[tengiz] dry-run: %s\n", r.Command)
+				continue
+			}
+			fmt.Printf("[tengiz] cleaned %s\n", r.Category)
+			if r.Output != "" {
+				for _, line := range strings.Split(r.Output, "\n") {
+					if line != "" {
+						fmt.Printf("  %s\n", line)
+					}
+				}
+			}
+			if r.Error != "" {
+				fmt.Printf("  warning: %s\n", r.Error)
+			}
 		}
 		return nil
 	},
