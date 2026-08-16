@@ -57,3 +57,63 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	}
 	return nil
 }
+
+var pruneResource = map[CleanupCategory]string{
+	CleanupContainers: "container",
+	CleanupImages:     "image",
+	CleanupVolumes:    "volume",
+	CleanupNetworks:   "network",
+	CleanupBuildCache: "builder",
+}
+
+func pruneCommand(cat CleanupCategory) []string {
+	resource, ok := pruneResource[cat]
+	if !ok {
+		return []string{"help"}
+	}
+	args := []string{resource, "prune", "-f"}
+	switch cat {
+	case CleanupContainers:
+		args = append(args, "--filter", "label!=tengiz-app")
+	case CleanupImages:
+		args = append(args, "--filter", "dangling=true")
+	}
+	return args
+}
+
+func defaultCleanupCategories() []CleanupCategory {
+	return []CleanupCategory{
+		CleanupContainers,
+		CleanupImages,
+		CleanupNetworks,
+		CleanupBuildCache,
+	}
+}
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) ([]CleanupReport, error) {
+	cats := opts.Categories
+	if len(cats) == 0 {
+		cats = defaultCleanupCategories()
+	}
+	reports := make([]CleanupReport, 0, len(cats))
+	for _, cat := range cats {
+		cmdArgs := pruneCommand(cat)
+		report := CleanupReport{
+			Category: cat,
+			Command:  strings.Join(append([]string{"docker"}, cmdArgs...), " "),
+		}
+		if opts.DryRun {
+			reports = append(reports, report)
+			continue
+		}
+		cmd := exec.CommandContext(ctx, "docker", cmdArgs...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			report.Error = fmt.Sprintf("%v\n%s", err, strings.TrimSpace(string(out)))
+		} else {
+			report.Output = strings.TrimSpace(string(out))
+		}
+		reports = append(reports, report)
+	}
+	return reports, nil
+}
