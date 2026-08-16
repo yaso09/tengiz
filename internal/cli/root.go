@@ -39,6 +39,7 @@ func init() {
 	rootCmd.AddCommand(deployCmd)
 	rootCmd.AddCommand(proxyCmd)
 	rootCmd.AddCommand(psCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(rmCmd)
@@ -86,6 +87,10 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers not managed by Tengiz")
+	cleanupCmd.Flags().Bool("images", false, "remove dangling and unused images not managed by Tengiz")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
 }
 
 var rootCmd = &cobra.Command{
@@ -598,6 +603,49 @@ var psCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Clean up unused Docker resources",
+	Long:  "Prunes stopped containers, unused images, networks, and volumes. " +
+		"Containers managed by Tengiz (labeled tengiz-app) and images in the tengiz-apps/ " +
+		"namespace are never removed. By default all categories are cleaned; use flags to " +
+		"select specific categories.",
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+		opts := cleanupOptions(cmd)
+		report, err := rt.Cleanup(context.Background(), opts)
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+		fmt.Print(formatCleanupReport(report))
+		return nil
+	},
+}
+
+func cleanupOptions(cmd *cobra.Command) runtime.CleanupOptions {
+	containers, _ := cmd.Flags().GetBool("containers")
+	images, _ := cmd.Flags().GetBool("images")
+	networks, _ := cmd.Flags().GetBool("networks")
+	volumes, _ := cmd.Flags().GetBool("volumes")
+	all := !containers && !images && !networks && !volumes
+	return runtime.CleanupOptions{
+		Containers: all || containers,
+		Images:     all || images,
+		Networks:   all || networks,
+		Volumes:    all || volumes,
+	}
+}
+
+func formatCleanupReport(report *runtime.CleanupReport) string {
+	return fmt.Sprintf("[tengiz] cleanup complete: %d containers, %d images (%d dangling), %d networks, %d volumes removed\n",
+		report.ContainersRemoved, report.ImagesRemoved, report.DanglingImagesRemoved,
+		report.NetworksRemoved, report.VolumesRemoved)
 }
 
 var stopCmd = &cobra.Command{
