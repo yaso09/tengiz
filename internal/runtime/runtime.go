@@ -28,12 +28,23 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type PruneOptions struct {
+	All        bool // prune all unused images, not just dangling ones
+	BuildCache bool // also prune the docker build cache
+}
+
+type PruneReport struct {
+	Reclaimed string // "Total reclaimed space: X" summary from docker
+	Output    string // full docker combined output
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
 	RemoveImage(ctx context.Context, imageTag string) error
 	KeepLastNImages(ctx context.Context, appName string, n int) error
+	Prune(ctx context.Context, opts PruneOptions) (*PruneReport, error)
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
@@ -116,6 +127,10 @@ func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
 
 func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
 	return nil
+}
+
+func (m *stubManager) Prune(ctx context.Context, opts PruneOptions) (*PruneReport, error) {
+	return &PruneReport{}, nil
 }
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {

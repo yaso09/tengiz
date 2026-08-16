@@ -57,3 +57,53 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	}
 	return nil
 }
+
+const tengizLabelFilter = "label!=tengiz-app"
+
+func buildPruneArgs(opts PruneOptions) []string {
+	args := []string{"system", "prune", "-f", "--filter", tengizLabelFilter}
+	if opts.All {
+		args = append(args, "-a")
+	}
+	return args
+}
+
+func parseReclaimedSpace(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "Total reclaimed space:") {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (*PruneReport, error) {
+	report := &PruneReport{}
+
+	pruneCmd := exec.CommandContext(ctx, "docker", buildPruneArgs(opts)...)
+	out, err := pruneCmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker system prune: %w\n%s", err, string(out))
+	}
+	report.Output = string(out)
+	report.Reclaimed = parseReclaimedSpace(report.Output)
+
+	if opts.BuildCache {
+		cacheCmd := exec.CommandContext(ctx, "docker", "builder", "prune", "-f")
+		cacheOut, cacheErr := cacheCmd.CombinedOutput()
+		if cacheErr != nil {
+			return nil, fmt.Errorf("docker builder prune: %w\n%s", cacheErr, string(cacheOut))
+		}
+		if reclaimed := parseReclaimedSpace(string(cacheOut)); reclaimed != "" {
+			if report.Reclaimed != "" {
+				report.Reclaimed += "; " + reclaimed
+			} else {
+				report.Reclaimed = reclaimed
+			}
+		}
+		report.Output += "\n" + string(cacheOut)
+	}
+
+	return report, nil
+}

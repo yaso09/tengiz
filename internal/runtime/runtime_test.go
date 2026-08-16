@@ -247,6 +247,17 @@ func TestStubRun(t *testing.T) {
 	}
 }
 
+func TestStubPrune(t *testing.T) {
+	m := NewStub()
+	report, err := m.Prune(context.Background(), PruneOptions{All: true, BuildCache: true})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if report == nil {
+		t.Fatal("Prune() returned nil report")
+	}
+}
+
 func TestStubRunInteractive(t *testing.T) {
 	m := NewStub()
 	cfg := &types.AppConfig{Name: "testapp", Env: map[string]string{"FOO": "bar"}}
