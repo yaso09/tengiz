@@ -79,3 +79,22 @@ func TestStubCleanup(t *testing.T) {
 		t.Errorf("stub Cleanup should return zeroed result, got %+v", res)
 	}
 }
+
+func TestParseReclaimed(t *testing.T) {
+	tests := []struct {
+		in   string
+		want int64
+	}{
+		{"Total reclaimed space: 1.234GB", 1},
+		{"Total reclaimed space: 56.7MB", 56},
+		{"Total reclaimed space: 0B", 0},
+		{"", 0},
+		{"some unrelated output", 0},
+	}
+	for _, tt := range tests {
+		got := parseReclaimed(tt.in)
+		if got != tt.want {
+			t.Errorf("parseReclaimed(%q) = %d, want %d", tt.in, got, tt.want)
+		}
+	}
+}
