@@ -99,6 +99,10 @@ func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) erro
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
+func (m *mockRTForDeploy) Cleanup(ctx context.Context, opts runtime.CleanupOptions) (runtime.CleanupResult, error) {
+	return runtime.CleanupResult{}, nil
+}
+
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}
 	if m == nil {
@@ -374,5 +378,80 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
 		}
+	}
+}
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not found: %v", err)
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCmdFlags(t *testing.T) {
+	for _, flag := range []string{"containers", "images", "build-cache", "volumes", "networks"} {
+		if cleanupCmd.Flags().Lookup(flag) == nil {
+			t.Errorf("cleanupCmd missing --%s flag", flag)
+		}
+	}
+}
+
+func TestCleanupCmdFlagDefaults(t *testing.T) {
+	containers, _ := cleanupCmd.Flags().GetBool("containers")
+	images, _ := cleanupCmd.Flags().GetBool("images")
+	buildCache, _ := cleanupCmd.Flags().GetBool("build-cache")
+	volumes, _ := cleanupCmd.Flags().GetBool("volumes")
+	networks, _ := cleanupCmd.Flags().GetBool("networks")
+
+	if !containers || !images || !buildCache {
+		t.Error("--containers/--images/--build-cache should default to true (safe categories)")
+	}
+	if volumes || networks {
+		t.Error("--volumes/--networks should default to false (opt-in categories)")
+	}
+}
+
+func TestCleanupCmdParsesOptions(t *testing.T) {
+	var got runtime.CleanupOptions
+	originalRunE := cleanupCmd.RunE
+	defer func() { cleanupCmd.RunE = originalRunE }()
+	cleanupCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		buildCache, _ := cmd.Flags().GetBool("build-cache")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		networks, _ := cmd.Flags().GetBool("networks")
+		got = runtime.CleanupOptions{
+			Containers: containers,
+			Images:     images,
+			BuildCache: buildCache,
+			Volumes:    volumes,
+			Networks:   networks,
+		}
+		return nil
+	}
+
+	rootCmd.SetArgs([]string{"cleanup", "--containers=false", "--volumes"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if got.Containers {
+		t.Error("Containers = true, want false (--containers=false)")
+	}
+	if !got.Images {
+		t.Error("Images = false, want true (default)")
+	}
+	if !got.BuildCache {
+		t.Error("BuildCache = false, want true (default)")
+	}
+	if !got.Volumes {
+		t.Error("Volumes = false, want true (--volumes)")
+	}
+	if got.Networks {
+		t.Error("Networks = true, want false (default)")
 	}
 }

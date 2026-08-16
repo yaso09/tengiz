@@ -65,6 +65,12 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("containers", true, "remove stopped Tengiz-managed containers")
+	cleanupCmd.Flags().Bool("images", true, "remove dangling build images")
+	cleanupCmd.Flags().Bool("build-cache", true, "remove unused build cache")
+	cleanupCmd.Flags().Bool("volumes", false, "also remove unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "also remove unused networks")
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
@@ -1157,6 +1163,59 @@ Examples:
 			return fmt.Errorf("run: %w", err)
 		}
 
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Prune unused Docker resources to reclaim disk space",
+	Long: `Removes unused Docker resources to reclaim disk space.
+
+Stopped Tengiz-managed containers (labeled tengiz-app), dangling build
+images, and unused build cache are removed by default. Running containers
+and tagged images are never touched. Use --volumes and --networks to also
+prune unused volumes and networks (they may affect resources not managed
+by Tengiz).`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		buildCache, _ := cmd.Flags().GetBool("build-cache")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		networks, _ := cmd.Flags().GetBool("networks")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		opts := runtime.CleanupOptions{
+			Containers: containers,
+			Images:     images,
+			BuildCache: buildCache,
+			Volumes:    volumes,
+			Networks:   networks,
+		}
+
+		fmt.Println("[tengiz] cleaning up Docker resources...")
+		res, err := rt.Cleanup(cmd.Context(), opts)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println("[tengiz] cleanup complete:")
+		fmt.Printf("  containers removed: %d\n", res.ContainersRemoved)
+		fmt.Printf("  images removed:     %d\n", res.ImagesRemoved)
+		fmt.Printf("  volumes removed:    %d\n", res.VolumesRemoved)
+		fmt.Printf("  networks removed:   %d\n", res.NetworksRemoved)
+		if buildCache {
+			if res.BuildCacheCleared {
+				fmt.Println("  build cache:        cleared")
+			} else {
+				fmt.Println("  build cache:        nothing to clear")
+			}
+		}
 		return nil
 	},
 }
