@@ -86,6 +86,13 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("containers", true, "prune stopped containers (default true)")
+	cleanupCmd.Flags().Bool("images", true, "prune dangling images (default true)")
+	cleanupCmd.Flags().Bool("volumes", true, "prune unused volumes (default true)")
+	cleanupCmd.Flags().Bool("networks", true, "prune unused networks (default true)")
+	cleanupCmd.Flags().Bool("cache", true, "prune build cache (default true)")
+	cleanupCmd.Flags().Bool("dry-run", false, "show reclaimable space without removing anything")
 }
 
 var rootCmd = &cobra.Command{
@@ -1595,6 +1602,70 @@ var configShowCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Prune unused Docker resources to reclaim disk space",
+	Long: `Prunes unused Docker resources: stopped containers, dangling images, unused volumes,
+unused networks, and build cache.
+
+Tengiz-managed containers (labeled tengiz-app) are always protected and never removed.
+By default all categories are pruned. Disable a category with --<category>=false.
+
+Examples:
+  tengiz cleanup                    # prune everything
+  tengiz cleanup --dry-run          # show reclaimable space without removing anything
+  tengiz cleanup --images=false     # skip image pruning
+  tengiz cleanup --volumes=false --networks=false`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts, err := cleanupOptions(cmd)
+		if err != nil {
+			return err
+		}
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+		res, err := rt.Prune(cmd.Context(), opts)
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+		if res.DryRun {
+			fmt.Print(res.Output)
+			return nil
+		}
+		if res.ReclaimedSpace == "" {
+			fmt.Println("[tengiz] nothing to reclaim.")
+			return nil
+		}
+		fmt.Printf("[tengiz] reclaimed: %s\n", res.ReclaimedSpace)
+		return nil
+	},
+}
+
+func cleanupOptions(cmd *cobra.Command) (runtime.PruneOptions, error) {
+	opts := runtime.PruneOptions{}
+	var err error
+	if opts.Containers, err = cmd.Flags().GetBool("containers"); err != nil {
+		return opts, err
+	}
+	if opts.Images, err = cmd.Flags().GetBool("images"); err != nil {
+		return opts, err
+	}
+	if opts.Volumes, err = cmd.Flags().GetBool("volumes"); err != nil {
+		return opts, err
+	}
+	if opts.Networks, err = cmd.Flags().GetBool("networks"); err != nil {
+		return opts, err
+	}
+	if opts.Cache, err = cmd.Flags().GetBool("cache"); err != nil {
+		return opts, err
+	}
+	if opts.DryRun, err = cmd.Flags().GetBool("dry-run"); err != nil {
+		return opts, err
+	}
+	return opts, nil
 }
 
 var secretCmd = &cobra.Command{

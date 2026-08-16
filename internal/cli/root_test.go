@@ -98,6 +98,7 @@ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppCon
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRTForDeploy) Prune(ctx context.Context, opts runtime.PruneOptions) (runtime.PruneResult, error) { return runtime.PruneResult{}, nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}
@@ -374,5 +375,56 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
 		}
+	}
+}
+
+func TestCleanupCmdRegistered(t *testing.T) {
+	found := false
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "cleanup" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("cleanup command not registered on rootCmd")
+	}
+}
+
+func TestCleanupOptions(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("containers", true, "")
+	cmd.Flags().Bool("images", true, "")
+	cmd.Flags().Bool("volumes", true, "")
+	cmd.Flags().Bool("networks", true, "")
+	cmd.Flags().Bool("cache", true, "")
+	cmd.Flags().Bool("dry-run", false, "")
+
+	opts, err := cleanupOptions(cmd)
+	if err != nil {
+		t.Fatalf("cleanupOptions() error = %v", err)
+	}
+	if !opts.Containers || !opts.Images || !opts.Volumes || !opts.Networks || !opts.Cache {
+		t.Errorf("default cleanupOptions = %+v, want all categories enabled", opts)
+	}
+	if opts.DryRun {
+		t.Errorf("default cleanupOptions.DryRun = true, want false")
+	}
+
+	if err := cmd.Flags().Set("dry-run", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("images", "false"); err != nil {
+		t.Fatal(err)
+	}
+	opts, err = cleanupOptions(cmd)
+	if err != nil {
+		t.Fatalf("cleanupOptions() error = %v", err)
+	}
+	if !opts.DryRun {
+		t.Error("cleanupOptions().DryRun = false, want true")
+	}
+	if opts.Images {
+		t.Error("cleanupOptions().Images = true, want false")
 	}
 }
