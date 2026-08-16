@@ -39,6 +39,7 @@ func init() {
 	rootCmd.AddCommand(deployCmd)
 	rootCmd.AddCommand(proxyCmd)
 	rootCmd.AddCommand(psCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(rmCmd)
@@ -86,6 +87,8 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("all", false, "remove all unused images, not just dangling ones")
+	cleanupCmd.Flags().Bool("cache", false, "also prune the Docker build cache")
 }
 
 var rootCmd = &cobra.Command{
@@ -595,6 +598,31 @@ var psCmd = &cobra.Command{
 				env = "-"
 			}
 			fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", a.Name, a.State, portStr, env, health)
+		}
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources",
+	Long:  "Prunes unused Docker containers, images, networks, and volumes to reclaim disk space. Containers managed by Tengiz (labeled tengiz-app) are always preserved.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		all, _ := cmd.Flags().GetBool("all")
+		cache, _ := cmd.Flags().GetBool("cache")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return err
+		}
+		report, err := rt.Prune(context.Background(), runtime.PruneOptions{All: all, BuildCache: cache})
+		if err != nil {
+			return err
+		}
+		if report.Reclaimed != "" {
+			fmt.Println(report.Reclaimed)
+		} else {
+			fmt.Println("Cleanup complete.")
 		}
 		return nil
 	},

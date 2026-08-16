@@ -291,6 +291,24 @@ func TestBuildLogsCmdRegistration(t *testing.T) {
 	}
 }
 
+func TestCleanupCmdRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCmdFlags(t *testing.T) {
+	for _, name := range []string{"all", "cache"} {
+		if cleanupCmd.Flags().Lookup(name) == nil {
+			t.Errorf("cleanupCmd missing --%s flag", name)
+		}
+	}
+}
+
 func TestLogsCmdWithFlags(t *testing.T) {
 	var called bool
 
