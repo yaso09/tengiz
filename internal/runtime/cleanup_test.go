@@ -18,3 +18,14 @@ func TestStubKeepLastNImages(t *testing.T) {
 		t.Fatalf("KeepLastNImages() error = %v", err)
 	}
 }
+
+func TestStubPrune(t *testing.T) {
+	m := NewStub()
+	res, err := m.Prune(context.Background(), PruneOptions{Containers: true, Images: true})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if res.ReclaimedSpace != "" || res.Output != "" {
+		t.Errorf("Prune() result = %+v, want empty", res)
+	}
+}

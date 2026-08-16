@@ -28,6 +28,21 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type PruneOptions struct {
+	Containers bool
+	Images     bool
+	Volumes    bool
+	Networks   bool
+	Cache      bool
+	DryRun     bool
+}
+
+type PruneResult struct {
+	ReclaimedSpace string // comma-joined reclaimed sizes, e.g. "1.234MB, 0B"
+	Output         string // raw docker output; set when DryRun is true
+	DryRun         bool
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
@@ -46,6 +61,7 @@ type Manager interface {
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
+	Prune(ctx context.Context, opts PruneOptions) (PruneResult, error)
 }
 
 type stubManager struct{}
@@ -120,4 +136,8 @@ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
 	return nil
+}
+
+func (m *stubManager) Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
+	return PruneResult{}, nil
 }
