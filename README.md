@@ -235,6 +235,26 @@ Rollback to the previous deployment. The previous active container is started on
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup`
+
+Prune unused Docker resources to reclaim disk space: stopped containers, dangling images, unused volumes, unused networks, and build cache. Tengiz-managed containers (labeled `tengiz-app`) are always protected and never removed.
+
+```
+tengiz cleanup                     # prune everything
+tengiz cleanup --dry-run           # show reclaimable space without removing anything
+tengiz cleanup --images=false      # skip image pruning
+tengiz cleanup --volumes=false     # skip volume pruning
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--containers` | `true` | prune stopped containers not managed by Tengiz |
+| `--images` | `true` | prune dangling images |
+| `--volumes` | `true` | prune unused volumes |
+| `--networks` | `true` | prune unused networks |
+| `--cache` | `true` | prune build cache |
+| `--dry-run` | `false` | show reclaimable space without removing anything |
+
 ### `tengiz domain`
 
 Manage custom domains for applications.
