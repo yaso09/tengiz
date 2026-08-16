@@ -52,8 +52,11 @@ func (p *VaultProvider) metadataPath(appName string) string {
 func (p *VaultProvider) Set(appName, key, value string) error {
 	sp := p.secretPath(appName)
 	secret, err := p.client.Logical().Read(sp)
+	if err != nil {
+		return fmt.Errorf("vault read: %w", err)
+	}
 	data := make(map[string]interface{})
-	if err == nil && secret != nil {
+	if secret != nil {
 		if d, ok := secret.Data["data"].(map[string]interface{}); ok {
 			for k, v := range d {
 				if s, ok := v.(string); ok {
