@@ -41,6 +41,7 @@ tengiz init [name]    → create .tengiz.yaml
 tengiz deploy [dir]   → detect, build, run container
 tengiz proxy [-a app] → start reverse proxy on :8080 (use -a to route all traffic to one app)
 tengiz ps             → list apps from Docker
+tengiz cleanup [--all] [--cache] → label-filtered docker system prune (preserves Tengiz-managed containers)
 tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] app  → stream logs with filtering
 tengiz build-logs <app> [deployment-id] → show build logs from previous deployments (--tail N)
 tengiz run <app> <cmd> [-i] [-e KEY=VALUE] → one-off command in temporary container
