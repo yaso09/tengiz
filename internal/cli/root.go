@@ -39,6 +39,7 @@ func init() {
 	rootCmd.AddCommand(deployCmd)
 	rootCmd.AddCommand(proxyCmd)
 	rootCmd.AddCommand(psCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(rmCmd)
@@ -86,6 +87,13 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("containers", false, "prune unused containers")
+	cleanupCmd.Flags().Bool("images", false, "prune dangling images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune build cache")
+	cleanupCmd.Flags().Bool("all", false, "prune all categories (default)")
+	cleanupCmd.Flags().Bool("yes", false, "actually execute the prune (default is dry-run)")
+	cleanupCmd.Flags().String("env", "production", "deployment environment")
 }
 
 var rootCmd = &cobra.Command{
@@ -595,6 +603,70 @@ var psCmd = &cobra.Command{
 				env = "-"
 			}
 			fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", a.Name, a.State, portStr, env, health)
+		}
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Prune unused Docker resources (containers, images, volumes, build cache)",
+	Long: `Prunes unused Docker resources to reclaim disk space. By default prunes
+all categories (containers, images, volumes, build cache) and runs in dry-run
+mode — pass --yes to actually execute.
+
+Tengiz-managed containers (labeled tengiz-app=*) and volumes mounted by
+deployed apps are preserved. Use individual category flags to limit what is
+pruned.
+
+Examples:
+  tengiz cleanup                # show what would be pruned (dry run)
+  tengiz cleanup --yes          # prune everything
+  tengiz cleanup --images --yes # only prune dangling images`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		buildCache, _ := cmd.Flags().GetBool("build-cache")
+		all, _ := cmd.Flags().GetBool("all")
+		yes, _ := cmd.Flags().GetBool("yes")
+
+		if all {
+			containers, images, volumes, buildCache = true, true, true, true
+		}
+		if !containers && !images && !volumes && !buildCache {
+			containers, images, volumes, buildCache = true, true, true, true
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		opts := runtime.CleanupOptions{
+			Containers: containers,
+			Images:     images,
+			Volumes:    volumes,
+			BuildCache: buildCache,
+			DryRun:     !yes,
+		}
+
+		mode := "would prune"
+		if yes {
+			mode = "pruned"
+		}
+		fmt.Printf("[tengiz] %s: containers=%v images=%v volumes=%v build-cache=%v\n",
+			mode, containers, images, volumes, buildCache)
+
+		res, err := rt.Cleanup(cmd.Context(), opts)
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+
+		if yes {
+			fmt.Printf("[tengiz] reclaimed: %d containers, %d images, %d volumes, %d build cache\n",
+				res.ContainersRemoved, res.ImagesRemoved, res.VolumesRemoved, res.BuildCacheReclaimed)
 		}
 		return nil
 	},
