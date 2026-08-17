@@ -1580,3 +1580,343 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Each datastore collection can be configured with a memory type: `Heap` (fast, volatile — data lost on canister upgrade) or `Stable` (persistent across upgrades, slightly slower). This lets developers make performance/cost trade-offs per collection: cache/session data goes in Heap for speed, user profiles go in Stable for durability. Collections default to Heap for maximum performance. The memory type affects both read/write latency and upgrade behavior — Stable collections survive platform upgrades, Heap collections are re-initialized.
 - **Why add to Tengiz:** Tengiz's planned Built-in NoSQL Datastore (#1) needs a similar performance/storage trade-off. Some data is ephemeral (sessions, cache, rate limit counters) — stored in-memory for speed and automatically reset on restart. Other data is persistent (user profiles, settings, content) — written to SQLite or disk-backed storage for durability. A `db.<collection>.memory: ephemeral | persistent` setting in `.tengiz.yaml` lets developers choose: ephemeral collections use Go maps (fast, lost on container restart), persistent collections use embedded SQLite tables (durable, survives restarts). This is particularly important for scale-to-zero — ephemeral collections naturally reset on cold start (good for session data that should force re-login), persistent collections survive scale-to-zero cycles (good for app state). Implementation: two store backends (`MemoryStore` and `SQLiteStore`) implementing the same `DocStore` interface, selected per-collection at deploy time. Low-medium effort, fits Tengiz's embedded database philosophy. Complements the NoSQL Datastore with production-grade configurability.
 - **Detected:** 2026-07-17
+
+---
+
+## Crash-Loop Detection & Restart Backoff
+- **Source:** Coolify
+- **Description:** Coolify tracks `restart_count`, `last_restart_at`, and `last_restart_type` on every application, database, and service. Each app has a `max_restart_count` (default 10). When a container crashes repeatedly, the counter increments and auto-restart stops once the ceiling is reached — preventing a crash-looping app from permanently churning the Docker daemon. Combined with the background `ServerCheckJob` monitoring, crash loops are surfaced to the UI for investigation.
+- **Why add to Tengiz:** Scale-to-zero means containers constantly start/stop, and the health package already auto-restarts failing containers. But an app with a broken config will restart forever (restart storm), wasting resources and masking the real error. Crash-loop detection with a max-restart ceiling (default 10) converts a silent restart storm into a visible `tengiz ps` status like `CrashLooping (9/10 restarts)`. `.tengiz.yaml`'da `health.max_restarts: 10` ile yapılandırılır. Complements existing health checks (#4) and restart policies (#44) — those define restart behavior; this bounds it and surfaces it.
+- **Detected:** 2026-08-17
+
+## Deploy Skip on Unchanged Config (Config Hash Diffing)
+- **Source:** Coolify
+- **Description:** Every Coolify deployment records `configuration_hash`, `configuration_snapshot`, and `configuration_diff` on the deployment queue entry. Applications and services carry a `config_hash` of their effective config (images, domains, storage, env vars). When a push arrives but the effective config hash matches the last deployed hash, the redeploy can be skipped — no wasted build, no container churn. The diff is also stored for audit and rollback analysis.
+- **Why add to Tengiz:** Rapid-fire CI/CD and webhook pushes often carry no meaningful config change (a docs-only commit, a metadata edit). Today Tengiz rebuilds and redeploys unconditionally, wasting build time and triggering unnecessary cold-starts. Computing a SHA-256 over the effective deploy inputs (git SHA, Dockerfile, `.tengiz.yaml`, env vars, secrets refs) and skipping when unchanged turns no-op deploys into instant `No changes — deploy skipped`. `.tengiz.yaml`'da `deploy.skip_unchanged: true`. The recorded snapshot also strengthens rollback with a before/after diff. Low effort (hash comparison in `deploy.go`), high CI/CD value.
+- **Detected:** 2026-08-17
+
+## Skip-Deploy Commit Detection (`[skip cd]`)
+- **Source:** Coolify
+- **Description:** Coolify's `DetectsSkipDeployCommits` concern checks incoming webhook payloads for commits whose messages contain `[skip cd]` (also `[ci skip]` / `[skip ci]` conventions). When matched, the deployment is not queued at all — the push is acknowledged but produces no build. The parser is case-insensitive and supports multiple skip tokens.
+- **Why add to Tengiz:** Docs changes, dependency-bump commits, and CI-triggered commits shouldn't always spawn a full deploy. GitHub Actions, Dependabot, and renovate produce high-volume commits that today would each trigger a `tengiz` build. A `[skip cd]` convention lets developers opt out explicitly and is the industry-standard gate. Implementation: a regex match over commit messages in the webhook handler (and `git pull` for gitdeploy). Complements Webhook Event Filtering (#69) which filters by branch/path — this filters by commit message. Trivial effort, immediate DX win.
+- **Detected:** 2026-08-17
+
+## Webhook SSRF Protection (Internal Host Allowlist)
+- **Source:** Coolify
+- **Description:** Coolify's instance settings include `webhook_allowed_internal_hosts` and `webhook_allow_localhost` to control which internal hosts outbound webhook requests (notifications, outgoing webhooks) may reach. This prevents an attacker who can trigger a webhook from using it as an SSRF proxy into the Docker network, the host metadata service, or internal Coolify services.
+- **Why add to Tengiz:** Once outgoing webhooks and the notification system exist, the webhook URL becomes an attack vector — a crafted payload could point a request at `169.254.169.254` (cloud metadata), the Docker socket, or other app containers. An allowlist of internal hosts (`~/.tengiz/config.json` `webhook.allow_internal_hosts`, `webhook.allow_localhost`) blocks this class of attack with ~30 lines of Go `net/url` checking before any HTTP request is made. Complements HMAC webhook signing (inbound) — this protects outbound. Low effort, meaningful security hardening.
+- **Detected:** 2026-08-17
+
+## Public Port Auto-Expiry (Ephemeral TCP Exposure)
+- **Source:** Coolify
+- **Description:** Every standalone database and service database carries a `public_port_timeout` (added 2026-02). When a database port is exposed publicly, the exposure is automatically removed after N minutes. This guards against the common mistake of leaving a database open to the internet — the TCP proxy stops forwarding once the timer expires, and the port is returned to the pool.
+- **Why add to Tengiz:** Managed databases and accessory services will tempt users to expose Postgres/Redis ports for debugging and then forget — a classic data-exposure incident. An auto-expiry on public port exposure (`tengiz db expose mydb --timeout 30m`) gives a short, safe window for debugging then reverts automatically. It fits Tengiz's scale-to-zero philosophy perfectly: ephemeral by default. Reuses the existing port allocation store. Low effort, high security value.
+- **Detected:** 2026-08-17
+
+## WWW/Non-WWW Redirect Policy
+- **Source:** Coolify
+- **Description:** Coolify's `RedirectTypes` enum (`both`, `www`, `non-www`) controls per-app WWW vs non-WWW canonicalization at the proxy level. Configuring `non-www` auto-redirects `www.myapp.com` → `myapp.com` with a 301, and vice versa for `www`. `both` leaves it unredirected.
+- **Why add to Tengiz:** URL Redirect & Rewrite covers arbitrary redirect rules but not the canonical domain normalization every production site needs for SEO and session consistency. A `domain.redirect: non-www` toggle in `.tengiz.yaml` auto-handles the most common redirect pair without users writing rules. Implementation: a small check in the proxy's host-based routing that redirects the alternate form with a 301 before forwarding. Complements Force HTTPS with another canonicalization middleware. Low effort, high polish.
+- **Detected:** 2026-08-17
+
+## Environment Variable Scoping (Buildtime / Runtime / Preview)
+- **Source:** Coolify
+- **Description:** Coolify env vars carry `is_buildtime`, `is_runtime`, `is_preview`, `is_literal`, `is_multiline`, `comment`, `version`, and `order` flags. Buildtime-only vars (e.g. `NEXT_PUBLIC_*`) are injected into `docker build` but never into the running container; runtime-only vars (e.g. `DATABASE_URL`) are injected at run but never baked into the image; preview-only vars apply only to PR previews. `is_literal` disables `[[...]]` interpolation, `is_multiline` allows multi-line values, and vars are versioned/ordered.
+- **Why add to Tengiz:** Tengiz currently treats env vars as a single flat list passed to the running container. Framework builds need build-only vars (`NEXT_PUBLIC_*`, `VITE_*`), and putting runtime secrets into the build leaks them into image history. Env scoping solves both: `env.buildtime:`, `env.runtime:`, `env.preview:` sections in `.tengiz.yaml`. Build Arguments from Env covers the mechanism; this adds explicit scoping and preview-application. Complements Preview Deployments with per-PR env. Medium effort, high correctness value.
+- **Detected:** 2026-08-17
+
+## Subpath Hosting (URL Prefix Stripping)
+- **Source:** Coolify
+- **Description:** Coolify's `is_stripprefix_enabled` (paired with `is_gzip_enabled`) lets a service be served under a URL prefix instead of its own subdomain. The proxy strips the prefix (`/grafana` → `/`) before forwarding to the container, so multiple services can share one domain at distinct paths (`example.com/grafana`, `example.com/api`).
+- **Why add to Tengiz:** Users often want one domain serving several services (metrics dashboards, admin panels, API + web) without juggling subdomains or wildcard certs. `tengiz deploy --path-prefix /grafana` or `.tengiz.yaml`'da `proxy.strip_prefix: /grafana` enables this with a small proxy middleware (prefix strip + rewrite before `httputil.ReverseProxy`). Complements custom domains (implemented) and the advanced proxy config. Low-medium effort, fills a real gap for single-domain setups.
+- **Detected:** 2026-08-17
+
+## Volume Cloning (Cross-App/Server Data Copy)
+- **Source:** Coolify
+- **Description:** `VolumeCloneJob` clones Docker volumes between destinations (local and remote), and `HostPathCloneJob` copies bind-mount host paths between servers via a staging dir (`docker run` + tar). Data can be duplicated from a running service to a new app or another server — used for staging seeding, environment migration, and backup-of-record duplication.
+- **Why add to Tengiz:** Cloning a volume is the data-level companion to App Cloning (config copy). Use cases: seed a staging app with production data, migrate an accessory's data to a new server, duplicate a database volume before a risky migration. `tengiz volume clone <app> <new-app>` or `tengiz volume clone <app> --server other` maps cleanly onto `docker run --rm -v` + tar piping. Complements Automated DB Backups which are logical dumps — this is a raw volume copy. Low-medium effort, high ops value.
+- **Detected:** 2026-08-17
+
+## Preview-Deployment Isolated Volumes
+- **Source:** Coolify
+- **Description:** Coolify volumes support `is_preview_suffix_enabled`: when enabled, preview deployments get a `-pr-<number>` suffixed volume instead of sharing the production volume. Each PR environment has fully isolated persistent storage that is cleaned up with the preview container.
+- **Why add to Tengiz:** Preview Deployments currently share the app's volume — a PR that mutates the database writes to production data, which is dangerous and defeats the purpose of isolated PR environments. `volume.preview_isolated: true` gives each PR its own volume (destroyed with the preview). This makes previews safe for stateful apps (e.g. a Next.js app with SQLite, or a service with uploaded files). Complements Persistent Storage. Low effort (volume naming in preview create path), high safety value.
+- **Detected:** 2026-08-17
+
+## Cloud Server Provisioning (Hetzner / Vultr / DigitalOcean)
+- **Source:** Coolify
+- **Description:** Coolify stores encrypted `CloudProviderToken`s for DigitalOcean, Hetzner, and Vultr, then provisions servers directly through those cloud APIs (locations, images, sizes, SSH keys, firewalls, cloud-init). `HetznerService`, `VultrService`, and `DigitalOceanService` orchestrate instance creation, status sync, and teardown. Reusable `CloudInitScript` resources seed new servers.
+- **Why add to Tengiz:** Server Bootstrap installs Docker on an existing machine; cloud provisioning removes the machine-procurement step entirely. `tengiz server create hetzner --location nbg1 --size cx22 --cloud-init setup.yaml` spins up a server, installs Docker, and registers it — one command from nothing to a managed node. This unblocks the multi-server features by making server acquisition automated. Medium-high effort (three provider clients via HTTP), high strategic value.
+- **Detected:** 2026-08-17
+
+## Global Search / Command Palette (CLI)
+- **Source:** Coolify
+- **Description:** Coolify ships a ⌘K command palette with global search across servers, projects, applications, environment variables, and cloud-init scripts, with keyboard navigation and fuzzy matching (DESIGN.md §8). It surfaces any resource or action without clicking through the UI hierarchy.
+- **Why add to Tengiz:** As app count grows, `tengiz ps` becomes a long list and users must remember app names/IDs. A `tengiz search <query>` command with fuzzy matching over apps, deployments, env vars, domains, images, and volumes returns a scoped, actionable result set with hints (`tengiz logs myapp`, `tengiz deploy myapp`). Implementation: a small fuzzy scorer over the existing `~/.tengiz/*.json` state plus the Docker label index — no new storage. Complements App Report which shows one app in depth; this finds the right app first. Low effort, high DX value.
+- **Detected:** 2026-08-17
+
+## Deploy Cancellation (Cancel a Running Deploy)
+- **Source:** Coolify
+- **Description:** Coolify's deployment queue exposes a cancel operation: a running deployment can be stopped from the API/UI (`cancel` action), killing the build process, marking the record `canceled`, and releasing the queue slot so the next deploy can proceed.
+- **Why add to Tengiz:** A deploy that hangs (long `npm install`, stuck git clone, a user who pushed wrong code) currently blocks the queue and wastes the build container indefinitely. `tengiz deploy --cancel <app>` or a `deploy.cancel` API signal terminates the build subprocess, marks the build record canceled, and frees the per-app lock so a corrected deploy can run immediately. Build Tracking already records a `canceled` status — this adds the control to reach it. Complements Build Queue with Dedup. Low-medium effort, high ops value.
+- **Detected:** 2026-08-17
+
+## Stop Grace Period (Per-App SIGTERM Window)
+- **Source:** Coolify
+- **Description:** Coolify's `ApplicationSetting.stop_grace_period` configures the per-app graceful shutdown window (bounded by MIN/MAX constants, defaulting sensibly). When a container is stopped, Docker sends SIGTERM and waits up to this period before SIGKILL. The setting is applied via `docker run --stop-timeout`.
+- **Why add to Tengiz:** Scale-to-zero stops containers on idle timeout and zero-downtime deploy stops the old container — both terminate processes. An app mid-transaction or mid-request needs time to finish cleanly (flush connections, commit state, drain work). `.tengiz.yaml`'da `stop_grace_period: 30` maps directly to Docker's `--stop-timeout` flag in `runtime.Stop()`. Complements idle timeout (implemented) and Readiness Delay & Deploy Timeouts with the final shutdown step. Trivial effort, prevents data corruption on scale-to-zero.
+- **Detected:** 2026-08-17
+
+## Sensitive Data Redaction (PII/Secret Sanitization in Logs)
+- **Source:** Coolify
+- **Description:** Coolify's `ApiSensitiveData` middleware plus the "Copy resource logs with PII/secret sanitization" feature redact credentials, tokens, and sensitive IDs from API responses and copied log output. Encrypting mount/fs_path and encrypted env values never appear in plaintext in logs or downloads.
+- **Why add to Tengiz:** `tengiz logs` and `tengiz build-logs` can leak secrets when an app echoes its env vars or a build script prints `--build-arg API_KEY=...`. A redaction layer over log output (masking values matching registered secret patterns from the secrets store and env vars) makes sharing logs safe (`tengiz logs myapp --redact`, plus on-by-default for build logs). Complements Secrets Management and Encryption at Rest — those protect storage; this protects output. Low effort (regex mask over emitted lines), good security posture.
+- **Detected:** 2026-08-17
+
+---
+
+## DNS Provider Management (Cloudflare/Route53 Record Automation)
+- **Source:** Dokploy
+- **Description:** First-class DNS provider CRUD (`services/dns-provider.ts`): store Cloudflare or AWS Route53 credentials (API token / secret access key) as reusable, org-scoped providers with secret masking (`DNS_SECRET_MASK = "********"`) and credential-preserving merge on update. Once connected, Dokploy lists zones, lists records, and creates/updates/deletes DNS records via a unified `DnsClient` interface (`utils/dns/cloudflare.ts`, `utils/dns/route53.ts`). Combined with `validateDomain` (`services/domain.ts:153`), deploy can verify A-record resolution, detect CDN providers, and confirm the domain points at the server IP.
+- **Why add to Tengiz:** Custom domain management (implemented) currently stops at the proxy layer — users must manually create DNS A/CNAME records at their registrar. DNS provider integration closes the loop: `tengiz domain add myapp.com --provider cloudflare` auto-creates the A record, verifies propagation, and only then enables the proxy route. With auto-SSL (#51) this becomes fully hands-off domain onboarding. `.tengiz.yaml`'da `dns.providers:` bölümü veya `tengiz dns provider add/rm/list` + `tengiz dns record add <domain> <type> <value>`. Go implementation: `golang.org/x/net` + Cloudflare/Route53 HTTP APIs, credentials encrypted in `~/.tengiz/dns.json` (reuses `encrypt` package). Medium effort, high production value — the missing piece between "custom domain supported" and "custom domain works".
+- **Detected:** 2026-08-17
+
+## In-Container File Browser & Editor (Volume/Container Filesystem Ops)
+- **Source:** Dokploy
+- **Description:** Dokploy lets operators browse, read, write, and delete files inside Docker volumes and running containers without entering a shell (`services/docker-volume.ts`, `services/docker.ts:724-863`). Volume ops mount the volume read-only into a throwaway `busybox` container and run `ls -1Ap`, so no agent/exec into the app container is needed; reads cap at 512KB with an explicit `truncated` flag; writes base64-encode content and reject payloads >2×512KB; deletions use quoted, recursive `rm`. Container variants use `docker exec` for `uploadFileToContainer`, `listContainerFiles`, `readContainerFile`, `writeContainerFile`, `deleteContainerFile`.
+- **Why add to Tengiz:** Debugging stateful apps on scale-to-zero (SQLite files, uploaded assets, log files) currently requires `tengiz enter` + knowing Unix paths + shelling into the container. A file browser gives non-shell access: `tengiz volume ls <app>`, `tengiz volume read <app> /data/app.db`, `tengiz volume write <app> /data/config.json -`, `tengiz volume rm <app> /data/tmp`. Files are the fastest way to inspect "what is actually persisted in this volume" — complementing `tengiz logs` and Container Entering. Implementation: ephemeral `docker run --rm -v <vol>:/__v:ro busybox` for reads + exec-based ops for the running container, with the 512KB guard and base64 transport (same pattern as Dokploy). Complements the volume/network CRUD and Volume Cloning features. Low-medium effort, high debugging value.
+- **Detected:** 2026-08-17
+
+## Consistent Volume Backups (Scheduled Tar to S3 with Scale-to-Zero)
+- **Source:** Dokploy
+- **Description:** `utils/volume-backups/backup.ts` schedules tar-based backups of arbitrary named Docker volumes (across applications, compose, and every DB type). A throwaway `ubuntu` container runs `tar cvf /backup/<name>-<ts>.tar .` against a volume mount; the tarball is streamed to S3 via `rclone copyto` and deleted locally. Critical detail: a `turnOff` flag enables **consistency mode** — the service is scaled to 0 replicas (recording `ACTUAL_REPLICAS`), backed up, then restarted at the same replica count (or `docker stop`/`start` for compose projects). A `flock`-based lock file (with `mkdir` fallback + 5s polling) serializes backups per service. Restore (`utils/volume-backups/restore.ts`) downloads the tar, detects volumes currently in use, and aborts with a per-container report rather than clobbering live data. Retention (`keepLatestCount`) prunes old `.tar` objects in S3.
+- **Why add to Tengiz:** Existing features cover logical DB dumps (#98) and raw volume cloning, but not scheduled raw-volume backups to S3 — the difference matters for state that isn't in a database (uploads, caches, app-generated files). Consistency mode is the standout: it makes point-in-time volume backup safe by briefly stopping writes, and Tengiz's scale-to-zero already stops containers cleanly, so `turnOff` fits naturally. `.tengiz.yaml`'da `volume_backups: [{volume: data, schedule: "0 3 * * *", turn_off: true, destination: main, keep_latest: 7}]` ile yapılandırılır. The `flock` lock prevents overlapping runs on the same service. Medium effort, high data-safety value for stateful apps.
+- **Detected:** 2026-08-17
+
+## Preview Deployment PR Comments (Live Status Table in Pull Request)
+- **Source:** Dokploy
+- **Description:** When a preview deployment is created for a GitHub PR, Dokploy posts a "building" comment on the PR and stores the comment ID (`services/github.ts:81-195`, `services/preview-deployment.ts`). On completion the same comment is updated with a markdown status table showing the preview environment and URL; on failure it posts the error. `createSecurityBlockedComment` posts a deduplicated block notice when a preview is rejected. The comment lifecycle (create → update → finalize) runs entirely through the GitHub REST API using per-installation tokens.
+- **Why add to Tengiz:** Commit Status Reporting (#38) puts a green/red checkmark on the commit, but a PR comment is where reviewers actually look. Dokploy's model — a persistent, updated comment per PR containing the preview URL and deploy status — is exactly the UX developers expect from Vercel/Netlify previews. `tengiz preview list` shows the environments in the CLI, but the PR comment surfaces them to the whole team without leaving GitHub. Implementation: reuse the existing git-provider credential store; POST to `repos/{owner}/{repo}/issues/{pr}/comments` on preview create, PATCH the same comment on success/failure, include the preview domain and a `tengiz` usage hint. Low effort on top of preview deployments (implemented), high collaboration value.
+- **Detected:** 2026-08-17
+
+## Preview Deployment Security Controls (Collaborator Permissions, Label Allowlist, Limits)
+- **Source:** Dokploy
+- **Description:** Dokploy's GitHub webhook handler (`apps/dokploy/pages/api/deploy/github.ts:394-535`) gates preview deployments on three per-app settings: `previewRequireCollaboratorPermissions` (only GitHub collaborators with `write`/`admin`/`maintain` level may trigger a preview; denied PRs get a blocked-comment), `previewLabels` (an allowlist — a PR must carry at least one of these labels to get a preview), and `previewLimit` (cap on concurrent previews per app). Checks run server-side against the GitHub API before any build starts.
+- **Why add to Tengiz:** Preview deployments (implemented) are powerful but currently run for every PR with a repo/webhook that points at them — a fork-based or drive-by PR could trigger a build, expose internal data, or exhaust resources. These three controls make previews production-safe: gate on contributor trust (`preview.require_write: true`), restrict to labeled PRs (`preview.labels: ["safe-to-test"]`), and bound cost (`preview.limit: 5`). `.tengiz.yaml`'da `preview.` bölümü altında yapılandırılır; gating happens in the existing `gitdeploy` webhook handler before creating the preview record. Low effort, closes a real security gap in a headline feature.
+- **Detected:** 2026-08-17
+
+## Isolated Compose Deployments (Name/Volume/Network Collision Prevention)
+- **Source:** Dokploy
+- **Description:** `utils/docker/collision.ts` (`addAppNameToPreventCollision`, `randomizeIsolatedDeploymentComposeFile`) transforms a `docker-compose.yml` before deploy: service names, volume names, and network names get an app-name/hash suffix so that multiple deployments of the same compose file can run side by side without colliding on shared Docker resources, while the `dokploy-network` link is preserved. `randomizeComposeFile` (in `utils/docker/compose.ts`) applies hash suffixes to all project properties. This is what lets Dokploy run preview/isolated copies of the same stack simultaneously.
+- **Why add to Tengiz:** Docker Compose Import (#91) and Stack lifecycle (#97) assume one instance per compose file. Teams commonly need N isolated copies of the same stack — per-PR previews of a full-stack app, staging vs dev environments, per-tenant deployments. Without name randomization, the second `tengiz compose up` fails on already-existing networks/volumes/containers. Implementation: YAML rewrite in `internal/compose/` that suffixes `services.<name>`, `volumes.<key>`, `networks.<key>`, and the `container_name` field with `-<app>-<suffix>` before `docker compose up`. Complements Preview-Deployment Isolated Volumes with full stack isolation. Medium effort, unlocks real multi-instance compose workflows.
+- **Detected:** 2026-08-17
+
+## SSO Forward-Auth Middleware (Proxy-Level App Authentication)
+- **Source:** Dokploy
+- **Description:** Dokploy protects app routes at the proxy level with an OAuth2/OIDC **forward-auth** middleware (`utils/traefik/forward-auth.ts`, `services/proprietary/forward-auth.ts`): a per-domain `forwardAuthEnabled` flag routes unauthenticated requests to an oauth2-proxy-style service that performs the OIDC authorization-code dance; authenticated sessions are passed back, and a negative response returns an `-errors` page (401/403). Enabled per domain (`domain.forwardAuthEnabled`), SAML is explicitly rejected. The middleware is deployed onto the target server via `deployForwardAuthOnServer` and toggled per-domain with `enable`/`disable` (337/368).
+- **Why add to Tengiz:** This is the missing half of the existing OIDC/SSO roadmap (#157, which covers *admin/team* login): protecting **user-facing app routes** behind the organization's identity provider without any app code changes. A staging environment, an internal tool, or a customer portal becomes SSO-gated purely via proxy config — no session code in the app. `.tengiz.yaml`'da `domains: [{name: internal.example.com, forward_auth: {provider: google, allowed_groups: [eng]}}]`. Implementation: an OIDC authorization-code flow + session cookie store inside the Tengiz proxy, `X-Forwarded-User`/`X-Forwarded-Groups` header injection, and a 401 page for denied routes. Distinct from Built-in Authentication Service (Juno, which is an auth *API* for apps to build on) — this is transparent traffic gating. Medium-high effort, high enterprise value.
+- **Detected:** 2026-08-17
+
+## Host-Level Scheduled Scripts (Server Cron with PID Tracking)
+- **Source:** Dokploy
+- **Description:** Beyond in-container cron jobs, Dokploy schedules **host-level scripts** (`services/schedule.ts`, `utils/schedules/utils.ts:148-194`): `scheduleType: "server"` runs a bash script on a remote managed server, `scheduleType: "dokploy-server"` runs one on the platform host itself. Each schedule stores a cron expression, per-schedule `timezone` (default UTC), `shellType` (`bash`/`sh`), and an `enabled` flag; jobs persist in DB and re-register at startup. Scripts are written to disk (base64-safe), prepended with `echo "PID: $$ | Schedule ID: <id>"`, executed with `set -euo pipefail`, and the captured PID is persisted to the run record. Concurrent runs are handled by marking prior `running` runs as `error: Superseded`, and logs are kept per-run with a 10-run retention. `assertHostScheduleAccess` restricts host-level schedules to owner/admin.
+- **Why add to Tengiz:** The scheduled-tasks roadmap (#74) covers `docker exec` inside app containers; it can't run host maintenance — `docker system prune`, volume cleanup, log rotation, cert renewal, DB vacuum on the host. A host-level schedule type (`schedule.host: "* 2 * * *"` with `script: /path/to/script.sh`) lets operators cronify ops work that must touch the host or a remote server. The PID tracking, timezone support, supersede handling, and run-log retention are exactly what makes cron usable as a product (vs raw crontab). `.tengiz.yaml`'da `host_schedules: [{cron: "0 3 * * *", script: "backup.sh", tz: "Europe/Istanbul"}]`. Uses `robfig/cron` (already planned for #74) with a `--run-on-server` target. Medium effort, closes the host-ops gap.
+- **Detected:** 2026-08-17
+
+## IP-Based Instant Public Domains (sslip.io / traefik.me Auto-Domains)
+- **Source:** Dokploy
+- **Description:** `services/domain.ts:46-77` auto-generates a working public domain for an app with zero DNS setup: `generateTraefikMeDomain` and `generateWildcardDomain` produce `{app}-{serverIp-dashed}.sslip.io` (e.g. `myapp-203-0-113-5.sslip.io`) or `*.sslip.io` wildcards, embedding the server's public IP as an in-domain address. Because sslip.io resolves any `<prefix>.<ip>.sslip.io` to that IP via wildcard DNS, the generated domain is immediately reachable and can even get a Let's Encrypt cert. Dokploy uses this for preview environments and for apps before a custom domain is attached.
+- **Why add to Tengiz:** Today a freshly deployed Tengiz app is only reachable at `myapp.tengiz.local` (needs `/etc/hosts` or DNS) or via a manually configured custom domain. `tengiz deploy` printing a real, clickable URL — `https://myapp-203-0-113-5.sslip.io` — makes single-server deployments feel like a managed PaaS from the first command, and the same mechanism gives preview deployments and AI-assistant domains an instant public endpoint. Implementation: detect the server's public IP (or read `platform.ip` from Platform Admin Settings), inject the generated domain into the proxy's `domains` map, and mark it as the default `*.sslip.io` cert domain for Let's Encrypt. Complements DNS Provider Management (auto DNS records) as the zero-config alternative. Low effort, high first-run delight.
+- **Detected:** 2026-08-17
+
+---
+
+## Multi-Tenant Namespaces (Isolated Environments per Tenant)
+- **Source:** CapRover
+- **Description:** The entire platform is namespace-scoped. A `x-captain-namespace` header (or namespace in the app name) selects an isolated environment: each namespace has its own datastore (`config-<namespace>.json`), its own encryption salt (`setEncryptionSalt` derives per-namespace encryptors), its own user/authenticator, and a completely separate set of apps. Service and volume names get namespace prefixes (`srv-<namespace>--<app>`, `<namespace>--<volume>`). `ServiceManager` and `DockerRegistryHelper` are instantiated per-namespace, so namespaces never share state.
+- **Why add to Tengiz:** Multi-Environment Desteği (implemented) is about env overrides on ONE shared store; namespaces are true tenant isolation. An agency or ISP running one Tengiz instance for several teams/projects needs hard separation: separate apps, separate secrets, separate state files. `tengiz --namespace acme deploy .` maps cleanly to per-namespace dirs in `~/.tengiz/namespaces/<name>/` (apps, ports, secrets all scoped), reusing the existing env-scoped store pattern. This is a P1 differentiator over Coolify/Dokku single-tenant installs. Medium effort (scope store + CLI flag).
+- **Detected:** 2026-08-17
+
+## Deploy from Tarball/Archive Source (Upload or URL)
+- **Source:** CapRover
+- **Description:** A third deploy source type besides git and local dir: `uploadedTarPathSource` accepts a source tarball (uploaded via API or pointed at a URL), `tar.extract`s it into the build dir, then runs the normal build (Dockerfile/captain-definition discovery works inside the extracted tree). Optionally carries a `gitHash` to populate `GIT_SHA` even though no git repo exists. Related: Dokku's `git:from-archive`.
+- **Why add to Tengiz:** `tengiz deploy .` and git-based deploy are covered, but build artifacts that ship as tarballs (CI pipelines that don't export git, legacy deploy bundles, offline source drops) have no path in. `tengiz deploy --tar https://.../src.tar.gz` or `tengiz deploy --tar ./src.tar.gz` extracts and builds with the existing builder pipeline. Low effort (extract step in `deploy.go` before framework detection), closes the last deploy-source gap.
+- **Detected:** 2026-08-17
+
+## Automated Image Cleanup with Version Retention (Keep N Most Recent per App)
+- **Source:** CapRover
+- **Description:** `DiskCleanupManager` runs an automated cleanup on a cron schedule (with timezone). For each app it computes the set of protected images: `deployedVersion`, `deployedVersion - 1`, ... down to `deployedVersion - mostRecentLimit`. Any image whose tag matches none of the protected versions is flagged unused and deleted. Errors are swallowed so cleanup never breaks the platform. `getUnusedImages` also powers a "show me what would be deleted" dry-run endpoint before bulk deletion.
+- **Why add to Tengiz:** Existing housekeeping (#6) is a blanket `docker system prune` and Container Retention Policy (#22) targets containers — neither protects the N most recent *deployed images* per app, which are exactly what Rollback needs. `tengiz cleanup --schedule "0 3 * * *" --keep 5` keeps rollback working while reclaiming disk, on a cron with timezone support. Dry-run (`tengiz cleanup --dry-run`) before deleting. Low effort (label/tag matching against deployment history), high ops value on single-server deploys.
+- **Detected:** 2026-08-17
+
+## Proxy Configuration Validation with Automatic Rollback
+- **Source:** CapRover
+- **Description:** Every proxy change flows through a coalesced reload queue: config is written to a `.fut` file, moved to `.bak`, atomically renamed to `.conf`, validated with `nginx -t` inside the proxy container, and only applied via a HUP signal on success. If validation fails, the app definition is **reverted to the previous values in the datastore** and nginx is reloaded — a broken config change never sticks. Base and captain-level configs are also user-editable templates with the same validation+rollback path.
+- **Why add to Tengiz:** Tengiz's proxy is in-memory Go (no nginx), but the *principle* is missing: a bad `.tengiz.yaml` proxy/domain edit currently applies and fails at request time. A validate-before-apply step (parse the new proxy config, verify all routes resolve, optionally dial a test port) with automatic revert to the last-good `~/.tengiz` state on failure makes config changes crash-safe. Extends Config Validation (#118) from pre-deploy into a rollback-capable runtime path. Low-medium effort, high robustness value.
+- **Detected:** 2026-08-17
+
+## Template-Based Dockerfile Generation (Lightweight Framework Alternative)
+- **Source:** CapRover
+- **Description:** `TemplateHelper` generates Dockerfiles from a small set of framework templates instead of a heavy buildpack engine: each `ITemplate` has `dockerHubImageName`, `tagSuffix` (e.g. `-slim`), and `postFromLines` (extra Dockerfile lines after `FROM`). `TemplateHelperVersionPrinter` queries Docker Hub's Registry API (`hub.docker.com/v2/repositories/<image>/tags`) to discover available versions per template. The `captain-definition`'s `templateId` selects one (Node, PHP, Python-Django, Ruby-Rack).
+- **Why add to Tengiz:** Nixpacks (implemented) covers hundreds of frameworks but shells out to a Node binary. A zero-dependency `FROM <image>:<tag>` template generator with optional `postFromLines` covers the 80% case (Node/Python/Ruby/PHP) in pure Go with no external tool — a cheap default for the most common stacks, with Nixpacks as the power fallback. `.tengiz.yaml`'da `build.template: node` selects it. Complements framework detection with an overridable lightweight path. Low effort, useful for minimal-footprint installs.
+- **Detected:** 2026-08-17
+
+## Orphaned SSL Certificate Detection & Expiry Warning
+- **Source:** CapRover
+- **Description:** `CertbotManager.logExpiringOrphanedCertificates` reads certbot's `renewal/*.conf` dir, parses each `cert.pem` with X.509, and flags certificates that are (a) NOT in the active domain set (custom domains no longer attached, renamed apps, removed apps) and (b) expiring within 48 hours (`ORPHAN_CERTIFICATE_EXPIRY_THRESHOLD_MS`). Orphans are logged for manual cleanup — observation-only, never auto-deleted. Renewal itself is a self-rescheduling 20.3h loop running `certbot renew`.
+- **Why add to Tengiz:** Apps get renamed, custom domains get removed, apps get deleted — each leaves a stale cert behind. With per-app Let's Encrypt (#65) on the roadmap, orphaned certs will accumulate and hit renewal/rate limits. A detection pass (`tengiz domain certs --orphans` or a background check in the monitoring scheduler) that lists active-vs-orphaned certs and flags expiring ones prevents silent renewal failures. Low effort (parse cert store, compare against active domains), good hygiene companion to SSL features.
+- **Detected:** 2026-08-17
+
+## Domain Ownership Verification Before SSL/Custom Domain (HTTP Round-Trip)
+- **Source:** CapRover
+- **Description:** `DomainResolveChecker` verifies a domain actually routes back to this server before enabling SSL or attaching it: it writes a random UUID to the domain's webroot (`captain-confirmation<identifierSuffix>`), waits 1s, HTTP GETs `http://<domain>/captain-confirmation...`, and succeeds only if the body matches the UUID. A `verifyDomainResolvesToDefaultServerOnHost` variant checks the public confirmation file for root-domain changes. Failure throws `VERIFICATION_FAILED` with a clear message — the user fixes DNS and retries instead of hitting a certbot timeout.
+- **Why add to Tengiz:** Custom domains (implemented) currently attach to the proxy with no verification — a domain pointing at the wrong server silently routes wrong. A pre-flight round-trip check (`tengiz domain add --verify myapp.com`) confirms the A/CNAME record + proxy path actually reach this Tengiz before the domain is registered or a cert is requested. Complements DNS Provider Management (which automates record creation) and Well-Known Paths (which serves the verification file). Low effort (write file + HTTP GET), prevents the #1 custom-domain support ticket.
+- **Detected:** 2026-08-17
+
+---
+
+## Role Boot Barrier (Healthcheck Gatekeeper Between Roles)
+- **Source:** Kamal
+- **Description:** `Kamal::Cli::Healthcheck::Barrier` (`cli/healthcheck/barrier.rb`) gates role booting during deploy: a barrier opens when the primary role's container passes its healthcheck (or readiness delay). Non-primary roles (`workers`, `jobs`) call `wait_at_barrier` (`cli/app/boot.rb`) and block until the primary is healthy. If the primary boot fails, the barrier closes with an error and every waiting role halts ("Halted at barrier"), aborting the whole deploy instead of booting workers against a dead web app.
+- **Why add to Tengiz:** Role-based server groups (#28) and rolling boot are recorded, but without a healthcheck gatekeeper a worker role can start and begin consuming jobs while the web app failed to come up — processing work against a half-deployed or down system. A barrier primitive (`tengiz` deploy waits for the web container's `/up` health check before starting worker containers; on web failure, workers are never started and the deploy is marked failed) makes multi-role deploys atomic. Implementation is a Go `sync.WaitGroup`/channel gate keyed on the healthcheck result in the deploy pipeline. Low effort, high correctness value for the role model.
+- **Detected:** 2026-08-17
+
+## Container Version Collision Renaming (Idempotent Redeploy)
+- **Source:** Kamal
+- **Description:** `old_version_renamed_if_clashing` (`cli/app/boot.rb`) detects when a container with the same image version already exists (e.g. redeploying the same git SHA) and renames it to `${version}_replaced_${SecureRandom.hex(8)}` instead of failing. The redeploy then proceeds as normal, and the renamed old container is cleaned up by the regular pruning. This makes redeploying an unchanged version a no-op success rather than a container-name conflict error.
+- **Why add to Tengiz:** Git-based image version tagging (#121) means deploying the same commit twice produces the same image tag. Today a second `tengiz deploy` of the same SHA hits `docker run` name collision and errors. Renaming the stale container (rather than erroring) makes redeploys idempotent — critical for webhook auto-deploy (implemented), where GitHub re-delivers `push` events and CI retries. Trivial in the runtime layer: before `docker run`, check for an existing `tengiz-<app>-<env>` and `docker rename` it. Low effort, removes a real user-facing failure mode.
+- **Detected:** 2026-08-17
+
+## Clean Build from Git Clone (Uncommitted Changes Detection)
+- **Source:** Kamal
+- **Description:** When no build `context` is set, Kamal builds from a fresh local git clone (`builder.git_clone?`, `cli/build.rb`) instead of the working directory — guaranteeing the image matches committed code. `Git.uncommitted_changes` / `uncommitted_files` / `untracked_files` detect a dirty tree, and `kamal build dev` tags dirty builds (`_uncommitted_` version suffix) while printing exactly which uncommitted/untracked files enter the image, so developers know the image does NOT reflect the repo state.
+- **Why add to Tengiz:** `tengiz deploy .` builds from whatever is in the working tree — a user with uncommitted local edits or untracked stray files ships an image that can't be reproduced from git, then can't trace it via the git-SHA image tag (#121). A `tengiz deploy --from-git` mode (or `build.from: git`) clones HEAD to a temp dir and builds from there; when `build.dev: true` is set, the image tag gets an `_uncommitted_` suffix and the CLI warns listing dirty files. This makes every image traceable to a real commit. Complements gitdeploy (implemented) which clones for the pipeline, and GitOps-style reproducibility. Low-medium effort in the builder package.
+- **Detected:** 2026-08-17
+
+## Proxy Boot Configuration Persistence (Per-Host Run Options)
+- **Source:** Kamal
+- **Description:** `kamal proxy boot_config set|get|reset` (`cli/proxy.rb`, `configuration/proxy/run.rb`) persists per-host proxy run options to files on the host (`options`, `image`, `image_version`, `run_command`). Options include `publish`, `publish_host_ip`, `http_port`, `https_port`, `log_max_size`, `debug`, `metrics_port`, plus registry/repository/version. The proxy container is booted from these persisted files (`commands/proxy.rb` reads them with defaults), so operators can change the proxy's runtime settings without editing deploy config and without the settings being overwritten on the next deploy.
+- **Why add to Tengiz:** Tengiz's proxy is in-process Go, but the *persistence* concept maps to `~/.tengiz/proxy.json`: runtime settings (bind address, port, log level, buffer sizes, metrics port) stored separately from `.tengiz.yaml` and not clobbered by config re-loads. `tengiz proxy boot-config set http_port 8443` then survives restarts, while code/config changes don't reset it. Complements Advanced Proxy Config (#14) — that's static config; this is mutable runtime state with explicit get/reset. Low effort (reuse the existing Store pattern), high ops value for proxy tuning on a busy host.
+- **Detected:** 2026-08-17
+
+## Boot Failure Auto-Diagnostics (Container + Health Log Dump)
+- **Source:** Kamal
+- **Description:** When a container fails to boot, `kamal` automatically dumps the failed container's logs and its Docker health log (`container_health_log`, `commands/app/containers.rb`; `DOCKER_HEALTH_LOG_FORMAT '{{json .State.Health}}'`) to the console. The health log shows the last check attempts, exit codes, and failure timestamps — the operator sees *why* the container is unhealthy immediately, without a separate `kamal app logs` invocation.
+- **Why add to Tengiz:** When a Tengiz deploy fails, the user currently gets an error and must manually run `tengiz logs myapp` (or worse, `docker inspect` the health state). On boot failure, Tengiz should print the tail of the failed container's stdout/stderr plus the parsed `State.Health` JSON (last 5 checks, exit codes, timestamps). This makes failed deploys self-diagnosing and pairs with build-logs (implemented) to cover both build and runtime failure. Implementation: on healthcheck failure in the deploy pipeline, `docker logs --tail 50` + `docker inspect --format '{{json .State.Health}}'`. Low effort, big debugging win.
+- **Detected:** 2026-08-17
+
+## Proxy Request/Response Header Logging (Debugging Aid)
+- **Source:** Kamal
+- **Description:** Kamal's proxy logs configurable request/response headers per request (`configuration/proxy.rb`): `request_headers` / `response_headers` (defaults include `Cache-Control`, `Last-Modified`, `User-Agent`). Each proxied request emits the selected header values, giving operators visibility into caching behavior and client fingerprints without full HTTP-dump verbosity.
+- **Why add to Tengiz:** Debugging caching bugs (wrong `Cache-Control`, stale `Last-Modified`) or identifying a misbehaving client (bad `User-Agent`) currently requires `tengiz proxy` with verbose logging or tcpdump. A configurable header log line in the proxy (`proxy.log_request_headers: [User-Agent, Cache-Control]`) surfaces the exact values per request and feeds the analytics/monitoring features. Implementation: `httputil.ReverseProxy` `ModifyResponse`/`Director` hooks capture selected headers into the access log. Low effort, high debugging value — and it matches the existing Go proxy architecture perfectly.
+- **Detected:** 2026-08-17
+
+## Custom SSL Certificates from Secrets (BYO Certificate)
+- **Source:** Kamal
+- **Description:** Kamal supports `ssl: { certificate_pem: <secret ref>, private_key_pem: <secret ref> }` in the proxy config (`cli/app/ssl_certificates.rb`, `configuration/proxy.rb`). The PEM values are resolved from the secrets store (1Password/vault) at deploy time, uploaded to the host's TLS directory, and used by the proxy — an alternative to Let's Encrypt for internal domains, enterprise certs, or air-gapped environments where ACME HTTP-01 can't reach the server.
+- **Why add to Tengiz:** Auto-SSL (#65) covers the public-internet case, but many Tengiz deployments are behind a firewall, on an internal domain, or required to use a company-issued wildcard cert. `tengiz domain ssl <domain> --cert-file cert.pem --key-file key.pem` (or `.tengiz.yaml` `domains: [{name: ..., ssl: {certificate: "[[secret.CERT_PEM]]"}}]`) stores the PEMs via the existing encrypt/secrets system and serves them from the proxy's TLS config. Complements secrets management (implemented) and custom domains (implemented). Low-medium effort (file read + `tls.LoadX509KeyPair`), unblocks enterprise/internal TLS.
+- **Detected:** 2026-08-17
+
+## Registry Mirror Seeding (Parallel Multi-Host Pull Optimized)
+- **Source:** Kamal
+- **Description:** In `cli/build.rb`, when deploying to multiple hosts Kamal first pulls the freshly built image to a single host ("seed"), then pulls in parallel on the remaining hosts. This avoids N simultaneous pulls of the same large image from the registry hammering it, while still keeping total pull time low.
+- **Why add to Tengiz:** Currently N/A for single-server Tengiz, but it's the missing piece for the multi-server roadmap (#25 SSH deploy, #51 Periphery). When Tengiz gains multiple Docker daemons, naive `docker pull` on every host concurrently stresses the registry (rate limits, egress cost). The seed-then-parallel pattern (`pull` to host A, then `pull` on B..N concurrently) is a 10-line ordering in the runtime layer once multi-host exists. Recorded so the multi-host feature doesn't ship without it. Low effort (deferred to multi-host), real infra benefit.
+- **Detected:** 2026-08-17
+
+## Host-Tagged Environment Variables (Per-Host-Tag Env Injection)
+- **Source:** Kamal
+- **Description:** `env.tags` (`configuration/env/tag.rb`) lets config define env vars per host tag: hosts are tagged in `servers` (e.g. `172.1.0.2: experiment1`), and `env.tags.experiment1.FEATURE_X: on` injects `FEATURE_X=on` only into containers on hosts bearing that tag. `Role#env_tags` merges role env + host-tag env at runtime. This enables canary-style, per-machine config (feature flags on one experimental host, different DB creds per region) without separate deploy files.
+- **Why add to Tengiz:** For single-server Tengiz this maps to per-*instance* env overrides — the same image deployed with different `-e` values based on a label/tag selected at deploy time (`tengiz deploy --tag experiment1` applies `env.tags.experiment1.*`). This is the cleanest mechanism for running the same code with divergent config (staging vs canary vs region) and complements GitOps ResourceSync (#33) and multi-env (implemented). `.tengiz.yaml`'da `env.tags.<tag>: {...}`. Low effort (merge tags into AppEntry.Env at deploy), useful for canary workflows.
+- **Detected:** 2026-08-17
+
+## Secret Aliasing in Env References (NAME:ALIAS)
+- **Source:** Kamal
+- **Description:** In `env.secret` lists, Kamal supports `NAME:SECRET_KEY` aliasing (`configuration/env.rb` `extract_alias`): the env var `NAME` gets its value from a secret stored under a *different* key. This decouples secret names (chosen by the secret store/vault) from env var names (required by the app), e.g. `DATABASE_URL:prod-db-url`.
+- **Why add to Tengiz:** Existing secret interpolation (`[[secret.NAME]]`) requires the secret key to match the env var name. When a shared vault key differs from what the app expects — or one secret feeds several apps with different env names — users must duplicate secrets. `tengiz secret set myapp DATABASE_URL --alias prod-db-url` (or `secret: [DATABASE_URL:prod-db-url]` in `.tengiz.yaml`) resolves the value at deploy/run time while keeping the app-facing name. Trivial to add to `ResolveInterpolations`/env assembly in the secrets package. Low effort, removes a real friction point for shared secret stores.
+- **Detected:** 2026-08-17
+
+---
+
+## English-Language Cron Schedule Expressions
+- **Source:** Komodo
+- **Description:** Komodo's `ScheduleFormat::English` accepts natural-language schedule expressions ("every 5 minutes", "daily at midnight") and converts them to cron syntax via the `english_to_cron` crate (`bin/core/src/schedule.rs:310`). The year field is stripped before parsing with the same `croner` parser used for native cron. Combined with per-schedule `schedule_timezone` (falls back to `core_config().timezone`, then server-local), next-run times are computed correctly in the operator's zone.
+- **Why add to Tengiz:** Scheduled Deployments and Host-Level Scheduled Scripts on the roadmap use raw cron expressions. English-language expressions remove the "which field is minutes vs hours" friction for the majority of users who just want "every 5 minutes" or "nightly at 3am". Tiny addition on top of `robfig/cron` (a `english_to_cron`-style mapper + timezone field in the schedule record). Fits the CLI-first model where users type schedules in a terminal, not a UI form. Low effort, high UX value.
+- **Detected:** 2026-08-17
+
+## Compose Command Wrapper for External Secrets Tooling
+- **Source:** Komodo
+- **Description:** Komodo's `StackConfig.compose_cmd_wrapper` lets users wrap the compose command with an external secrets/encryption tool before execution: `op run -- [[COMPOSE_COMMAND]]` (1Password CLI), or `sops exec-file --no-fifo /path/to/secret.env '[[COMPOSE_COMMAND]]'` (sops). `compose_cmd_wrapper_include` selects which subcommands get wrapped (`config`, `build`, `pull`, `up`, `run` for Compose; `config`, `deploy` for Swarm), defaulting to `up`/`deploy`. A missing `[[COMPOSE_COMMAND]]` placeholder is a hard validation error (`bin/periphery/src/api/swarm/stack.rs:52`).
+- **Why add to Tengiz:** Secrets management exists but deployment-time decryption tooling doesn't — users with sops-encrypted env files or 1Password vaults have no clean way to decrypt before `docker compose up`. A `compose_cmd_wrapper` setting in `.tengiz.yaml` (`stack.cmd_wrapper: "op run -- [[COMPOSE_COMMAND]]"`) lets Tengiz integrate with the user's existing secret tooling instead of forcing migration to Tengiz's own secret store. Implementation is a template string substitution around the assembled compose command. Low effort, unblocks real-world sops/vault workflows.
+- **Detected:** 2026-08-17
+
+## Per-Service Config File Dependency Tracking
+- **Source:** Komodo
+- **Description:** Komodo's `StackFileDependency` attaches arbitrary config files to a Stack with a `services` list and a `requires` level: `Redeploy`, `Restart`, or `None` (`bin/core/src/entities/stack.rs:1182`). When a watched file changes, `DeployStackIfChanged` diffing decides the minimal action — a changed env file that only feeds one service triggers a restart, a compose-file change triggers a full redeploy, and a metadata-only file triggers nothing. Per-service `requires` granularity avoids wasteful full-stack restarts.
+- **Why add to Tengiz:** Docker Compose Import and Stack lifecycle on the roadmap redeploy the whole stack on any config change. With per-file dependency tracking, a change to `redis.conf` wouldn't restart the web service, and a `.env` edit would only restart dependent services. `.tengiz.yaml`'da `stack.file_dependencies: [{path: redis.conf, services: [redis], requires: restart}]`. Distinctive — no other Docker-based alternative does differential compose redeploys. Medium effort (file-hash diffing in the compose pipeline), meaningful ops value on multi-service stacks.
+- **Detected:** 2026-08-17
+
+## Compose Project Name Preservation (Rename Resilience)
+- **Source:** Komodo
+- **Description:** Komodo's `Stack.project_name(fresh)` returns the last-known `deployed_project_name` (recorded at every successful deploy) in preference to the configured `project_name` (`bin/core/src/entities/stack.rs:52`). This lets users import pre-existing compose projects whose name differs from the Stack resource name, and keeps Docker compose project identity stable across resource renames — there is deliberately no rename-compose-project API.
+- **Why add to Tengiz:** If a user renames a Tengiz app or stack that owns a compose project, the Docker project name (which determines network/volume/container prefixes) would otherwise change, orphaning the deployed resources. Recording `deployed_project_name` at deploy time and preferring it on subsequent operations makes renames safe for compose-managed stacks. Complements App Renaming and the rename resilience gap. Low effort (one persisted field + a getter), removes a real data-integrity footgun.
+- **Detected:** 2026-08-17
+
+## Alert Debounce Buffer (Two-Consecutive-Failure Gate)
+- **Source:** Komodo
+- **Description:** Komodo's `AlertBuffer.ready_to_open` (`bin/core/src/monitor/alert/mod.rs:88`) requires two consecutive failing polls before an alert is opened — a toggle that must return `true` twice in a row. The buffer is keyed per server/variant and resets whenever health returns to `Ok`. This debounces transient CPU/memory spikes, brief container restarts, and momentary network unreachability so they never page operators.
+- **Why add to Tengiz:** Tengiz's monitoring scheduler and health-check restart loop can observe momentary spikes that would otherwise generate alert storms. A two-pass debounce converts "transient blip" into silence while still surfacing persistent problems. Implementation is a `map[(server, variant)]bool` toggled across monitor passes — pure in-memory, no persistence. Complements the Alert System with Severity Levels and Background Monitoring Scheduler on the roadmap. Low effort, directly reduces alert fatigue.
+- **Detected:** 2026-08-17
+
+## `komodo.skip` Label for Bulk Operation Exclusion
+- **Source:** Komodo
+- **Description:** Komodo's bulk container actions (`StartAllContainers`, `RestartAllContainers`, `PauseAllContainers`, `UnpauseAllContainers`, `StopAllContainers`) skip any container carrying a `komodo.skip` label whose value isn't `"false"` (`bin/periphery/src/api/container/mod.rs:448`). This lets operators pin exclusion containers that bulk operations must never touch — e.g. a database or a manually-managed container.
+- **Why add to Tengiz:** The Parallel Bulk Operations feature on the roadmap (`tengiz restart --all`, `tengiz stop --all`) would otherwise operate on every Tengiz container including accessories and manually-created ones. A `tengiz-skip` label (or `.tengiz.yaml`'da `bulk.skip: true`) makes bulk ops safe to run on a mixed host. One label check in the bulk-action filter. Trivial effort, prevents a real "I stopped all containers including postgres" incident.
+- **Detected:** 2026-08-17
+
+## Secret-Safe CLI Command Construction (stdin + sanitized logs)
+- **Source:** Komodo
+- **Description:** Komodo's Periphery never interpolates secrets into process args: `docker login` writes the token to stdin via `--password-stdin` (`bin/periphery/src/docker/mod.rs:41-87`), Swarm config/secret creation pipes data through `printf '%s\n' <data> |` with `shell_escape`, and the logged command string is sanitized so the raw secret never appears in operation logs or the UI (`bin/periphery/src/docker/secret.rs`). A unit test asserts secrets don't appear in process arguments (`lib/command/src/lib.rs:391`).
+- **Why add to Tengiz:** Tengiz shells out to the `docker` CLI for everything. Today a registry password, build secret, or env value passed as `-e KEY=value` shows up in `ps`, shell history, and error logs — a classic credential leak. Adopting stdin-based flags (`docker login --password-stdin`, `docker secret create` via pipe) and redacting secret placeholders from captured command output closes it. Security hygiene that applies to every existing Docker call site. Low effort, high security value.
+- **Detected:** 2026-08-17
+
+## Deduplicated Image Pulls with Timeout Cache
+- **Source:** Komodo
+- **Description:** Komodo's `PullImage` operation acquires a per-image `TimeoutCache` lock so simultaneous pulls of the same image serialize, and caches a successful pull for 5 seconds (`PULL_TIMEOUT`, `bin/periphery/src/api/docker.rs:83-149`). When Core fans out multiple deploys targeting the same image, the first pull's result is reused. Errors are never cached, so transient failures are retried.
+- **Why add to Tengiz:** Parallel Bulk Operations, Build-to-Deploy chains, and webhook-triggered redeploys can trigger N simultaneous `docker pull`s of the same image — hammering the registry and wasting bandwidth. A per-image in-flight lock + short success cache deduplicates redundant pulls. Implementation: a `sync.Map[string]*SingleFlight`-style gate in the runtime layer. Low effort, real efficiency win for the multi-app path.
+- **Detected:** 2026-08-17
+
+## Multi-Term Log Search with AND/OR Combinators & Invert
+- **Source:** Komodo
+- **Description:** Komodo's `GetContainerLogSearch` pipes `docker logs --tail 5000` into a generated grep with three combinators (`bin/periphery/src/helpers.rs:117-137`, `SearchCombinator`): `Or` uses `grep -E` with `|`, `And` uses `grep -P` with a lookahead chain `^(?=.*a)(?=.*b)`, and an invert flag adds `-v`. The same helper powers compose and swarm service log search. Search terms are shell-escaped.
+- **Why add to Tengiz:** `tengiz logs --grep pattern` exists but supports a single term. Production debugging often needs "show lines with error AND user_id" or "all lines EXCEPT healthcheck noise". `tengiz logs --grep error --grep user_id --and` (or `--grep "error" -v`) gives AND/OR/invert semantics through the existing grep pipeline. Extension of the implemented Log Filtering feature, same `docker logs` plumbing. Low effort, high debugging value.
+- **Detected:** 2026-08-17
+
+## ZFS ARC-Aware Memory Accounting
+- **Source:** Komodo
+- **Description:** Komodo's Linux memory stats are parsed directly from `/proc/meminfo` (`bin/periphery/src/stats/mem.rs`) rather than `sysinfo`: free, buff/cache, SReclaimable, Shmem, and — uniquely — the ZFS ARC size read from `/proc/spl/kstat/zfs/arcstats`. Because `MemAvailable` does not count ARC as reclaimable, Komodo subtracts ARC from "used" and reports it separately (`mem_zfs_arc_gb`), preventing false high-memory alerts on ZFS hosts. Falls back to `sysinfo` on non-Linux.
+- **Why add to Tengiz:** ZFS is the default filesystem on TrueNAS and common on Proxmox. On such hosts, naive `MemAvailable` accounting shows near-100% memory usage and triggers false alerts / wrong scale-to-zero decisions. A `/proc/meminfo` breakdown with ARC correction makes `tengiz status` and system-stat monitoring accurate on ZFS hosts. Small Go module (`/proc` parsing, no deps), distinct from the sysinfo-based approach most tools use. Low effort, correctness win for a real deployment class.
+- **Detected:** 2026-08-17
+
+## Zero-Downtime Swarm Config/Secret Rotation
+- **Source:** Komodo
+- **Description:** Komodo's `rotate_swarm_config` and `rotate_swarm_secret` (`bin/periphery/src/docker/config.rs:170-349`, `docker/secret.rs:203-362`) perform staged rotation: create a `{name}-tmp-{random}` config/secret, find all consuming services, switch them to the tmp version (preserving `target`/`uid`/`gid`/`mode` mount options), recreate the real config/secret, switch services back, and remove the tmp. Each stage is gated on all logs succeeding, so rotation produces zero service downtime.
+- **Why add to Tengiz:** Docker Swarm Resource Management is on the roadmap. Rotating a swarm secret or config today means: update the secret, then manually redeploy every consuming service — with downtime and the risk of missing a service. A `tengiz swarm secret rotate <name>` command that stages the rotation across all referencing services makes secret rotation a one-command, no-downtime operation. Requires the swarm resource to exist first (sequencing dependency on the roadmap item). Medium effort, high value for swarm-mode users.
+- **Detected:** 2026-08-17
+
+## First-User Admin Bootstrap & Signup Governance
+- **Source:** Komodo
+- **Description:** Komodo's auth bootstrap makes the first registered user `admin` + `super_admin` (`bin/core/src/auth/mod.rs:192, 274-276`), and gates all subsequent registrations behind `enable_new_users` (or `no_users_exist`), producing disabled-by-default accounts until an admin enables them. A `disable_non_admin_create` flag additionally rejects resource creation by non-admins, and the config exposes `disable_user_registration` for fully closed signup.
+- **Why add to Tengiz:** OIDC/SSO and RBAC are on the roadmap but need an onboarding story. A first-user-becomes-admin bootstrap gives a zero-config path to a secured instance: the first `tengiz setup` user is admin, later registrations require admin approval. `tengiz auth` config in `.tengiz.yaml` (`auth.enable_new_users: false`, `auth.disable_non_admin_create: true`) maps directly to Komodo's flags. Low effort (one flag during user creation), important governance piece for the team-multi-user roadmap.
+- **Detected:** 2026-08-17
+
+## Server/Agent Version Mismatch Alert
+- **Source:** Komodo
+- **Description:** Komodo's monitor compares each Periphery's reported version against `env!("CARGO_PKG_VERSION")` of the Core and raises a `ServerVersionMismatch` Warning alert when they diverge (`bin/core/src/monitor/alert/server.rs:152-204`), with its own buffer and update semantics. This catches a drifted agent silently serving outdated Docker operations.
+- **Why add to Tengiz:** When Tengiz gains remote agents (SSH deployment, Periphery-style architecture), a version-skewed agent can behave subtly differently from the CLI's expectations — and the drift is silent. A version check during the monitoring poll surfaces `server <name> is on v1.2, core is on v1.3` as an alert/status line. For single-binary Tengiz it's trivial (compare against the running binary's `runtime.Version()` build stamp). Low effort, prevents silent protocol-drift incidents in the multi-server roadmap.
+- **Detected:** 2026-08-17
+
+## Docker Stop with Graceful Signal & Legacy Fallback
+- **Source:** Komodo
+- **Description:** Komodo's `stop_container_command` builds `docker stop --signal <sig> --time <t> -- <name>` (`bin/periphery/src/docker/mod.rs:100-113`). `StopContainer`/`RemoveContainer` detect the `unknown flag: --signal` stderr and re-run without the flag, annotated as "old docker version" (`bin/periphery/src/api/container/mod.rs:265-360`). `--` guards dash-prefixed container names.
+- **Why add to Tengiz:** Stop Grace Period exists on the roadmap (`stop_grace_period` → `--stop-timeout`), but Komodo's addition is the configurable **signal** (`SIGTERM`/`SIGINT`/`SIGQUIT`) plus graceful degradation on older Docker daemons. Some apps need a specific shutdown signal (e.g. `SIGQUIT` for Go's graceful shutdown) and some hosts run old Docker. `.tengiz.yaml`'da `stop.signal: SIGQUIT`, `stop.timeout: 30`, with fallback when `--signal` is unsupported. Low effort, completes the graceful-shutdown story.
+- **Detected:** 2026-08-17
