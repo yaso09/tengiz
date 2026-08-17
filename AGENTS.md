@@ -57,6 +57,7 @@ tengiz volume add/remove/list   → persistent storage volumes
 tengiz preview list <app>       → list preview deployments
 tengiz preview rm <app> <pr>    → remove a preview deployment
 tengiz preview deploy <app> <pr> → create/update preview deployment (webhook preferred)
+tengiz cleanup [-y] [--volumes] → prune unused Docker resources (label-protected; volumes require confirmation)
 tengiz rollback <app>           → rollback to previous deployment
 tengiz notification enable      → enable notifications
 tengiz notification disable     → disable notifications
