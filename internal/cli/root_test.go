@@ -377,3 +377,18 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+	for _, flag := range []string{"containers", "images", "volumes", "networks", "cache"} {
+		if cmd.Flags().Lookup(flag) == nil {
+			t.Errorf("cleanup missing --%s flag", flag)
+		}
+	}
+}
