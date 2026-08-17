@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -73,6 +74,14 @@ func init() {
 	notificationCmd.AddCommand(notificationSetChannelCmd)
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
+	cleanupCmd.Flags().Bool("containers", true, "prune stopped containers not managed by Tengiz")
+	cleanupCmd.Flags().Bool("images", true, "prune dangling images")
+	cleanupCmd.Flags().Bool("networks", true, "prune unused networks")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune docker build cache")
+	cleanupCmd.Flags().Bool("all", false, "prune all categories (including volumes and build cache)")
+	cleanupCmd.Flags().Bool("force", false, "skip the confirmation prompt")
+	rootCmd.AddCommand(cleanupCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -1159,6 +1168,89 @@ Examples:
 
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources to reclaim disk space",
+	Long: `Removes unused Docker resources to reclaim disk space.
+
+By default prunes stopped containers (excluding Tengiz-managed ones), dangling
+images, and unused networks. Tengiz-managed containers (labeled tengiz-app) are
+always protected.
+
+Pass a category flag explicitly to limit the run to just those categories:
+  tengiz cleanup                # containers + images + networks
+  tengiz cleanup --containers   # only stopped non-Tengiz containers
+  tengiz cleanup --volumes      # containers/images/networks + volumes
+  tengiz cleanup --all --force  # every category, no confirmation prompt`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		opts := pruneOptionsFromCmd(cmd)
+
+		force, _ := cmd.Flags().GetBool("force")
+		proceed, err := confirmCleanup(force)
+		if err != nil {
+			return err
+		}
+		if !proceed {
+			fmt.Println("[tengiz] cleanup aborted")
+			return nil
+		}
+
+		fmt.Println("[tengiz] cleaning up unused Docker resources...")
+		result, err := rt.Prune(cmd.Context(), opts)
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+
+		msg := fmt.Sprintf("[tengiz] removed %d containers, %d images, %d networks, %d volumes, %d build cache entries",
+			result.Containers, result.Images, result.Networks, result.Volumes, result.BuildCache)
+		if result.Space != "" {
+			msg += fmt.Sprintf(" (reclaimed %s)", result.Space)
+		}
+		fmt.Println(msg)
+		return nil
+	},
+}
+
+func pruneOptionsFromCmd(cmd *cobra.Command) runtime.PruneOptions {
+	var opts runtime.PruneOptions
+
+	categorySet := cmd.Flags().Changed("containers") || cmd.Flags().Changed("images") || cmd.Flags().Changed("networks")
+	if categorySet {
+		opts.Containers = cmd.Flags().Changed("containers")
+		opts.Images = cmd.Flags().Changed("images")
+		opts.Networks = cmd.Flags().Changed("networks")
+	} else {
+		opts.Containers, opts.Images, opts.Networks = true, true, true
+	}
+	opts.Volumes, _ = cmd.Flags().GetBool("volumes")
+	opts.BuildCache, _ = cmd.Flags().GetBool("build-cache")
+	opts.All, _ = cmd.Flags().GetBool("all")
+	if opts.All {
+		opts.Containers, opts.Images, opts.Networks = true, true, true
+		opts.Volumes, opts.BuildCache = true, true
+	}
+	return opts
+}
+
+func confirmCleanup(force bool) (bool, error) {
+	if force {
+		return true, nil
+	}
+	fi, err := os.Stdin.Stat()
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return false, fmt.Errorf("stdin is not a terminal - re-run with --force to proceed without confirmation")
+	}
+	fmt.Print("[tengiz] This will remove unused Docker resources. Continue? [y/N]: ")
+	answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	return strings.EqualFold(strings.TrimSpace(answer), "y"), nil
 }
 
 var gitCmd = &cobra.Command{

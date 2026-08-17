@@ -377,3 +377,100 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not found: %v", err)
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+	expected := []string{"containers", "images", "networks", "volumes", "build-cache", "all", "force"}
+	for _, flag := range expected {
+		if cmd.Flags().Lookup(flag) == nil {
+			t.Errorf("cleanup missing --%s flag", flag)
+		}
+	}
+}
+
+func TestCleanupFlagDefaults(t *testing.T) {
+	flags := cleanupCmd.Flags()
+	for _, name := range []string{"containers", "images", "networks"} {
+		v, err := flags.GetBool(name)
+		if err != nil {
+			t.Fatalf("--%s: %v", name, err)
+		}
+		if !v {
+			t.Errorf("--%s default should be true", name)
+		}
+	}
+	for _, name := range []string{"volumes", "build-cache", "all", "force"} {
+		v, err := flags.GetBool(name)
+		if err != nil {
+			t.Fatalf("--%s: %v", name, err)
+		}
+		if v {
+			t.Errorf("--%s default should be false", name)
+		}
+	}
+}
+
+func TestPruneOptionsFromCmd(t *testing.T) {
+	newCmd := func() *cobra.Command {
+		c := &cobra.Command{Use: "cleanup"}
+		c.Flags().Bool("containers", true, "")
+		c.Flags().Bool("images", true, "")
+		c.Flags().Bool("networks", true, "")
+		c.Flags().Bool("volumes", false, "")
+		c.Flags().Bool("build-cache", false, "")
+		c.Flags().Bool("all", false, "")
+		return c
+	}
+
+	t.Run("defaults", func(t *testing.T) {
+		c := newCmd()
+		opts := pruneOptionsFromCmd(c)
+		if !opts.Containers || !opts.Images || !opts.Networks {
+			t.Errorf("defaults: expected containers/images/networks true, got %+v", opts)
+		}
+		if opts.Volumes || opts.BuildCache || opts.All {
+			t.Errorf("defaults: expected volumes/build-cache/all false, got %+v", opts)
+		}
+	})
+
+	t.Run("explicit single category limits run", func(t *testing.T) {
+		c := newCmd()
+		if err := c.Flags().Parse([]string{"--containers"}); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		opts := pruneOptionsFromCmd(c)
+		if !opts.Containers {
+			t.Error("containers should be true")
+		}
+		if opts.Images || opts.Networks {
+			t.Errorf("images/networks should be false when only --containers passed, got %+v", opts)
+		}
+	})
+
+	t.Run("all enables every category", func(t *testing.T) {
+		c := newCmd()
+		if err := c.Flags().Parse([]string{"--all"}); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		opts := pruneOptionsFromCmd(c)
+		if !opts.All || !opts.Containers || !opts.Images || !opts.Networks || !opts.Volumes || !opts.BuildCache {
+			t.Errorf("--all should enable everything, got %+v", opts)
+		}
+	})
+}
+
+func TestConfirmCleanupForce(t *testing.T) {
+	proceed, err := confirmCleanup(true)
+	if err != nil {
+		t.Fatalf("confirmCleanup(true) error = %v", err)
+	}
+	if !proceed {
+		t.Error("confirmCleanup(true) should proceed")
+	}
+}
