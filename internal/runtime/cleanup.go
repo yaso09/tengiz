@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -56,4 +58,82 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 		}
 	}
 	return nil
+}
+
+func containerPruneArgs() []string {
+	return []string{"container", "prune", "-f", "--filter", "label!=tengiz-app"}
+}
+
+func imagePruneArgs(all bool) []string {
+	args := []string{"image", "prune", "-f"}
+	if all {
+		args = append(args, "-a")
+	}
+	return args
+}
+
+func networkPruneArgs() []string {
+	return []string{"network", "prune", "-f"}
+}
+
+func volumePruneArgs() []string {
+	return []string{"volume", "prune", "-f"}
+}
+
+func countPrunedItems(output, header string) int {
+	count := 0
+	in := false
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, header) {
+			in = true
+			continue
+		}
+		if in {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "Total reclaimed space:") {
+				break
+			}
+			if trimmed != "" {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func countDeletedLines(output string) int {
+	count := 0
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "deleted:") {
+			count++
+		}
+	}
+	return count
+}
+
+var reclaimedSpaceRe = regexp.MustCompile(`(?i)total reclaimed space:\s*([0-9.]+)\s*([a-z]+)`)
+
+func parseReclaimedBytes(output string) int64 {
+	m := reclaimedSpaceRe.FindStringSubmatch(output)
+	if m == nil {
+		return 0
+	}
+	val, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		return 0
+	}
+	switch strings.ToLower(m[2]) {
+	case "b":
+		return int64(val)
+	case "kb":
+		return int64(val * 1024)
+	case "mb":
+		return int64(val * 1024 * 1024)
+	case "gb":
+		return int64(val * 1024 * 1024 * 1024)
+	case "tb":
+		return int64(val * 1024 * 1024 * 1024 * 1024)
+	default:
+		return int64(val)
+	}
 }
