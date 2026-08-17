@@ -13,6 +13,30 @@ func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneResu
 	return PruneResult{}, nil
 }
 
+func buildPruneCommands(opts PruneOptions) [][]string {
+	var cmds [][]string
+	if opts.Containers {
+		cmds = append(cmds, []string{"container", "prune", "-f", "--filter", "label!=tengiz-app"})
+	}
+	if opts.Images {
+		args := []string{"image", "prune", "-f"}
+		if opts.All {
+			args = append(args, "-a")
+		}
+		cmds = append(cmds, args)
+	}
+	if opts.Networks {
+		cmds = append(cmds, []string{"network", "prune", "-f"})
+	}
+	if opts.Volumes {
+		cmds = append(cmds, []string{"volume", "prune", "-f"})
+	}
+	if opts.BuildCache {
+		cmds = append(cmds, []string{"builder", "prune", "-f"})
+	}
+	return cmds
+}
+
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()
