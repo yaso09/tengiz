@@ -238,6 +238,13 @@ func TestBuildWithSecrets(t *testing.T) {
 	}
 }
 
+func TestAppLabelArgs(t *testing.T) {
+	args := appLabelArgs("myapp")
+	if len(args) != 2 || args[0] != "--label" || args[1] != "tengiz-app=myapp" {
+		t.Errorf("appLabelArgs(myapp) = %v, want [--label tengiz-app=myapp]", args)
+	}
+}
+
 func TestFrameworkNixpacksConstant(t *testing.T) {
 	if FrameworkNixpacks != "nixpacks" {
 		t.Errorf("expected nixpacks, got %q", FrameworkNixpacks)
