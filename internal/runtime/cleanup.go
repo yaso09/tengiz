@@ -37,6 +37,43 @@ func buildPruneCommands(opts PruneOptions) [][]string {
 	return cmds
 }
 
+func pruneHeader(kind string) string {
+	switch kind {
+	case "container":
+		return "Deleted Containers:"
+	case "image":
+		return "Deleted Images:"
+	case "network":
+		return "Deleted Networks:"
+	case "volume":
+		return "Deleted Volumes:"
+	case "builder":
+		return "Deleted Build Cache Entry:"
+	}
+	return ""
+}
+
+func parsePruneOutput(kind, output string) (int, string) {
+	header := pruneHeader(kind)
+	space := ""
+	count := 0
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if line == header {
+			continue
+		}
+		if strings.HasPrefix(line, "Total reclaimed space:") {
+			space = strings.TrimSpace(strings.TrimPrefix(line, "Total reclaimed space:"))
+			continue
+		}
+		count++
+	}
+	return count, space
+}
+
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()

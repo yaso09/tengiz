@@ -104,3 +104,75 @@ func TestBuildPruneCommands(t *testing.T) {
 		})
 	}
 }
+
+func TestParsePruneOutput(t *testing.T) {
+	tests := []struct {
+		name      string
+		kind      string
+		output    string
+		wantCount int
+		wantSpace string
+	}{
+		{
+			name:      "containers with two entries",
+			kind:      "container",
+			output:    "Deleted Containers:\nabcd1234abcd\nefef1234efef\n\nTotal reclaimed space: 123.4MB\n",
+			wantCount: 2,
+			wantSpace: "123.4MB",
+		},
+		{
+			name:      "images with untagged lines",
+			kind:      "image",
+			output:    "Deleted Images:\nuntagged: tengiz-apps/foo:latest\nuntagged: sha256:abc123\n\nTotal reclaimed space: 2.3GB\n",
+			wantCount: 2,
+			wantSpace: "2.3GB",
+		},
+		{
+			name:      "networks no reclaimed line",
+			kind:      "network",
+			output:    "Deleted Networks:\nfoo_network\n",
+			wantCount: 1,
+			wantSpace: "",
+		},
+		{
+			name:      "volumes",
+			kind:      "volume",
+			output:    "Deleted Volumes:\nvol1\n\nTotal reclaimed space: 4.5MB\n",
+			wantCount: 1,
+			wantSpace: "4.5MB",
+		},
+		{
+			name:      "build cache",
+			kind:      "builder",
+			output:    "Deleted Build Cache Entry:\nsha256:abc123\n\nTotal reclaimed space: 5.4MB\n",
+			wantCount: 1,
+			wantSpace: "5.4MB",
+		},
+		{
+			name:      "empty output",
+			kind:      "container",
+			output:    "",
+			wantCount: 0,
+			wantSpace: "",
+		},
+		{
+			name:      "nothing to prune",
+			kind:      "image",
+			output:    "Total reclaimed space: 0B\n",
+			wantCount: 0,
+			wantSpace: "0B",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			count, space := parsePruneOutput(tt.kind, tt.output)
+			if count != tt.wantCount {
+				t.Errorf("parsePruneOutput(%q).count = %d, want %d", tt.kind, count, tt.wantCount)
+			}
+			if space != tt.wantSpace {
+				t.Errorf("parsePruneOutput(%q).space = %q, want %q", tt.kind, space, tt.wantSpace)
+			}
+		})
+	}
+}
