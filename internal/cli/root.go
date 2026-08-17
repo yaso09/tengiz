@@ -65,6 +65,13 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers not managed by Tengiz")
+	cleanupCmd.Flags().Bool("images", false, "prune dangling (unreferenced) images")
+	cleanupCmd.Flags().Bool("all-images", false, "prune all unused images (not just dangling)")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes (data loss risk)")
+	cleanupCmd.Flags().Bool("all", false, "clean everything, including unused volumes")
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
@@ -1159,6 +1166,102 @@ Examples:
 
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources to free disk space",
+	Long: `Remove unused Docker resources (containers, images, networks, volumes).
+
+Tengiz-managed containers are always protected: pruning uses label-based
+filtering (label!=tengiz-app) so running and stopped app containers — including
+scale-to-zero cold-start state — are never removed.
+
+By default (no flags) removes:
+  - stopped containers not managed by Tengiz
+  - dangling (unreferenced) images
+  - unused networks
+
+If any category flag is set, only those categories are cleaned.
+Use --all to clean everything, including unused volumes (data loss risk).
+
+Examples:
+  tengiz cleanup
+  tengiz cleanup --all-images
+  tengiz cleanup --volumes
+  tengiz cleanup --all`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts, err := cleanupOptionsFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		fmt.Println("[tengiz] cleaning up unused Docker resources...")
+		res, err := rt.Cleanup(context.Background(), opts)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("[tengiz] cleanup complete:\n")
+		fmt.Printf("  containers removed: %d\n", res.ContainersDeleted)
+		fmt.Printf("  images removed: %d\n", res.ImagesDeleted)
+		fmt.Printf("  networks removed: %d\n", res.NetworksDeleted)
+		fmt.Printf("  volumes removed: %d\n", res.VolumesDeleted)
+		fmt.Printf("  space reclaimed: %s\n", humanizeBytes(res.TotalReclaimedBytes))
+		return nil
+	},
+}
+
+func cleanupOptionsFromFlags(cmd *cobra.Command) (runtime.CleanupOptions, error) {
+	containers, _ := cmd.Flags().GetBool("containers")
+	images, _ := cmd.Flags().GetBool("images")
+	allImages, _ := cmd.Flags().GetBool("all-images")
+	networks, _ := cmd.Flags().GetBool("networks")
+	volumes, _ := cmd.Flags().GetBool("volumes")
+	all, _ := cmd.Flags().GetBool("all")
+
+	if all {
+		return runtime.CleanupOptions{
+			Containers: true,
+			Images:     true,
+			AllImages:  true,
+			Networks:   true,
+			Volumes:    true,
+		}, nil
+	}
+	if !containers && !images && !allImages && !networks && !volumes {
+		return runtime.CleanupOptions{
+			Containers: true,
+			Images:     true,
+			Networks:   true,
+		}, nil
+	}
+	return runtime.CleanupOptions{
+		Containers: containers,
+		Images:     images || allImages,
+		AllImages:  allImages,
+		Networks:   networks,
+		Volumes:    volumes,
+	}, nil
+}
+
+func humanizeBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%dB", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f%cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 var gitCmd = &cobra.Command{
