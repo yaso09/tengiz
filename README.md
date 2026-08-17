@@ -18,6 +18,7 @@
 - **Multi-environment** — Isolate dev/staging/production with `--env` flag, env-scoped config overrides, and separate state files.
 - **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
+- **Docker housekeeping** — `tengiz cleanup` prunes unused containers, images, networks, volumes, and build cache while protecting all Tengiz-managed resources.
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
@@ -234,6 +235,17 @@ Rollback to the previous deployment. The previous active container is started on
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name (required) |
+
+### `tengiz cleanup`
+
+Prune unused Docker resources to reclaim disk space. Always removes: stopped non-Tengiz containers, dangling images, and unused networks. Tengiz-managed containers (labeled `tengiz-app`) and Tengiz images (`tengiz-apps/*`) are never removed.
+
+| Flag | Description |
+|------|-------------|
+| `-a`, `--all` | Also remove all unused images (excluding `tengiz-apps/*`) and all unused build cache |
+| `--volumes` | Also remove unused anonymous volumes |
+| `--build-cache` | Also prune the Docker build cache (dangling only unless `--all`) |
+| `--dry-run` | Print the docker commands that would run, without executing them |
 
 ### `tengiz domain`
 
