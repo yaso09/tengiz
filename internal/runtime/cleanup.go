@@ -10,7 +10,35 @@ import (
 )
 
 func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
-	return PruneResult{}, nil
+	var result PruneResult
+	cmds := buildPruneCommands(opts)
+	for _, args := range cmds {
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return result, fmt.Errorf("docker %s: %w\n%s", strings.Join(args, " "), err, string(out))
+		}
+		count, space := parsePruneOutput(args[0], string(out))
+		switch args[0] {
+		case "container":
+			result.Containers += count
+		case "image":
+			result.Images += count
+		case "network":
+			result.Networks += count
+		case "volume":
+			result.Volumes += count
+		case "builder":
+			result.BuildCache += count
+		}
+		if space != "" {
+			if result.Space != "" {
+				result.Space += ", "
+			}
+			result.Space += space
+		}
+	}
+	return result, nil
 }
 
 func buildPruneCommands(opts PruneOptions) [][]string {
