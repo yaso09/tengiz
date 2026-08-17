@@ -1580,3 +1580,95 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Each datastore collection can be configured with a memory type: `Heap` (fast, volatile — data lost on canister upgrade) or `Stable` (persistent across upgrades, slightly slower). This lets developers make performance/cost trade-offs per collection: cache/session data goes in Heap for speed, user profiles go in Stable for durability. Collections default to Heap for maximum performance. The memory type affects both read/write latency and upgrade behavior — Stable collections survive platform upgrades, Heap collections are re-initialized.
 - **Why add to Tengiz:** Tengiz's planned Built-in NoSQL Datastore (#1) needs a similar performance/storage trade-off. Some data is ephemeral (sessions, cache, rate limit counters) — stored in-memory for speed and automatically reset on restart. Other data is persistent (user profiles, settings, content) — written to SQLite or disk-backed storage for durability. A `db.<collection>.memory: ephemeral | persistent` setting in `.tengiz.yaml` lets developers choose: ephemeral collections use Go maps (fast, lost on container restart), persistent collections use embedded SQLite tables (durable, survives restarts). This is particularly important for scale-to-zero — ephemeral collections naturally reset on cold start (good for session data that should force re-login), persistent collections survive scale-to-zero cycles (good for app state). Implementation: two store backends (`MemoryStore` and `SQLiteStore`) implementing the same `DocStore` interface, selected per-collection at deploy time. Low-medium effort, fits Tengiz's embedded database philosophy. Complements the NoSQL Datastore with production-grade configurability.
 - **Detected:** 2026-07-17
+
+---
+
+## Crash-Loop Detection & Restart Backoff
+- **Source:** Coolify
+- **Description:** Coolify tracks `restart_count`, `last_restart_at`, and `last_restart_type` on every application, database, and service. Each app has a `max_restart_count` (default 10). When a container crashes repeatedly, the counter increments and auto-restart stops once the ceiling is reached — preventing a crash-looping app from permanently churning the Docker daemon. Combined with the background `ServerCheckJob` monitoring, crash loops are surfaced to the UI for investigation.
+- **Why add to Tengiz:** Scale-to-zero means containers constantly start/stop, and the health package already auto-restarts failing containers. But an app with a broken config will restart forever (restart storm), wasting resources and masking the real error. Crash-loop detection with a max-restart ceiling (default 10) converts a silent restart storm into a visible `tengiz ps` status like `CrashLooping (9/10 restarts)`. `.tengiz.yaml`'da `health.max_restarts: 10` ile yapılandırılır. Complements existing health checks (#4) and restart policies (#44) — those define restart behavior; this bounds it and surfaces it.
+- **Detected:** 2026-08-17
+
+## Deploy Skip on Unchanged Config (Config Hash Diffing)
+- **Source:** Coolify
+- **Description:** Every Coolify deployment records `configuration_hash`, `configuration_snapshot`, and `configuration_diff` on the deployment queue entry. Applications and services carry a `config_hash` of their effective config (images, domains, storage, env vars). When a push arrives but the effective config hash matches the last deployed hash, the redeploy can be skipped — no wasted build, no container churn. The diff is also stored for audit and rollback analysis.
+- **Why add to Tengiz:** Rapid-fire CI/CD and webhook pushes often carry no meaningful config change (a docs-only commit, a metadata edit). Today Tengiz rebuilds and redeploys unconditionally, wasting build time and triggering unnecessary cold-starts. Computing a SHA-256 over the effective deploy inputs (git SHA, Dockerfile, `.tengiz.yaml`, env vars, secrets refs) and skipping when unchanged turns no-op deploys into instant `No changes — deploy skipped`. `.tengiz.yaml`'da `deploy.skip_unchanged: true`. The recorded snapshot also strengthens rollback with a before/after diff. Low effort (hash comparison in `deploy.go`), high CI/CD value.
+- **Detected:** 2026-08-17
+
+## Skip-Deploy Commit Detection (`[skip cd]`)
+- **Source:** Coolify
+- **Description:** Coolify's `DetectsSkipDeployCommits` concern checks incoming webhook payloads for commits whose messages contain `[skip cd]` (also `[ci skip]` / `[skip ci]` conventions). When matched, the deployment is not queued at all — the push is acknowledged but produces no build. The parser is case-insensitive and supports multiple skip tokens.
+- **Why add to Tengiz:** Docs changes, dependency-bump commits, and CI-triggered commits shouldn't always spawn a full deploy. GitHub Actions, Dependabot, and renovate produce high-volume commits that today would each trigger a `tengiz` build. A `[skip cd]` convention lets developers opt out explicitly and is the industry-standard gate. Implementation: a regex match over commit messages in the webhook handler (and `git pull` for gitdeploy). Complements Webhook Event Filtering (#69) which filters by branch/path — this filters by commit message. Trivial effort, immediate DX win.
+- **Detected:** 2026-08-17
+
+## Webhook SSRF Protection (Internal Host Allowlist)
+- **Source:** Coolify
+- **Description:** Coolify's instance settings include `webhook_allowed_internal_hosts` and `webhook_allow_localhost` to control which internal hosts outbound webhook requests (notifications, outgoing webhooks) may reach. This prevents an attacker who can trigger a webhook from using it as an SSRF proxy into the Docker network, the host metadata service, or internal Coolify services.
+- **Why add to Tengiz:** Once outgoing webhooks and the notification system exist, the webhook URL becomes an attack vector — a crafted payload could point a request at `169.254.169.254` (cloud metadata), the Docker socket, or other app containers. An allowlist of internal hosts (`~/.tengiz/config.json` `webhook.allow_internal_hosts`, `webhook.allow_localhost`) blocks this class of attack with ~30 lines of Go `net/url` checking before any HTTP request is made. Complements HMAC webhook signing (inbound) — this protects outbound. Low effort, meaningful security hardening.
+- **Detected:** 2026-08-17
+
+## Public Port Auto-Expiry (Ephemeral TCP Exposure)
+- **Source:** Coolify
+- **Description:** Every standalone database and service database carries a `public_port_timeout` (added 2026-02). When a database port is exposed publicly, the exposure is automatically removed after N minutes. This guards against the common mistake of leaving a database open to the internet — the TCP proxy stops forwarding once the timer expires, and the port is returned to the pool.
+- **Why add to Tengiz:** Managed databases and accessory services will tempt users to expose Postgres/Redis ports for debugging and then forget — a classic data-exposure incident. An auto-expiry on public port exposure (`tengiz db expose mydb --timeout 30m`) gives a short, safe window for debugging then reverts automatically. It fits Tengiz's scale-to-zero philosophy perfectly: ephemeral by default. Reuses the existing port allocation store. Low effort, high security value.
+- **Detected:** 2026-08-17
+
+## WWW/Non-WWW Redirect Policy
+- **Source:** Coolify
+- **Description:** Coolify's `RedirectTypes` enum (`both`, `www`, `non-www`) controls per-app WWW vs non-WWW canonicalization at the proxy level. Configuring `non-www` auto-redirects `www.myapp.com` → `myapp.com` with a 301, and vice versa for `www`. `both` leaves it unredirected.
+- **Why add to Tengiz:** URL Redirect & Rewrite covers arbitrary redirect rules but not the canonical domain normalization every production site needs for SEO and session consistency. A `domain.redirect: non-www` toggle in `.tengiz.yaml` auto-handles the most common redirect pair without users writing rules. Implementation: a small check in the proxy's host-based routing that redirects the alternate form with a 301 before forwarding. Complements Force HTTPS with another canonicalization middleware. Low effort, high polish.
+- **Detected:** 2026-08-17
+
+## Environment Variable Scoping (Buildtime / Runtime / Preview)
+- **Source:** Coolify
+- **Description:** Coolify env vars carry `is_buildtime`, `is_runtime`, `is_preview`, `is_literal`, `is_multiline`, `comment`, `version`, and `order` flags. Buildtime-only vars (e.g. `NEXT_PUBLIC_*`) are injected into `docker build` but never into the running container; runtime-only vars (e.g. `DATABASE_URL`) are injected at run but never baked into the image; preview-only vars apply only to PR previews. `is_literal` disables `[[...]]` interpolation, `is_multiline` allows multi-line values, and vars are versioned/ordered.
+- **Why add to Tengiz:** Tengiz currently treats env vars as a single flat list passed to the running container. Framework builds need build-only vars (`NEXT_PUBLIC_*`, `VITE_*`), and putting runtime secrets into the build leaks them into image history. Env scoping solves both: `env.buildtime:`, `env.runtime:`, `env.preview:` sections in `.tengiz.yaml`. Build Arguments from Env covers the mechanism; this adds explicit scoping and preview-application. Complements Preview Deployments with per-PR env. Medium effort, high correctness value.
+- **Detected:** 2026-08-17
+
+## Subpath Hosting (URL Prefix Stripping)
+- **Source:** Coolify
+- **Description:** Coolify's `is_stripprefix_enabled` (paired with `is_gzip_enabled`) lets a service be served under a URL prefix instead of its own subdomain. The proxy strips the prefix (`/grafana` → `/`) before forwarding to the container, so multiple services can share one domain at distinct paths (`example.com/grafana`, `example.com/api`).
+- **Why add to Tengiz:** Users often want one domain serving several services (metrics dashboards, admin panels, API + web) without juggling subdomains or wildcard certs. `tengiz deploy --path-prefix /grafana` or `.tengiz.yaml`'da `proxy.strip_prefix: /grafana` enables this with a small proxy middleware (prefix strip + rewrite before `httputil.ReverseProxy`). Complements custom domains (implemented) and the advanced proxy config. Low-medium effort, fills a real gap for single-domain setups.
+- **Detected:** 2026-08-17
+
+## Volume Cloning (Cross-App/Server Data Copy)
+- **Source:** Coolify
+- **Description:** `VolumeCloneJob` clones Docker volumes between destinations (local and remote), and `HostPathCloneJob` copies bind-mount host paths between servers via a staging dir (`docker run` + tar). Data can be duplicated from a running service to a new app or another server — used for staging seeding, environment migration, and backup-of-record duplication.
+- **Why add to Tengiz:** Cloning a volume is the data-level companion to App Cloning (config copy). Use cases: seed a staging app with production data, migrate an accessory's data to a new server, duplicate a database volume before a risky migration. `tengiz volume clone <app> <new-app>` or `tengiz volume clone <app> --server other` maps cleanly onto `docker run --rm -v` + tar piping. Complements Automated DB Backups which are logical dumps — this is a raw volume copy. Low-medium effort, high ops value.
+- **Detected:** 2026-08-17
+
+## Preview-Deployment Isolated Volumes
+- **Source:** Coolify
+- **Description:** Coolify volumes support `is_preview_suffix_enabled`: when enabled, preview deployments get a `-pr-<number>` suffixed volume instead of sharing the production volume. Each PR environment has fully isolated persistent storage that is cleaned up with the preview container.
+- **Why add to Tengiz:** Preview Deployments currently share the app's volume — a PR that mutates the database writes to production data, which is dangerous and defeats the purpose of isolated PR environments. `volume.preview_isolated: true` gives each PR its own volume (destroyed with the preview). This makes previews safe for stateful apps (e.g. a Next.js app with SQLite, or a service with uploaded files). Complements Persistent Storage. Low effort (volume naming in preview create path), high safety value.
+- **Detected:** 2026-08-17
+
+## Cloud Server Provisioning (Hetzner / Vultr / DigitalOcean)
+- **Source:** Coolify
+- **Description:** Coolify stores encrypted `CloudProviderToken`s for DigitalOcean, Hetzner, and Vultr, then provisions servers directly through those cloud APIs (locations, images, sizes, SSH keys, firewalls, cloud-init). `HetznerService`, `VultrService`, and `DigitalOceanService` orchestrate instance creation, status sync, and teardown. Reusable `CloudInitScript` resources seed new servers.
+- **Why add to Tengiz:** Server Bootstrap installs Docker on an existing machine; cloud provisioning removes the machine-procurement step entirely. `tengiz server create hetzner --location nbg1 --size cx22 --cloud-init setup.yaml` spins up a server, installs Docker, and registers it — one command from nothing to a managed node. This unblocks the multi-server features by making server acquisition automated. Medium-high effort (three provider clients via HTTP), high strategic value.
+- **Detected:** 2026-08-17
+
+## Global Search / Command Palette (CLI)
+- **Source:** Coolify
+- **Description:** Coolify ships a ⌘K command palette with global search across servers, projects, applications, environment variables, and cloud-init scripts, with keyboard navigation and fuzzy matching (DESIGN.md §8). It surfaces any resource or action without clicking through the UI hierarchy.
+- **Why add to Tengiz:** As app count grows, `tengiz ps` becomes a long list and users must remember app names/IDs. A `tengiz search <query>` command with fuzzy matching over apps, deployments, env vars, domains, images, and volumes returns a scoped, actionable result set with hints (`tengiz logs myapp`, `tengiz deploy myapp`). Implementation: a small fuzzy scorer over the existing `~/.tengiz/*.json` state plus the Docker label index — no new storage. Complements App Report which shows one app in depth; this finds the right app first. Low effort, high DX value.
+- **Detected:** 2026-08-17
+
+## Deploy Cancellation (Cancel a Running Deploy)
+- **Source:** Coolify
+- **Description:** Coolify's deployment queue exposes a cancel operation: a running deployment can be stopped from the API/UI (`cancel` action), killing the build process, marking the record `canceled`, and releasing the queue slot so the next deploy can proceed.
+- **Why add to Tengiz:** A deploy that hangs (long `npm install`, stuck git clone, a user who pushed wrong code) currently blocks the queue and wastes the build container indefinitely. `tengiz deploy --cancel <app>` or a `deploy.cancel` API signal terminates the build subprocess, marks the build record canceled, and frees the per-app lock so a corrected deploy can run immediately. Build Tracking already records a `canceled` status — this adds the control to reach it. Complements Build Queue with Dedup. Low-medium effort, high ops value.
+- **Detected:** 2026-08-17
+
+## Stop Grace Period (Per-App SIGTERM Window)
+- **Source:** Coolify
+- **Description:** Coolify's `ApplicationSetting.stop_grace_period` configures the per-app graceful shutdown window (bounded by MIN/MAX constants, defaulting sensibly). When a container is stopped, Docker sends SIGTERM and waits up to this period before SIGKILL. The setting is applied via `docker run --stop-timeout`.
+- **Why add to Tengiz:** Scale-to-zero stops containers on idle timeout and zero-downtime deploy stops the old container — both terminate processes. An app mid-transaction or mid-request needs time to finish cleanly (flush connections, commit state, drain work). `.tengiz.yaml`'da `stop_grace_period: 30` maps directly to Docker's `--stop-timeout` flag in `runtime.Stop()`. Complements idle timeout (implemented) and Readiness Delay & Deploy Timeouts with the final shutdown step. Trivial effort, prevents data corruption on scale-to-zero.
+- **Detected:** 2026-08-17
+
+## Sensitive Data Redaction (PII/Secret Sanitization in Logs)
+- **Source:** Coolify
+- **Description:** Coolify's `ApiSensitiveData` middleware plus the "Copy resource logs with PII/secret sanitization" feature redact credentials, tokens, and sensitive IDs from API responses and copied log output. Encrypting mount/fs_path and encrypted env values never appear in plaintext in logs or downloads.
+- **Why add to Tengiz:** `tengiz logs` and `tengiz build-logs` can leak secrets when an app echoes its env vars or a build script prints `--build-arg API_KEY=...`. A redaction layer over log output (masking values matching registered secret patterns from the secrets store and env vars) makes sharing logs safe (`tengiz logs myapp --redact`, plus on-by-default for build logs). Complements Secrets Management and Encryption at Rest — those protect storage; this protects output. Low effort (regex mask over emitted lines), good security posture.
+- **Detected:** 2026-08-17
