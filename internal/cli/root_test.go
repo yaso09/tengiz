@@ -186,6 +186,25 @@ func TestWebhookCmdReadsConfig(t *testing.T) {
 	}
 }
 
+func TestCleanupCmdRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCmdFlags(t *testing.T) {
+	cmd, _, _ := rootCmd.Find([]string{"cleanup"})
+	for _, flag := range []string{"dry-run", "all", "volumes"} {
+		if cmd.Flags().Lookup(flag) == nil {
+			t.Errorf("cleanupCmd missing --%s flag", flag)
+		}
+	}
+}
+
 func TestGitCommandsRegistered(t *testing.T) {
 	cmd, _, err := rootCmd.Find([]string{"git"})
 	if err != nil {
