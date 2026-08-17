@@ -238,6 +238,20 @@ func TestStubGetContainerPort(t *testing.T) {
 	}
 }
 
+func TestStubPrune(t *testing.T) {
+	m := NewStub()
+	res, err := m.Prune(context.Background(), PruneOptions{})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if res == nil {
+		t.Fatal("Prune() returned nil result")
+	}
+	if len(res.ContainersRemoved) != 0 || res.ImagesRemoved != 0 || res.NetworksRemoved != 0 || res.VolumesRemoved != 0 {
+		t.Errorf("expected zeroed PruneResult, got %+v", res)
+	}
+}
+
 func TestStubRun(t *testing.T) {
 	m := NewStub()
 	cfg := &types.AppConfig{Name: "testapp"}
