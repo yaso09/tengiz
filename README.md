@@ -18,6 +18,7 @@
 - **Multi-environment** — Isolate dev/staging/production with `--env` flag, env-scoped config overrides, and separate state files.
 - **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
+- **Docker housekeeping** — `tengiz cleanup` prunes unused containers, images, volumes, networks, and build cache with label-aware protection for Tengiz-managed resources.
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
@@ -97,6 +98,7 @@ go build -o tengiz .
 cd my-project
 tengiz deploy          # detect framework, build image, start container
 tengiz proxy           # start reverse proxy on :8080 with scale-to-zero
+tengiz cleanup        # prune unused Docker resources (label-aware, dry-run with --dry-run)
 # Visit http://my-project.tengiz.local:8080
 ```
 
@@ -148,6 +150,33 @@ The proxy also starts an **admin API** on `127.0.0.1:9099` for dynamic route man
 List all deployed applications and their status.
 
 Output: `NAME`, `STATE` (running/stopped), `PORT`, `ENVIRONMENT`, `HEALTH`.
+
+### `tengiz cleanup`
+
+Remove unused Docker resources to reclaim disk space.
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Prune stopped containers not managed by Tengiz |
+| `--images` | Prune dangling images |
+| `--all-images` | Also remove all unused non-Tengiz images (preserves `tengiz-apps/*` rollback images) |
+| `--volumes` | Prune unused anonymous volumes (may contain data) |
+| `--networks` | Prune unused networks |
+| `--cache` | Prune the Docker build cache |
+| `--all` | Enable all categories, including volumes |
+| `--dry-run` | Print the commands that would run without executing them |
+| `-y`, `--force` | Skip the confirmation prompt |
+
+Tengiz-managed containers (labeled `tengiz-app=*`) are **never** removed. By default only
+the safe categories run (containers, dangling images, networks, build cache); volumes are
+excluded because they may contain data. Runs a confirmation prompt unless `-y/--force` is
+passed.
+
+```bash
+tengiz cleanup                # safe default cleanup with confirmation
+tengiz cleanup --dry-run      # preview the exact docker commands
+tengiz cleanup --all -y       # full cleanup incl. volumes, no prompt
+```
 
 ### `tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] <app>`
 
