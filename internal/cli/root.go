@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -39,6 +40,7 @@ func init() {
 	rootCmd.AddCommand(deployCmd)
 	rootCmd.AddCommand(proxyCmd)
 	rootCmd.AddCommand(psCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(rmCmd)
@@ -86,6 +88,15 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers not managed by Tengiz")
+	cleanupCmd.Flags().Bool("images", false, "prune dangling images")
+	cleanupCmd.Flags().Bool("all-images", false, "also remove all unused non-Tengiz images (preserves tengiz-apps/* rollback images)")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused anonymous volumes (may contain data)")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("cache", false, "prune Docker build cache")
+	cleanupCmd.Flags().Bool("all", false, "enable all cleanup categories, including volumes")
+	cleanupCmd.Flags().Bool("dry-run", false, "print the commands that would run without executing them")
+	cleanupCmd.Flags().BoolP("force", "y", false, "skip the confirmation prompt")
 }
 
 var rootCmd = &cobra.Command{
@@ -594,10 +605,125 @@ var psCmd = &cobra.Command{
 			if env == "" {
 				env = "-"
 			}
-			fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", a.Name, a.State, portStr, env, health)
+		fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", a.Name, a.State, portStr, env, health)
+	}
+	return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources",
+	Long: `Remove unused Docker resources to reclaim disk space.
+
+Tengiz-managed containers (labeled tengiz-app=*) are always protected and are never removed.
+
+By default cleanup runs the safe categories: stopped non-Tengiz containers, dangling
+images, unused networks, and the Docker build cache. Volumes are excluded because they
+may contain data; include them with --volumes or --all.
+
+Use --dry-run to preview the exact docker commands that would run, and -y/--force to
+skip the confirmation prompt (for scripts and CI).`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		allImages, _ := cmd.Flags().GetBool("all-images")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		networks, _ := cmd.Flags().GetBool("networks")
+		cache, _ := cmd.Flags().GetBool("cache")
+		all, _ := cmd.Flags().GetBool("all")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		force, _ := cmd.Flags().GetBool("force")
+
+		if all {
+			containers, images, allImages, volumes, networks, cache = true, true, true, true, true, true
+		}
+		if allImages {
+			images = true // --all-images also prunes dangling images
+		}
+		if !containers && !images && !allImages && !volumes && !networks && !cache {
+			// Safe defaults: protect data and preserve rollback images.
+			containers, images, networks, cache = true, true, true, true
+		}
+
+		opts := runtime.CleanupOptions{
+			Containers: containers,
+			Images:     images,
+			AllImages:  allImages,
+			Volumes:    volumes,
+			Networks:   networks,
+			Cache:      cache,
+		}
+
+		if dryRun {
+			fmt.Println("[tengiz] cleanup dry-run — commands that would run:")
+			for _, c := range runtime.CleanupCommands(opts) {
+				fmt.Printf("  docker %s\n", strings.Join(c.Args, " "))
+			}
+			if opts.AllImages {
+				fmt.Println("  docker images --format '{{.Repository}}:{{.Tag}}'")
+				fmt.Println("  docker rmi -f <each unused non-tengiz-apps image>")
+			}
+			fmt.Println("[tengiz] dry-run complete — nothing was removed.")
+			return nil
+		}
+
+		if !force && !confirmCleanup(os.Stdin) {
+			fmt.Println("[tengiz] cleanup aborted.")
+			return nil
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		res, err := rt.Cleanup(cmd.Context(), opts)
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+
+		fmt.Println("[tengiz] cleanup complete:")
+		if opts.Containers {
+			fmt.Printf("  containers: %s reclaimed\n", orDash(res.Containers))
+		}
+		if opts.Images {
+			fmt.Printf("  images: %s reclaimed\n", orDash(res.Images))
+		}
+		if opts.AllImages {
+			fmt.Println("  images: unused non-Tengiz images removed")
+		}
+		if opts.Volumes {
+			fmt.Printf("  volumes: %s reclaimed\n", orDash(res.Volumes))
+		}
+		if opts.Networks {
+			fmt.Printf("  networks: %s reclaimed\n", orDash(res.Networks))
+		}
+		if opts.Cache {
+			fmt.Printf("  build cache: %s reclaimed\n", orDash(res.Cache))
 		}
 		return nil
 	},
+}
+
+// confirmCleanup prompts the user on r (typically os.Stdin) and returns true when they
+// confirm with y/yes.
+func confirmCleanup(r io.Reader) bool {
+	fmt.Print("This will remove unused Docker resources. Continue? [y/N] ")
+	reader := bufio.NewReader(r)
+	input, _ := reader.ReadString('\n')
+	switch strings.ToLower(strings.TrimSpace(input)) {
+	case "y", "yes":
+		return true
+	}
+	return false
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 var stopCmd = &cobra.Command{
