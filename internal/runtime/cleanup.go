@@ -125,6 +125,53 @@ func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error 
 	return nil
 }
 
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
+	var res CleanupResult
+
+	runPrune := func(args []string) (string, error) {
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("docker %s: %w\n%s", strings.Join(args, " "), err, string(out))
+		}
+		return reclaimedFromOutput(out), nil
+	}
+
+	for _, c := range CleanupCommands(opts) {
+		reclaimed, err := runPrune(c.Args)
+		if err != nil {
+			return res, err
+		}
+		switch c.Args[0] {
+		case "container":
+			res.Containers = reclaimed
+		case "image":
+			res.Images = reclaimed
+		case "volume":
+			res.Volumes = reclaimed
+		case "network":
+			res.Networks = reclaimed
+		case "builder":
+			res.Cache = reclaimed
+		}
+	}
+
+	if opts.AllImages {
+		imgCmd := exec.CommandContext(ctx, "docker", "images", "--format", "{{.Repository}}:{{.Tag}}")
+		out, err := imgCmd.CombinedOutput()
+		if err != nil {
+			return res, fmt.Errorf("docker images: %w", err)
+		}
+		for _, ref := range nonTengizImageRefs(string(out)) {
+			if err := r.RemoveImage(ctx, ref); err != nil {
+				log.Printf("[runtime] cleanup: failed to remove image %s: %v", ref, err)
+			}
+		}
+	}
+
+	return res, nil
+}
+
 func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n int) error {
 	cmd := exec.CommandContext(ctx, "docker", "images",
 		"--filter", fmt.Sprintf("reference=tengiz-apps/%s:*", appName),

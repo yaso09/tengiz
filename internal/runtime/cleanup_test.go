@@ -122,3 +122,14 @@ func TestCleanupCommands(t *testing.T) {
 		t.Fatal("expected no commands for empty options")
 	}
 }
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	res, err := m.Cleanup(context.Background(), CleanupOptions{Containers: true, Images: true})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if res.Containers != "" || res.Images != "" {
+		t.Errorf("expected empty CleanupResult, got %+v", res)
+	}
+}
