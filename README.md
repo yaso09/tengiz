@@ -235,6 +235,21 @@ Rollback to the previous deployment. The previous active container is started on
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup [--all] [--volumes] [--yes]`
+
+Remove unused Docker resources while protecting every Tengiz-managed container.
+
+| Flag | Description |
+|------|-------------|
+| `-a`, `--all` | Also remove all unused images, not just dangling ones |
+| `--volumes` | Also remove unused volumes (data-loss risk) |
+| `-y`, `--yes` | Skip the confirmation prompt |
+
+Removes stopped containers not managed by Tengiz (identified by the `tengiz-app`
+label — stopped scale-to-zero containers, versioned blue/green containers, and
+preview deployments are protected), dangling images, unused networks, and BuildKit
+build cache. Use `--volumes` to additionally remove unused volumes.
+
 ### `tengiz domain`
 
 Manage custom domains for applications.
