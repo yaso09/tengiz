@@ -9,6 +9,99 @@ import (
 	"strings"
 )
 
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
+	var result PruneResult
+	cmds := buildPruneCommands(opts)
+	for _, args := range cmds {
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return result, fmt.Errorf("docker %s: %w\n%s", strings.Join(args, " "), err, string(out))
+		}
+		count, space := parsePruneOutput(args[0], string(out))
+		switch args[0] {
+		case "container":
+			result.Containers += count
+		case "image":
+			result.Images += count
+		case "network":
+			result.Networks += count
+		case "volume":
+			result.Volumes += count
+		case "builder":
+			result.BuildCache += count
+		}
+		if space != "" {
+			if result.Space != "" {
+				result.Space += ", "
+			}
+			result.Space += space
+		}
+	}
+	return result, nil
+}
+
+func buildPruneCommands(opts PruneOptions) [][]string {
+	var cmds [][]string
+	if opts.Containers {
+		cmds = append(cmds, []string{"container", "prune", "-f", "--filter", "label!=tengiz-app"})
+	}
+	if opts.Images {
+		args := []string{"image", "prune", "-f"}
+		if opts.All {
+			args = append(args, "-a")
+		}
+		cmds = append(cmds, args)
+	}
+	if opts.Networks {
+		cmds = append(cmds, []string{"network", "prune", "-f"})
+	}
+	if opts.Volumes {
+		cmds = append(cmds, []string{"volume", "prune", "-f"})
+	}
+	if opts.BuildCache {
+		cmds = append(cmds, []string{"builder", "prune", "-f"})
+	}
+	return cmds
+}
+
+func pruneHeader(kind string) string {
+	switch kind {
+	case "container":
+		return "Deleted Containers:"
+	case "image":
+		return "Deleted Images:"
+	case "network":
+		return "Deleted Networks:"
+	case "volume":
+		return "Deleted Volumes:"
+	case "builder":
+		return "Deleted Build Cache Entry:"
+	}
+	return ""
+}
+
+func parsePruneOutput(kind, output string) (int, string) {
+	header := pruneHeader(kind)
+	space := ""
+	count := 0
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if line == header {
+			continue
+		}
+		if strings.HasPrefix(line, "Total reclaimed space:") {
+			space = strings.TrimSpace(strings.TrimPrefix(line, "Total reclaimed space:"))
+			continue
+		}
+		count++
+	}
+	return count, space
+}
+
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()

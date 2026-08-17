@@ -149,6 +149,31 @@ List all deployed applications and their status.
 
 Output: `NAME`, `STATE` (running/stopped), `PORT`, `ENVIRONMENT`, `HEALTH`.
 
+### `tengiz cleanup [--containers] [--images] [--networks] [--volumes] [--build-cache] [--all] [--force]`
+
+Reclaim disk space by removing unused Docker resources.
+
+By default prunes stopped containers (excluding Tengiz-managed ones), dangling images, and unused networks. Tengiz-managed containers (labeled `tengiz-app`) are always protected.
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Prune stopped containers not managed by Tengiz (default: true) |
+| `--images` | Prune dangling images (default: true) |
+| `--networks` | Prune unused networks (default: true) |
+| `--volumes` | Also prune unused volumes |
+| `--build-cache` | Also prune the Docker build cache |
+| `--all` | Prune all categories (containers, images, networks, volumes, build cache) |
+| `--force` | Skip the confirmation prompt (required in non-interactive shells) |
+
+Passing a category flag explicitly (e.g. `--containers`) limits the run to just that category. Without `--force` you are prompted for confirmation; non-interactive shells must pass `--force`.
+
+Examples:
+```
+tengiz cleanup
+tengiz cleanup --volumes
+tengiz cleanup --all --force
+```
+
 ### `tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] <app>`
 
 Show application logs.
