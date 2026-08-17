@@ -1834,3 +1834,89 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** In `env.secret` lists, Kamal supports `NAME:SECRET_KEY` aliasing (`configuration/env.rb` `extract_alias`): the env var `NAME` gets its value from a secret stored under a *different* key. This decouples secret names (chosen by the secret store/vault) from env var names (required by the app), e.g. `DATABASE_URL:prod-db-url`.
 - **Why add to Tengiz:** Existing secret interpolation (`[[secret.NAME]]`) requires the secret key to match the env var name. When a shared vault key differs from what the app expects — or one secret feeds several apps with different env names — users must duplicate secrets. `tengiz secret set myapp DATABASE_URL --alias prod-db-url` (or `secret: [DATABASE_URL:prod-db-url]` in `.tengiz.yaml`) resolves the value at deploy/run time while keeping the app-facing name. Trivial to add to `ResolveInterpolations`/env assembly in the secrets package. Low effort, removes a real friction point for shared secret stores.
 - **Detected:** 2026-08-17
+
+---
+
+## English-Language Cron Schedule Expressions
+- **Source:** Komodo
+- **Description:** Komodo's `ScheduleFormat::English` accepts natural-language schedule expressions ("every 5 minutes", "daily at midnight") and converts them to cron syntax via the `english_to_cron` crate (`bin/core/src/schedule.rs:310`). The year field is stripped before parsing with the same `croner` parser used for native cron. Combined with per-schedule `schedule_timezone` (falls back to `core_config().timezone`, then server-local), next-run times are computed correctly in the operator's zone.
+- **Why add to Tengiz:** Scheduled Deployments and Host-Level Scheduled Scripts on the roadmap use raw cron expressions. English-language expressions remove the "which field is minutes vs hours" friction for the majority of users who just want "every 5 minutes" or "nightly at 3am". Tiny addition on top of `robfig/cron` (a `english_to_cron`-style mapper + timezone field in the schedule record). Fits the CLI-first model where users type schedules in a terminal, not a UI form. Low effort, high UX value.
+- **Detected:** 2026-08-17
+
+## Compose Command Wrapper for External Secrets Tooling
+- **Source:** Komodo
+- **Description:** Komodo's `StackConfig.compose_cmd_wrapper` lets users wrap the compose command with an external secrets/encryption tool before execution: `op run -- [[COMPOSE_COMMAND]]` (1Password CLI), or `sops exec-file --no-fifo /path/to/secret.env '[[COMPOSE_COMMAND]]'` (sops). `compose_cmd_wrapper_include` selects which subcommands get wrapped (`config`, `build`, `pull`, `up`, `run` for Compose; `config`, `deploy` for Swarm), defaulting to `up`/`deploy`. A missing `[[COMPOSE_COMMAND]]` placeholder is a hard validation error (`bin/periphery/src/api/swarm/stack.rs:52`).
+- **Why add to Tengiz:** Secrets management exists but deployment-time decryption tooling doesn't — users with sops-encrypted env files or 1Password vaults have no clean way to decrypt before `docker compose up`. A `compose_cmd_wrapper` setting in `.tengiz.yaml` (`stack.cmd_wrapper: "op run -- [[COMPOSE_COMMAND]]"`) lets Tengiz integrate with the user's existing secret tooling instead of forcing migration to Tengiz's own secret store. Implementation is a template string substitution around the assembled compose command. Low effort, unblocks real-world sops/vault workflows.
+- **Detected:** 2026-08-17
+
+## Per-Service Config File Dependency Tracking
+- **Source:** Komodo
+- **Description:** Komodo's `StackFileDependency` attaches arbitrary config files to a Stack with a `services` list and a `requires` level: `Redeploy`, `Restart`, or `None` (`bin/core/src/entities/stack.rs:1182`). When a watched file changes, `DeployStackIfChanged` diffing decides the minimal action — a changed env file that only feeds one service triggers a restart, a compose-file change triggers a full redeploy, and a metadata-only file triggers nothing. Per-service `requires` granularity avoids wasteful full-stack restarts.
+- **Why add to Tengiz:** Docker Compose Import and Stack lifecycle on the roadmap redeploy the whole stack on any config change. With per-file dependency tracking, a change to `redis.conf` wouldn't restart the web service, and a `.env` edit would only restart dependent services. `.tengiz.yaml`'da `stack.file_dependencies: [{path: redis.conf, services: [redis], requires: restart}]`. Distinctive — no other Docker-based alternative does differential compose redeploys. Medium effort (file-hash diffing in the compose pipeline), meaningful ops value on multi-service stacks.
+- **Detected:** 2026-08-17
+
+## Compose Project Name Preservation (Rename Resilience)
+- **Source:** Komodo
+- **Description:** Komodo's `Stack.project_name(fresh)` returns the last-known `deployed_project_name` (recorded at every successful deploy) in preference to the configured `project_name` (`bin/core/src/entities/stack.rs:52`). This lets users import pre-existing compose projects whose name differs from the Stack resource name, and keeps Docker compose project identity stable across resource renames — there is deliberately no rename-compose-project API.
+- **Why add to Tengiz:** If a user renames a Tengiz app or stack that owns a compose project, the Docker project name (which determines network/volume/container prefixes) would otherwise change, orphaning the deployed resources. Recording `deployed_project_name` at deploy time and preferring it on subsequent operations makes renames safe for compose-managed stacks. Complements App Renaming and the rename resilience gap. Low effort (one persisted field + a getter), removes a real data-integrity footgun.
+- **Detected:** 2026-08-17
+
+## Alert Debounce Buffer (Two-Consecutive-Failure Gate)
+- **Source:** Komodo
+- **Description:** Komodo's `AlertBuffer.ready_to_open` (`bin/core/src/monitor/alert/mod.rs:88`) requires two consecutive failing polls before an alert is opened — a toggle that must return `true` twice in a row. The buffer is keyed per server/variant and resets whenever health returns to `Ok`. This debounces transient CPU/memory spikes, brief container restarts, and momentary network unreachability so they never page operators.
+- **Why add to Tengiz:** Tengiz's monitoring scheduler and health-check restart loop can observe momentary spikes that would otherwise generate alert storms. A two-pass debounce converts "transient blip" into silence while still surfacing persistent problems. Implementation is a `map[(server, variant)]bool` toggled across monitor passes — pure in-memory, no persistence. Complements the Alert System with Severity Levels and Background Monitoring Scheduler on the roadmap. Low effort, directly reduces alert fatigue.
+- **Detected:** 2026-08-17
+
+## `komodo.skip` Label for Bulk Operation Exclusion
+- **Source:** Komodo
+- **Description:** Komodo's bulk container actions (`StartAllContainers`, `RestartAllContainers`, `PauseAllContainers`, `UnpauseAllContainers`, `StopAllContainers`) skip any container carrying a `komodo.skip` label whose value isn't `"false"` (`bin/periphery/src/api/container/mod.rs:448`). This lets operators pin exclusion containers that bulk operations must never touch — e.g. a database or a manually-managed container.
+- **Why add to Tengiz:** The Parallel Bulk Operations feature on the roadmap (`tengiz restart --all`, `tengiz stop --all`) would otherwise operate on every Tengiz container including accessories and manually-created ones. A `tengiz-skip` label (or `.tengiz.yaml`'da `bulk.skip: true`) makes bulk ops safe to run on a mixed host. One label check in the bulk-action filter. Trivial effort, prevents a real "I stopped all containers including postgres" incident.
+- **Detected:** 2026-08-17
+
+## Secret-Safe CLI Command Construction (stdin + sanitized logs)
+- **Source:** Komodo
+- **Description:** Komodo's Periphery never interpolates secrets into process args: `docker login` writes the token to stdin via `--password-stdin` (`bin/periphery/src/docker/mod.rs:41-87`), Swarm config/secret creation pipes data through `printf '%s\n' <data> |` with `shell_escape`, and the logged command string is sanitized so the raw secret never appears in operation logs or the UI (`bin/periphery/src/docker/secret.rs`). A unit test asserts secrets don't appear in process arguments (`lib/command/src/lib.rs:391`).
+- **Why add to Tengiz:** Tengiz shells out to the `docker` CLI for everything. Today a registry password, build secret, or env value passed as `-e KEY=value` shows up in `ps`, shell history, and error logs — a classic credential leak. Adopting stdin-based flags (`docker login --password-stdin`, `docker secret create` via pipe) and redacting secret placeholders from captured command output closes it. Security hygiene that applies to every existing Docker call site. Low effort, high security value.
+- **Detected:** 2026-08-17
+
+## Deduplicated Image Pulls with Timeout Cache
+- **Source:** Komodo
+- **Description:** Komodo's `PullImage` operation acquires a per-image `TimeoutCache` lock so simultaneous pulls of the same image serialize, and caches a successful pull for 5 seconds (`PULL_TIMEOUT`, `bin/periphery/src/api/docker.rs:83-149`). When Core fans out multiple deploys targeting the same image, the first pull's result is reused. Errors are never cached, so transient failures are retried.
+- **Why add to Tengiz:** Parallel Bulk Operations, Build-to-Deploy chains, and webhook-triggered redeploys can trigger N simultaneous `docker pull`s of the same image — hammering the registry and wasting bandwidth. A per-image in-flight lock + short success cache deduplicates redundant pulls. Implementation: a `sync.Map[string]*SingleFlight`-style gate in the runtime layer. Low effort, real efficiency win for the multi-app path.
+- **Detected:** 2026-08-17
+
+## Multi-Term Log Search with AND/OR Combinators & Invert
+- **Source:** Komodo
+- **Description:** Komodo's `GetContainerLogSearch` pipes `docker logs --tail 5000` into a generated grep with three combinators (`bin/periphery/src/helpers.rs:117-137`, `SearchCombinator`): `Or` uses `grep -E` with `|`, `And` uses `grep -P` with a lookahead chain `^(?=.*a)(?=.*b)`, and an invert flag adds `-v`. The same helper powers compose and swarm service log search. Search terms are shell-escaped.
+- **Why add to Tengiz:** `tengiz logs --grep pattern` exists but supports a single term. Production debugging often needs "show lines with error AND user_id" or "all lines EXCEPT healthcheck noise". `tengiz logs --grep error --grep user_id --and` (or `--grep "error" -v`) gives AND/OR/invert semantics through the existing grep pipeline. Extension of the implemented Log Filtering feature, same `docker logs` plumbing. Low effort, high debugging value.
+- **Detected:** 2026-08-17
+
+## ZFS ARC-Aware Memory Accounting
+- **Source:** Komodo
+- **Description:** Komodo's Linux memory stats are parsed directly from `/proc/meminfo` (`bin/periphery/src/stats/mem.rs`) rather than `sysinfo`: free, buff/cache, SReclaimable, Shmem, and — uniquely — the ZFS ARC size read from `/proc/spl/kstat/zfs/arcstats`. Because `MemAvailable` does not count ARC as reclaimable, Komodo subtracts ARC from "used" and reports it separately (`mem_zfs_arc_gb`), preventing false high-memory alerts on ZFS hosts. Falls back to `sysinfo` on non-Linux.
+- **Why add to Tengiz:** ZFS is the default filesystem on TrueNAS and common on Proxmox. On such hosts, naive `MemAvailable` accounting shows near-100% memory usage and triggers false alerts / wrong scale-to-zero decisions. A `/proc/meminfo` breakdown with ARC correction makes `tengiz status` and system-stat monitoring accurate on ZFS hosts. Small Go module (`/proc` parsing, no deps), distinct from the sysinfo-based approach most tools use. Low effort, correctness win for a real deployment class.
+- **Detected:** 2026-08-17
+
+## Zero-Downtime Swarm Config/Secret Rotation
+- **Source:** Komodo
+- **Description:** Komodo's `rotate_swarm_config` and `rotate_swarm_secret` (`bin/periphery/src/docker/config.rs:170-349`, `docker/secret.rs:203-362`) perform staged rotation: create a `{name}-tmp-{random}` config/secret, find all consuming services, switch them to the tmp version (preserving `target`/`uid`/`gid`/`mode` mount options), recreate the real config/secret, switch services back, and remove the tmp. Each stage is gated on all logs succeeding, so rotation produces zero service downtime.
+- **Why add to Tengiz:** Docker Swarm Resource Management is on the roadmap. Rotating a swarm secret or config today means: update the secret, then manually redeploy every consuming service — with downtime and the risk of missing a service. A `tengiz swarm secret rotate <name>` command that stages the rotation across all referencing services makes secret rotation a one-command, no-downtime operation. Requires the swarm resource to exist first (sequencing dependency on the roadmap item). Medium effort, high value for swarm-mode users.
+- **Detected:** 2026-08-17
+
+## First-User Admin Bootstrap & Signup Governance
+- **Source:** Komodo
+- **Description:** Komodo's auth bootstrap makes the first registered user `admin` + `super_admin` (`bin/core/src/auth/mod.rs:192, 274-276`), and gates all subsequent registrations behind `enable_new_users` (or `no_users_exist`), producing disabled-by-default accounts until an admin enables them. A `disable_non_admin_create` flag additionally rejects resource creation by non-admins, and the config exposes `disable_user_registration` for fully closed signup.
+- **Why add to Tengiz:** OIDC/SSO and RBAC are on the roadmap but need an onboarding story. A first-user-becomes-admin bootstrap gives a zero-config path to a secured instance: the first `tengiz setup` user is admin, later registrations require admin approval. `tengiz auth` config in `.tengiz.yaml` (`auth.enable_new_users: false`, `auth.disable_non_admin_create: true`) maps directly to Komodo's flags. Low effort (one flag during user creation), important governance piece for the team-multi-user roadmap.
+- **Detected:** 2026-08-17
+
+## Server/Agent Version Mismatch Alert
+- **Source:** Komodo
+- **Description:** Komodo's monitor compares each Periphery's reported version against `env!("CARGO_PKG_VERSION")` of the Core and raises a `ServerVersionMismatch` Warning alert when they diverge (`bin/core/src/monitor/alert/server.rs:152-204`), with its own buffer and update semantics. This catches a drifted agent silently serving outdated Docker operations.
+- **Why add to Tengiz:** When Tengiz gains remote agents (SSH deployment, Periphery-style architecture), a version-skewed agent can behave subtly differently from the CLI's expectations — and the drift is silent. A version check during the monitoring poll surfaces `server <name> is on v1.2, core is on v1.3` as an alert/status line. For single-binary Tengiz it's trivial (compare against the running binary's `runtime.Version()` build stamp). Low effort, prevents silent protocol-drift incidents in the multi-server roadmap.
+- **Detected:** 2026-08-17
+
+## Docker Stop with Graceful Signal & Legacy Fallback
+- **Source:** Komodo
+- **Description:** Komodo's `stop_container_command` builds `docker stop --signal <sig> --time <t> -- <name>` (`bin/periphery/src/docker/mod.rs:100-113`). `StopContainer`/`RemoveContainer` detect the `unknown flag: --signal` stderr and re-run without the flag, annotated as "old docker version" (`bin/periphery/src/api/container/mod.rs:265-360`). `--` guards dash-prefixed container names.
+- **Why add to Tengiz:** Stop Grace Period exists on the roadmap (`stop_grace_period` → `--stop-timeout`), but Komodo's addition is the configurable **signal** (`SIGTERM`/`SIGINT`/`SIGQUIT`) plus graceful degradation on older Docker daemons. Some apps need a specific shutdown signal (e.g. `SIGQUIT` for Go's graceful shutdown) and some hosts run old Docker. `.tengiz.yaml`'da `stop.signal: SIGQUIT`, `stop.timeout: 30`, with fallback when `--signal` is unsupported. Low effort, completes the graceful-shutdown story.
+- **Detected:** 2026-08-17
