@@ -85,3 +85,14 @@ func TestBuildCleanupCommandsAllVolumesBuildCache(t *testing.T) {
 		{Args: []string{"builder", "prune", "-f", "-a"}},
 	})
 }
+
+func TestStubCleanup(t *testing.T) {
+	m := NewStub()
+	report, err := m.Cleanup(context.Background(), CleanupOptions{All: true, Volumes: true})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if report == nil || len(report.Results) != 0 {
+		t.Fatalf("expected empty report from stub, got %+v", report)
+	}
+}

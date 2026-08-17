@@ -94,3 +94,24 @@ func BuildCleanupCommands(opts CleanupOptions) []CleanupCommand {
 	}
 	return cmds
 }
+
+type CleanupResult struct {
+	Command CleanupCommand
+	Output  string
+	Err     error
+}
+
+type CleanupReport struct {
+	Results []CleanupResult
+}
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (*CleanupReport, error) {
+	cmds := BuildCleanupCommands(opts)
+	report := &CleanupReport{Results: make([]CleanupResult, 0, len(cmds))}
+	for _, c := range cmds {
+		cmd := exec.CommandContext(ctx, "docker", c.Args...)
+		out, err := cmd.CombinedOutput()
+		report.Results = append(report.Results, CleanupResult{Command: c, Output: string(out), Err: err})
+	}
+	return report, nil
+}
