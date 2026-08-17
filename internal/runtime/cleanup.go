@@ -9,6 +9,51 @@ import (
 	"strings"
 )
 
+type CleanupOptions struct {
+	Containers bool
+	Images     bool
+	Volumes    bool
+	Networks   bool
+	BuildCache bool
+}
+
+type CleanupResult struct {
+	Output string
+}
+
+func cleanupCommands(opts CleanupOptions) [][]string {
+	var cmds [][]string
+	if opts.Containers {
+		cmds = append(cmds, []string{"container", "prune", "-f", "--filter", "label!=tengiz-app"})
+	}
+	if opts.Images {
+		cmds = append(cmds, []string{"image", "prune", "-f"})
+	}
+	if opts.Volumes {
+		cmds = append(cmds, []string{"volume", "prune", "-f", "--filter", "label!=tengiz-app"})
+	}
+	if opts.Networks {
+		cmds = append(cmds, []string{"network", "prune", "-f", "--filter", "label!=tengiz-app"})
+	}
+	if opts.BuildCache {
+		cmds = append(cmds, []string{"builder", "prune", "-f"})
+	}
+	return cmds
+}
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
+	var result CleanupResult
+	for _, args := range cleanupCommands(opts) {
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return result, fmt.Errorf("docker %s: %w\n%s", strings.Join(args[:2], " "), err, string(out))
+		}
+		result.Output += string(out)
+	}
+	return result, nil
+}
+
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()

@@ -97,6 +97,7 @@ func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *ty
 func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) Cleanup(ctx context.Context, opts runtime.CleanupOptions) (runtime.CleanupResult, error) { return runtime.CleanupResult{}, nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
@@ -373,6 +374,21 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	for name, found := range expected {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
+		}
+	}
+}
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+	for _, flag := range []string{"containers", "images", "volumes", "networks", "cache"} {
+		if cmd.Flags().Lookup(flag) == nil {
+			t.Errorf("cleanup missing --%s flag", flag)
 		}
 	}
 }
