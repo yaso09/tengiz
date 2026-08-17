@@ -149,6 +149,25 @@ List all deployed applications and their status.
 
 Output: `NAME`, `STATE` (running/stopped), `PORT`, `ENVIRONMENT`, `HEALTH`.
 
+### `tengiz cleanup`
+
+Reclaim disk space by pruning Docker resources not managed by Tengiz. Tengiz-managed containers (labeled `tengiz-app=*`) are always protected. With no flags, every category is cleaned.
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Prune stopped containers not managed by Tengiz |
+| `--images` | Prune dangling images |
+| `--volumes` | Prune unused volumes |
+| `--networks` | Prune unused networks |
+| `--cache` | Prune Docker build cache |
+
+Examples:
+```
+tengiz cleanup                  # clean everything
+tengiz cleanup --containers     # clean only stopped non-Tengiz containers
+tengiz cleanup --images --cache # clean only dangling images and build cache
+```
+
 ### `tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] <app>`
 
 Show application logs.
@@ -573,6 +592,7 @@ When `webhook.secret` is set, the server verifies the payload signature on every
 | `tengiz git disconnect` | Remove the SSH deploy key |
 | `tengiz webhook [-p <port>] [--config <path>]` | Start the webhook server with optional config |
 | `tengiz init --git-repo URL` | Create config with git repo |
+| `tengiz cleanup [--containers] [--images] [--volumes] [--networks] [--cache]` | Prune unused Docker resources (Tengiz containers protected) |
 
 ## Architecture
 
