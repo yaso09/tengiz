@@ -1772,3 +1772,65 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** `DomainResolveChecker` verifies a domain actually routes back to this server before enabling SSL or attaching it: it writes a random UUID to the domain's webroot (`captain-confirmation<identifierSuffix>`), waits 1s, HTTP GETs `http://<domain>/captain-confirmation...`, and succeeds only if the body matches the UUID. A `verifyDomainResolvesToDefaultServerOnHost` variant checks the public confirmation file for root-domain changes. Failure throws `VERIFICATION_FAILED` with a clear message — the user fixes DNS and retries instead of hitting a certbot timeout.
 - **Why add to Tengiz:** Custom domains (implemented) currently attach to the proxy with no verification — a domain pointing at the wrong server silently routes wrong. A pre-flight round-trip check (`tengiz domain add --verify myapp.com`) confirms the A/CNAME record + proxy path actually reach this Tengiz before the domain is registered or a cert is requested. Complements DNS Provider Management (which automates record creation) and Well-Known Paths (which serves the verification file). Low effort (write file + HTTP GET), prevents the #1 custom-domain support ticket.
 - **Detected:** 2026-08-17
+
+---
+
+## Role Boot Barrier (Healthcheck Gatekeeper Between Roles)
+- **Source:** Kamal
+- **Description:** `Kamal::Cli::Healthcheck::Barrier` (`cli/healthcheck/barrier.rb`) gates role booting during deploy: a barrier opens when the primary role's container passes its healthcheck (or readiness delay). Non-primary roles (`workers`, `jobs`) call `wait_at_barrier` (`cli/app/boot.rb`) and block until the primary is healthy. If the primary boot fails, the barrier closes with an error and every waiting role halts ("Halted at barrier"), aborting the whole deploy instead of booting workers against a dead web app.
+- **Why add to Tengiz:** Role-based server groups (#28) and rolling boot are recorded, but without a healthcheck gatekeeper a worker role can start and begin consuming jobs while the web app failed to come up — processing work against a half-deployed or down system. A barrier primitive (`tengiz` deploy waits for the web container's `/up` health check before starting worker containers; on web failure, workers are never started and the deploy is marked failed) makes multi-role deploys atomic. Implementation is a Go `sync.WaitGroup`/channel gate keyed on the healthcheck result in the deploy pipeline. Low effort, high correctness value for the role model.
+- **Detected:** 2026-08-17
+
+## Container Version Collision Renaming (Idempotent Redeploy)
+- **Source:** Kamal
+- **Description:** `old_version_renamed_if_clashing` (`cli/app/boot.rb`) detects when a container with the same image version already exists (e.g. redeploying the same git SHA) and renames it to `${version}_replaced_${SecureRandom.hex(8)}` instead of failing. The redeploy then proceeds as normal, and the renamed old container is cleaned up by the regular pruning. This makes redeploying an unchanged version a no-op success rather than a container-name conflict error.
+- **Why add to Tengiz:** Git-based image version tagging (#121) means deploying the same commit twice produces the same image tag. Today a second `tengiz deploy` of the same SHA hits `docker run` name collision and errors. Renaming the stale container (rather than erroring) makes redeploys idempotent — critical for webhook auto-deploy (implemented), where GitHub re-delivers `push` events and CI retries. Trivial in the runtime layer: before `docker run`, check for an existing `tengiz-<app>-<env>` and `docker rename` it. Low effort, removes a real user-facing failure mode.
+- **Detected:** 2026-08-17
+
+## Clean Build from Git Clone (Uncommitted Changes Detection)
+- **Source:** Kamal
+- **Description:** When no build `context` is set, Kamal builds from a fresh local git clone (`builder.git_clone?`, `cli/build.rb`) instead of the working directory — guaranteeing the image matches committed code. `Git.uncommitted_changes` / `uncommitted_files` / `untracked_files` detect a dirty tree, and `kamal build dev` tags dirty builds (`_uncommitted_` version suffix) while printing exactly which uncommitted/untracked files enter the image, so developers know the image does NOT reflect the repo state.
+- **Why add to Tengiz:** `tengiz deploy .` builds from whatever is in the working tree — a user with uncommitted local edits or untracked stray files ships an image that can't be reproduced from git, then can't trace it via the git-SHA image tag (#121). A `tengiz deploy --from-git` mode (or `build.from: git`) clones HEAD to a temp dir and builds from there; when `build.dev: true` is set, the image tag gets an `_uncommitted_` suffix and the CLI warns listing dirty files. This makes every image traceable to a real commit. Complements gitdeploy (implemented) which clones for the pipeline, and GitOps-style reproducibility. Low-medium effort in the builder package.
+- **Detected:** 2026-08-17
+
+## Proxy Boot Configuration Persistence (Per-Host Run Options)
+- **Source:** Kamal
+- **Description:** `kamal proxy boot_config set|get|reset` (`cli/proxy.rb`, `configuration/proxy/run.rb`) persists per-host proxy run options to files on the host (`options`, `image`, `image_version`, `run_command`). Options include `publish`, `publish_host_ip`, `http_port`, `https_port`, `log_max_size`, `debug`, `metrics_port`, plus registry/repository/version. The proxy container is booted from these persisted files (`commands/proxy.rb` reads them with defaults), so operators can change the proxy's runtime settings without editing deploy config and without the settings being overwritten on the next deploy.
+- **Why add to Tengiz:** Tengiz's proxy is in-process Go, but the *persistence* concept maps to `~/.tengiz/proxy.json`: runtime settings (bind address, port, log level, buffer sizes, metrics port) stored separately from `.tengiz.yaml` and not clobbered by config re-loads. `tengiz proxy boot-config set http_port 8443` then survives restarts, while code/config changes don't reset it. Complements Advanced Proxy Config (#14) — that's static config; this is mutable runtime state with explicit get/reset. Low effort (reuse the existing Store pattern), high ops value for proxy tuning on a busy host.
+- **Detected:** 2026-08-17
+
+## Boot Failure Auto-Diagnostics (Container + Health Log Dump)
+- **Source:** Kamal
+- **Description:** When a container fails to boot, `kamal` automatically dumps the failed container's logs and its Docker health log (`container_health_log`, `commands/app/containers.rb`; `DOCKER_HEALTH_LOG_FORMAT '{{json .State.Health}}'`) to the console. The health log shows the last check attempts, exit codes, and failure timestamps — the operator sees *why* the container is unhealthy immediately, without a separate `kamal app logs` invocation.
+- **Why add to Tengiz:** When a Tengiz deploy fails, the user currently gets an error and must manually run `tengiz logs myapp` (or worse, `docker inspect` the health state). On boot failure, Tengiz should print the tail of the failed container's stdout/stderr plus the parsed `State.Health` JSON (last 5 checks, exit codes, timestamps). This makes failed deploys self-diagnosing and pairs with build-logs (implemented) to cover both build and runtime failure. Implementation: on healthcheck failure in the deploy pipeline, `docker logs --tail 50` + `docker inspect --format '{{json .State.Health}}'`. Low effort, big debugging win.
+- **Detected:** 2026-08-17
+
+## Proxy Request/Response Header Logging (Debugging Aid)
+- **Source:** Kamal
+- **Description:** Kamal's proxy logs configurable request/response headers per request (`configuration/proxy.rb`): `request_headers` / `response_headers` (defaults include `Cache-Control`, `Last-Modified`, `User-Agent`). Each proxied request emits the selected header values, giving operators visibility into caching behavior and client fingerprints without full HTTP-dump verbosity.
+- **Why add to Tengiz:** Debugging caching bugs (wrong `Cache-Control`, stale `Last-Modified`) or identifying a misbehaving client (bad `User-Agent`) currently requires `tengiz proxy` with verbose logging or tcpdump. A configurable header log line in the proxy (`proxy.log_request_headers: [User-Agent, Cache-Control]`) surfaces the exact values per request and feeds the analytics/monitoring features. Implementation: `httputil.ReverseProxy` `ModifyResponse`/`Director` hooks capture selected headers into the access log. Low effort, high debugging value — and it matches the existing Go proxy architecture perfectly.
+- **Detected:** 2026-08-17
+
+## Custom SSL Certificates from Secrets (BYO Certificate)
+- **Source:** Kamal
+- **Description:** Kamal supports `ssl: { certificate_pem: <secret ref>, private_key_pem: <secret ref> }` in the proxy config (`cli/app/ssl_certificates.rb`, `configuration/proxy.rb`). The PEM values are resolved from the secrets store (1Password/vault) at deploy time, uploaded to the host's TLS directory, and used by the proxy — an alternative to Let's Encrypt for internal domains, enterprise certs, or air-gapped environments where ACME HTTP-01 can't reach the server.
+- **Why add to Tengiz:** Auto-SSL (#65) covers the public-internet case, but many Tengiz deployments are behind a firewall, on an internal domain, or required to use a company-issued wildcard cert. `tengiz domain ssl <domain> --cert-file cert.pem --key-file key.pem` (or `.tengiz.yaml` `domains: [{name: ..., ssl: {certificate: "[[secret.CERT_PEM]]"}}]`) stores the PEMs via the existing encrypt/secrets system and serves them from the proxy's TLS config. Complements secrets management (implemented) and custom domains (implemented). Low-medium effort (file read + `tls.LoadX509KeyPair`), unblocks enterprise/internal TLS.
+- **Detected:** 2026-08-17
+
+## Registry Mirror Seeding (Parallel Multi-Host Pull Optimized)
+- **Source:** Kamal
+- **Description:** In `cli/build.rb`, when deploying to multiple hosts Kamal first pulls the freshly built image to a single host ("seed"), then pulls in parallel on the remaining hosts. This avoids N simultaneous pulls of the same large image from the registry hammering it, while still keeping total pull time low.
+- **Why add to Tengiz:** Currently N/A for single-server Tengiz, but it's the missing piece for the multi-server roadmap (#25 SSH deploy, #51 Periphery). When Tengiz gains multiple Docker daemons, naive `docker pull` on every host concurrently stresses the registry (rate limits, egress cost). The seed-then-parallel pattern (`pull` to host A, then `pull` on B..N concurrently) is a 10-line ordering in the runtime layer once multi-host exists. Recorded so the multi-host feature doesn't ship without it. Low effort (deferred to multi-host), real infra benefit.
+- **Detected:** 2026-08-17
+
+## Host-Tagged Environment Variables (Per-Host-Tag Env Injection)
+- **Source:** Kamal
+- **Description:** `env.tags` (`configuration/env/tag.rb`) lets config define env vars per host tag: hosts are tagged in `servers` (e.g. `172.1.0.2: experiment1`), and `env.tags.experiment1.FEATURE_X: on` injects `FEATURE_X=on` only into containers on hosts bearing that tag. `Role#env_tags` merges role env + host-tag env at runtime. This enables canary-style, per-machine config (feature flags on one experimental host, different DB creds per region) without separate deploy files.
+- **Why add to Tengiz:** For single-server Tengiz this maps to per-*instance* env overrides — the same image deployed with different `-e` values based on a label/tag selected at deploy time (`tengiz deploy --tag experiment1` applies `env.tags.experiment1.*`). This is the cleanest mechanism for running the same code with divergent config (staging vs canary vs region) and complements GitOps ResourceSync (#33) and multi-env (implemented). `.tengiz.yaml`'da `env.tags.<tag>: {...}`. Low effort (merge tags into AppEntry.Env at deploy), useful for canary workflows.
+- **Detected:** 2026-08-17
+
+## Secret Aliasing in Env References (NAME:ALIAS)
+- **Source:** Kamal
+- **Description:** In `env.secret` lists, Kamal supports `NAME:SECRET_KEY` aliasing (`configuration/env.rb` `extract_alias`): the env var `NAME` gets its value from a secret stored under a *different* key. This decouples secret names (chosen by the secret store/vault) from env var names (required by the app), e.g. `DATABASE_URL:prod-db-url`.
+- **Why add to Tengiz:** Existing secret interpolation (`[[secret.NAME]]`) requires the secret key to match the env var name. When a shared vault key differs from what the app expects — or one secret feeds several apps with different env names — users must duplicate secrets. `tengiz secret set myapp DATABASE_URL --alias prod-db-url` (or `secret: [DATABASE_URL:prod-db-url]` in `.tengiz.yaml`) resolves the value at deploy/run time while keeping the app-facing name. Trivial to add to `ResolveInterpolations`/env assembly in the secrets package. Low effort, removes a real friction point for shared secret stores.
+- **Detected:** 2026-08-17
