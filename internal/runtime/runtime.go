@@ -28,12 +28,31 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type PruneOptions struct {
+	Containers bool
+	Images     bool
+	Networks   bool
+	Volumes    bool
+	BuildCache bool
+	All        bool
+}
+
+type PruneResult struct {
+	Containers int
+	Images     int
+	Networks   int
+	Volumes    int
+	BuildCache int
+	Space      string
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateVersioned(ctx context.Context, cfg *types.AppConfig, imageTag string, port int, suffix string) error
 	RemoveImage(ctx context.Context, imageTag string) error
 	KeepLastNImages(ctx context.Context, appName string, n int) error
+	Prune(ctx context.Context, opts PruneOptions) (PruneResult, error)
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
@@ -116,6 +135,10 @@ func (m *stubManager) RemoveImage(ctx context.Context, imageTag string) error {
 
 func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int) error {
 	return nil
+}
+
+func (m *stubManager) Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
+	return PruneResult{}, nil
 }
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
