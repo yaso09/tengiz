@@ -64,6 +64,7 @@ func init() {
 	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
@@ -86,6 +87,13 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without removing anything")
+	cleanupCmd.Flags().Bool("all", false, "clean up all categories (containers, images, volumes, networks, build cache)")
+	cleanupCmd.Flags().Bool("containers", false, "remove stopped containers not managed by Tengiz")
+	cleanupCmd.Flags().Bool("images", false, "remove dangling images")
+	cleanupCmd.Flags().Bool("volumes", false, "remove unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "remove unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "remove the Docker build cache")
 }
 
 var rootCmd = &cobra.Command{
@@ -1087,6 +1095,104 @@ Use --tail N to show only the last N lines of the latest build log.`,
 		}
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Clean up unused Docker resources",
+	Long: `Remove unused Docker resources to reclaim disk space.
+
+By default cleans up stopped containers (excluding Tengiz-managed apps),
+dangling images, and the build cache. Add categories with flags or use --all.
+Use --dry-run to preview what would be removed without deleting anything.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+		return runCleanup(cmd, rt)
+	},
+}
+
+func runCleanup(cmd *cobra.Command, rt runtime.Manager) error {
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	all, _ := cmd.Flags().GetBool("all")
+	containers, _ := cmd.Flags().GetBool("containers")
+	images, _ := cmd.Flags().GetBool("images")
+	volumes, _ := cmd.Flags().GetBool("volumes")
+	networks, _ := cmd.Flags().GetBool("networks")
+	buildCache, _ := cmd.Flags().GetBool("build-cache")
+
+	opts := resolveCleanupOptions(all, containers, images, volumes, networks, buildCache, dryRun)
+
+	res, err := rt.Prune(cmd.Context(), opts)
+	if err != nil {
+		return fmt.Errorf("cleanup: %w", err)
+	}
+
+	if opts.DryRun {
+		fmt.Println("[tengiz] dry run — nothing was removed")
+	}
+	if opts.Containers {
+		fmt.Printf("[tengiz] stopped containers: %d\n", res.Containers)
+	}
+	if opts.Images {
+		fmt.Printf("[tengiz] dangling images: %d\n", res.Images)
+	}
+	if opts.Volumes {
+		fmt.Printf("[tengiz] unused volumes: %d\n", res.Volumes)
+	}
+	if opts.Networks {
+		fmt.Printf("[tengiz] unused networks: %d\n", res.Networks)
+	}
+	if opts.BuildCache {
+		fmt.Printf("[tengiz] build cache: %s\n", formatBytes(res.BuildCache))
+	}
+	if !opts.DryRun && res.Reclaimed > 0 {
+		fmt.Printf("[tengiz] total reclaimed: %s\n", formatBytes(res.Reclaimed))
+	}
+	return nil
+}
+
+func resolveCleanupOptions(all, containers, images, volumes, networks, buildCache, dryRun bool) runtime.PruneOptions {
+	if all {
+		return runtime.PruneOptions{
+			DryRun:     dryRun,
+			Containers: true,
+			Images:     true,
+			Volumes:    true,
+			Networks:   true,
+			BuildCache: true,
+		}
+	}
+	if !containers && !images && !volumes && !networks && !buildCache {
+		containers = true
+		images = true
+		buildCache = true
+	}
+	return runtime.PruneOptions{
+		DryRun:     dryRun,
+		Containers: containers,
+		Images:     images,
+		Volumes:    volumes,
+		Networks:   networks,
+		BuildCache: buildCache,
+	}
+}
+
+func formatBytes(b int64) string {
+	units := []string{"B", "kB", "MB", "GB", "TB"}
+	v := float64(b)
+	i := 0
+	for v >= 1024 && i < len(units)-1 {
+		v /= 1024
+		i++
+	}
+	if i == 0 {
+		return fmt.Sprintf("%dB", b)
+	}
+	return fmt.Sprintf("%.2f%s", v, units[i])
 }
 
 var runCmd = &cobra.Command{
