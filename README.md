@@ -19,6 +19,7 @@
 - **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
+- **Docker housekeeping** — One-command `tengiz cleanup` prunes unused containers, images, volumes, networks, and build cache while always protecting Tengiz-managed resources.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
 
@@ -226,6 +227,30 @@ Remove an application completely — stops the container, deletes it, and cleans
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name (required) |
+
+### `tengiz cleanup`
+
+Clean up unused Docker resources to free disk space. Stopped containers managed by Tengiz (labeled `tengiz-app`) and Tengiz images (`tengiz-apps/*`) are always protected.
+
+With no category flags, all categories are cleaned. Use flags to select specific categories.
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Remove stopped containers not managed by Tengiz |
+| `--images` | Remove dangling (untagged) images |
+| `--all-images` | With `--images`, also remove all unused images (`tengiz-apps/*` are kept) |
+| `--volumes` | Remove unused anonymous volumes |
+| `--networks` | Remove unused networks |
+| `--build-cache` | Remove Docker build cache |
+| `--dry-run` | Show what would be cleaned and current disk usage without deleting anything |
+
+Examples:
+```
+tengiz cleanup                    # prune everything safely
+tengiz cleanup --dry-run          # preview what would be removed
+tengiz cleanup --containers --volumes
+tengiz cleanup --images --all-images
+```
 
 ### `tengiz rollback <app>`
 
