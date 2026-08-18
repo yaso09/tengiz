@@ -1,7 +1,9 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -145,4 +147,92 @@ func parseSystemDFBuildCache(out string) int64 {
 		}
 	}
 	return 0
+}
+
+func (r *dockerRuntime) runDocker(ctx context.Context, args []string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker %s: %w\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func (r *dockerRuntime) runAndCount(ctx context.Context, args []string) (int, error) {
+	out, err := r.runDocker(ctx, args)
+	if err != nil {
+		return 0, err
+	}
+	return countNonEmptyLines(out), nil
+}
+
+func (r *dockerRuntime) pruneCategory(ctx context.Context, dryRun bool, pruneArgs, listArgs []string) (int, int64, error) {
+	if dryRun {
+		count, err := r.runAndCount(ctx, listArgs)
+		return count, 0, err
+	}
+	out, err := r.runDocker(ctx, pruneArgs)
+	if err != nil {
+		return 0, 0, err
+	}
+	return parsePruneDeletedCount(out), parsePruneReclaimed(out), nil
+}
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
+	result := PruneResult{}
+
+	if opts.Containers {
+		count, reclaimed, err := r.pruneCategory(ctx, opts.DryRun, pruneContainerArgs(), dryRunContainerArgs())
+		if err != nil {
+			return result, err
+		}
+		result.Containers = count
+		result.Reclaimed += reclaimed
+	}
+
+	if opts.Images {
+		count, reclaimed, err := r.pruneCategory(ctx, opts.DryRun, pruneImageArgs(), dryRunImageArgs())
+		if err != nil {
+			return result, err
+		}
+		result.Images = count
+		result.Reclaimed += reclaimed
+	}
+
+	if opts.Volumes {
+		count, reclaimed, err := r.pruneCategory(ctx, opts.DryRun, pruneVolumeArgs(), dryRunVolumeArgs())
+		if err != nil {
+			return result, err
+		}
+		result.Volumes = count
+		result.Reclaimed += reclaimed
+	}
+
+	if opts.Networks {
+		count, reclaimed, err := r.pruneCategory(ctx, opts.DryRun, pruneNetworkArgs(), dryRunNetworkArgs())
+		if err != nil {
+			return result, err
+		}
+		result.Networks = count
+		result.Reclaimed += reclaimed
+	}
+
+	if opts.BuildCache {
+		if opts.DryRun {
+			out, err := r.runDocker(ctx, dryRunBuilderArgs())
+			if err != nil {
+				return result, err
+			}
+			result.BuildCache = parseSystemDFBuildCache(out)
+		} else {
+			out, err := r.runDocker(ctx, pruneBuilderArgs())
+			if err != nil {
+				return result, err
+			}
+			result.BuildCache = parsePruneReclaimed(out)
+			result.Reclaimed += result.BuildCache
+		}
+	}
+
+	return result, nil
 }

@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"reflect"
 	"testing"
 )
@@ -160,5 +161,16 @@ func TestCountNonEmptyLines(t *testing.T) {
 	}
 	if got := countNonEmptyLines(""); got != 0 {
 		t.Errorf("countNonEmptyLines(empty) = %d, want 0", got)
+	}
+}
+
+func TestDockerPruneNoCategories(t *testing.T) {
+	r := &dockerRuntime{}
+	res, err := r.Prune(context.Background(), PruneOptions{})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if res != (PruneResult{}) {
+		t.Errorf("Prune() with no categories = %+v, want zero result", res)
 	}
 }
