@@ -48,6 +48,39 @@ type Manager interface {
 	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
 }
 
+type PruneOptions struct {
+	Containers bool
+	Images     bool
+	AllImages  bool
+	Volumes    bool
+	Networks   bool
+	BuildCache bool
+	DryRun     bool
+}
+
+type PruneResult struct {
+	Containers string
+	Images     string
+	Volumes    string
+	Networks   string
+	BuildCache string
+	Reclaimed  string
+}
+
+type Cleaner interface {
+	Prune(ctx context.Context, opts PruneOptions) (*PruneResult, error)
+}
+
+type stubCleaner struct{}
+
+func NewStubCleaner() Cleaner {
+	return &stubCleaner{}
+}
+
+func (c *stubCleaner) Prune(ctx context.Context, opts PruneOptions) (*PruneResult, error) {
+	return &PruneResult{}, nil
+}
+
 type stubManager struct{}
 
 func NewStub() Manager {
