@@ -57,3 +57,7 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	}
 	return nil
 }
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts CleanupOptions) (*PruneReport, error) {
+	return &PruneReport{}, nil
+}
