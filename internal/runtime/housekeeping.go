@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"fmt"
+	"os/exec"
 	"sort"
 	"strings"
 )
@@ -152,4 +154,123 @@ func oldImageTags(lines []string, keepN int) []string {
 	}
 	sort.Strings(toRemove)
 	return toRemove
+}
+
+// Prune removes the Docker resources selected by opts. In dry-run mode nothing
+// is removed; the result reports what would be removed instead.
+func (r *dockerRuntime) Prune(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
+	var result CleanupResult
+	result.DryRun = opts.DryRun
+
+	var err error
+	if opts.Containers {
+		result.Containers, err = r.pruneContainers(ctx, opts.DryRun)
+		if err != nil {
+			return result, fmt.Errorf("containers: %w", err)
+		}
+	}
+	if opts.Images {
+		result.Images, err = r.pruneImages(ctx, opts.KeepImages, opts.DryRun)
+		if err != nil {
+			return result, fmt.Errorf("images: %w", err)
+		}
+	}
+	if opts.Networks {
+		result.Networks, err = r.pruneNetworks(ctx, opts.DryRun)
+		if err != nil {
+			return result, fmt.Errorf("networks: %w", err)
+		}
+	}
+	if opts.Volumes {
+		result.Volumes, err = r.pruneVolumes(ctx, opts.DryRun)
+		if err != nil {
+			return result, fmt.Errorf("volumes: %w", err)
+		}
+	}
+	if opts.BuildCache {
+		if !opts.DryRun {
+			if err := r.pruneBuildCache(ctx); err != nil {
+				return result, fmt.Errorf("build cache: %w", err)
+			}
+		}
+		result.BuildCache = true
+	}
+	return result, nil
+}
+
+func (r *dockerRuntime) pruneContainers(ctx context.Context, dryRun bool) ([]string, error) {
+	args := pruneContainersArgs(dryRun)
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker %s: %w\n%s", args[0], err, string(out))
+	}
+	if dryRun {
+		return parseListLines(string(out)), nil
+	}
+	return parsePruneItems(string(out)), nil
+}
+
+func (r *dockerRuntime) pruneImages(ctx context.Context, keepN int, dryRun bool) ([]string, error) {
+	var removed []string
+
+	args := pruneDanglingImagesArgs(dryRun)
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker %s: %w\n%s", args[0], err, string(out))
+	}
+	if dryRun {
+		removed = append(removed, parseListLines(string(out))...)
+	} else {
+		removed = append(removed, parsePruneItems(string(out))...)
+	}
+
+	listOut, err := exec.CommandContext(ctx, "docker", tengizImageListArgs()...).CombinedOutput()
+	if err != nil {
+		return removed, fmt.Errorf("docker images: %w\n%s", err, string(listOut))
+	}
+	lines := strings.Split(strings.TrimSpace(string(listOut)), "\n")
+	for _, tag := range oldImageTags(lines, keepN) {
+		if dryRun {
+			removed = append(removed, tag)
+			continue
+		}
+		if err := r.RemoveImage(ctx, tag); err != nil {
+			return removed, fmt.Errorf("remove old image %s: %w", tag, err)
+		}
+		removed = append(removed, tag)
+	}
+	return removed, nil
+}
+
+func (r *dockerRuntime) pruneNetworks(ctx context.Context, dryRun bool) ([]string, error) {
+	args := pruneNetworksArgs(dryRun)
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker %s: %w\n%s", args[0], err, string(out))
+	}
+	if dryRun {
+		return parseListLines(string(out)), nil
+	}
+	return parsePruneItems(string(out)), nil
+}
+
+func (r *dockerRuntime) pruneVolumes(ctx context.Context, dryRun bool) ([]string, error) {
+	args := pruneVolumesArgs(dryRun)
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker %s: %w\n%s", args[0], err, string(out))
+	}
+	if dryRun {
+		return parseListLines(string(out)), nil
+	}
+	return parsePruneItems(string(out)), nil
+}
+
+func (r *dockerRuntime) pruneBuildCache(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, "docker", "builder", "prune", "-af")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker builder prune: %w\n%s", err, string(out))
+	}
+	return nil
 }

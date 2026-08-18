@@ -1,6 +1,9 @@
 package runtime
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestCleanupResultEmpty(t *testing.T) {
 	if !(CleanupResult{}).Empty() {
@@ -213,5 +216,36 @@ func TestOldImageTags(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPruneNothingSelected(t *testing.T) {
+	r := &dockerRuntime{}
+	result, err := r.Prune(context.Background(), CleanupOptions{})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if !result.Empty() {
+		t.Errorf("Prune() with no selection should return empty result, got %+v", result)
+	}
+	if result.DryRun {
+		t.Error("DryRun should be false")
+	}
+}
+
+func TestPruneDryRunBuildCache(t *testing.T) {
+	r := &dockerRuntime{}
+	result, err := r.Prune(context.Background(), CleanupOptions{BuildCache: true, DryRun: true})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if !result.BuildCache {
+		t.Error("BuildCache should be reported in dry-run")
+	}
+	if !result.DryRun {
+		t.Error("DryRun should be true")
+	}
+	if result.Empty() {
+		t.Errorf("build cache was reported, so the result must not be empty, got %+v", result)
 	}
 }
