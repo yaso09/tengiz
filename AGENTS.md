@@ -23,6 +23,7 @@
 | `encrypt` | AES-256-GCM encrypt/decrypt, key generation, key file load/save |
 | `secrets` | `Manager` struct: encrypted per-app secrets storage in `secrets-{env}.json`. `Provider` interface with `LocalProvider` (file-based), `VaultProvider`, `DopplerProvider` backends. `NewManagerFromConfig` for provider selection. `ResolveInterpolations` for `[[secret.NAME]]` env var expansion. `RotateKey` on `LocalProvider` for re-encryption. |
 | `notify` | Multi-channel notification system. `Notifier` interface with Discord/Slack/Email backends. `Manager` with `Send`/`SendAsync`, `LoadConfig`/`SaveConfig`. Per-environment config in `notifications-{env}.json`. |
+| `housekeeping` | Docker disk housekeeping via `docker` CLI (`os/exec`). `Manager` interface with `DiskUsage`/`Prune`. `NewDocker()` = exec-based impl, `NewStub()` = test mock. Label-based protection (`label!=tengiz-app`); volumes pruned only with explicit opt-in (`--volumes`). |
 | `types` | Shared: `AppConfig`, `AppStatus`, `AppEntry`, `PortEntry`, `DeploymentEntry`, `DeploymentStatus`. `AppConfig.Environment` field, `AppConfig.Secrets` field. |
 
 ## Commands
@@ -58,6 +59,7 @@ tengiz preview list <app>       → list preview deployments
 tengiz preview rm <app> <pr>    → remove a preview deployment
 tengiz preview deploy <app> <pr> → create/update preview deployment (webhook preferred)
 tengiz rollback <app>           → rollback to previous deployment
+tengiz cleanup [--apply] [--df] [--containers|--images|--networks|--cache|--volumes] → prune unused Docker resources (dry-run by default)
 tengiz notification enable      → enable notifications
 tengiz notification disable     → disable notifications
 tengiz notification config <app> [--events ...] [--all] → configure which events trigger notifications
