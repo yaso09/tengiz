@@ -46,8 +46,7 @@ func TestPruneContainersArgs(t *testing.T) {
 			"--filter", "status=exited",
 			"--filter", "status=created",
 			"--filter", "status=dead",
-			"--filter", "label!=tengiz-app",
-			"--format", "{{.Names}}"})
+			"--format", "{{.Names}}|{{.Label \"tengiz-app\"}}"})
 }
 
 func TestPruneDanglingImagesArgs(t *testing.T) {
@@ -126,6 +125,17 @@ func TestParseListLines(t *testing.T) {
 	}
 	if got := parseListLines(""); len(got) != 0 {
 		t.Fatalf("parseListLines(\"\") = %v, want empty", got)
+	}
+}
+
+func TestParseListLinesExcludingLabel(t *testing.T) {
+	out := "container-a|\ncontainer-b|\n\ntengiz-app-myapp|myapp\n"
+	got := parseListLinesExcludingLabel(out)
+	if len(got) != 2 || got[0] != "container-a" || got[1] != "container-b" {
+		t.Fatalf("parseListLinesExcludingLabel(%q) = %v", out, got)
+	}
+	if got := parseListLinesExcludingLabel(""); len(got) != 0 {
+		t.Fatalf("parseListLinesExcludingLabel(\"\") = %v, want empty", got)
 	}
 }
 

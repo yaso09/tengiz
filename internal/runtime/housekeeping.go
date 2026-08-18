@@ -43,12 +43,14 @@ type Housekeeper interface {
 
 func pruneContainersArgs(dryRun bool) []string {
 	if dryRun {
+		// docker ps does not support negated label filters (only prune commands
+		// do), so the tengiz-app label is emitted alongside the name and
+		// filtered out client-side by parseListLinesExcludingLabel.
 		return []string{"ps", "-a",
 			"--filter", "status=exited",
 			"--filter", "status=created",
 			"--filter", "status=dead",
-			"--filter", "label!=tengiz-app",
-			"--format", "{{.Names}}",
+			"--format", "{{.Names}}|{{.Label \"tengiz-app\"}}",
 		}
 	}
 	return []string{"container", "prune", "-f", "--filter", "label!=tengiz-app"}
@@ -104,6 +106,28 @@ func parseListLines(out string) []string {
 			continue
 		}
 		items = append(items, line)
+	}
+	return items
+}
+
+// parseListLinesExcludingLabel extracts container names from "{{.Names}}|{{.Label ...}}"
+// formatted output, skipping any container carrying the tengiz-app label so
+// Tengiz-managed containers are never reported for cleanup.
+func parseListLinesExcludingLabel(out string) []string {
+	var items []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		idx := strings.LastIndex(line, "|")
+		if idx < 0 {
+			continue
+		}
+		if line[idx+1:] != "" {
+			continue
+		}
+		items = append(items, line[:idx])
 	}
 	return items
 }
@@ -205,7 +229,7 @@ func (r *dockerRuntime) pruneContainers(ctx context.Context, dryRun bool) ([]str
 		return nil, fmt.Errorf("docker %s: %w\n%s", args[0], err, string(out))
 	}
 	if dryRun {
-		return parseListLines(string(out)), nil
+		return parseListLinesExcludingLabel(string(out)), nil
 	}
 	return parsePruneItems(string(out)), nil
 }
