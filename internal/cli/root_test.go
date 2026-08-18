@@ -97,6 +97,9 @@ func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *ty
 func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) Prune(ctx context.Context, opts runtime.PruneOptions) (runtime.PruneResult, error) {
+	return runtime.PruneResult{}, nil
+}
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
@@ -374,5 +377,128 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
 		}
+	}
+}
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCommandFlags(t *testing.T) {
+	for _, f := range []string{"dry-run", "all", "containers", "images", "volumes", "networks", "build-cache"} {
+		if cleanupCmd.Flags().Lookup(f) == nil {
+			t.Errorf("cleanupCmd missing --%s flag", f)
+		}
+	}
+}
+
+func TestResolveCleanupOptionsDefaults(t *testing.T) {
+	opts := resolveCleanupOptions(false, false, false, false, false, false, false)
+	if !opts.Containers || !opts.Images || !opts.BuildCache {
+		t.Errorf("default safe set wrong: %+v", opts)
+	}
+	if opts.Volumes || opts.Networks || opts.DryRun {
+		t.Errorf("volumes/networks/dry-run should not default on: %+v", opts)
+	}
+}
+
+func TestResolveCleanupOptionsAll(t *testing.T) {
+	opts := resolveCleanupOptions(true, false, false, false, false, false, false)
+	if !opts.Containers || !opts.Images || !opts.Volumes || !opts.Networks || !opts.BuildCache {
+		t.Errorf("--all should enable every category: %+v", opts)
+	}
+	if opts.DryRun {
+		t.Error("--all should not imply dry-run")
+	}
+}
+
+func TestResolveCleanupOptionsSingle(t *testing.T) {
+	opts := resolveCleanupOptions(false, false, false, true, false, false, true)
+	if !opts.Volumes || !opts.DryRun {
+		t.Errorf("explicit volumes/dry-run not passed through: %+v", opts)
+	}
+	if opts.Containers || opts.Images || opts.Networks || opts.BuildCache {
+		t.Errorf("unexpected categories enabled: %+v", opts)
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		b    int64
+		want string
+	}{
+		{0, "0B"},
+		{512, "512B"},
+		{1536, "1.50kB"},
+		{5 * 1024 * 1024, "5.00MB"},
+		{int64(1.5 * 1024 * 1024 * 1024), "1.50GB"},
+	}
+	for _, tc := range tests {
+		if got := formatBytes(tc.b); got != tc.want {
+			t.Errorf("formatBytes(%d) = %q, want %q", tc.b, got, tc.want)
+		}
+	}
+}
+
+type cleanupCaptureRT struct {
+	runtime.Manager
+	opts   runtime.PruneOptions
+	called bool
+}
+
+func (m *cleanupCaptureRT) Prune(ctx context.Context, opts runtime.PruneOptions) (runtime.PruneResult, error) {
+	m.opts = opts
+	m.called = true
+	return runtime.PruneResult{}, nil
+}
+
+func TestRunCleanupPassesOptions(t *testing.T) {
+	cmd := &cobra.Command{}
+	for _, f := range []string{"dry-run", "all", "containers", "images", "volumes", "networks", "build-cache"} {
+		cmd.Flags().Bool(f, false, "")
+	}
+	if err := cmd.Flags().Set("volumes", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("dry-run", "true"); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &cleanupCaptureRT{}
+	if err := runCleanup(cmd, rt); err != nil {
+		t.Fatalf("runCleanup() error = %v", err)
+	}
+	if !rt.called {
+		t.Fatal("Prune was not called")
+	}
+	if !rt.opts.Volumes || !rt.opts.DryRun {
+		t.Errorf("opts.Volumes/DryRun not set: %+v", rt.opts)
+	}
+	if rt.opts.Containers || rt.opts.Images || rt.opts.Networks || rt.opts.BuildCache {
+		t.Errorf("unexpected categories enabled: %+v", rt.opts)
+	}
+}
+
+func TestRunCleanupDryRunOutput(t *testing.T) {
+	cmd := &cobra.Command{}
+	for _, f := range []string{"dry-run", "all", "containers", "images", "volumes", "networks", "build-cache"} {
+		cmd.Flags().Bool(f, false, "")
+	}
+	if err := cmd.Flags().Set("dry-run", "true"); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &cleanupCaptureRT{}
+	out := captureOutput(func() {
+		runCleanup(cmd, rt)
+	})
+	if !strings.Contains(out, "dry run") {
+		t.Errorf("expected dry-run banner in output, got: %s", out)
 	}
 }
