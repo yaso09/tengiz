@@ -75,7 +75,7 @@ func init() {
 	rootCmd.AddCommand(notificationCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
-	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
+	runCmd.Flags().StringArrayP("env-var", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
 	initCmd.Flags().String("git-repo", "", "git repository URL for auto-deploy")
 	initCmd.Flags().String("git-branch", "main", "git branch for auto-deploy")
 	logsCmd.Flags().BoolP("follow", "f", false, "follow log output")
@@ -1128,7 +1128,7 @@ Examples:
 		fmt.Printf("[tengiz] running: %s (%s)\n", strings.Join(command, " "), imageTag)
 
 		extraEnv := make(map[string]string)
-		envFlags, _ := cmd.Flags().GetStringArray("env")
+		envFlags, _ := cmd.Flags().GetStringArray("env-var")
 		for _, e := range envFlags {
 			parts := strings.SplitN(e, "=", 2)
 			if len(parts) != 2 {
