@@ -19,6 +19,7 @@
 - **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
+- **Docker housekeeping** — `tengiz cleanup` prunes stopped non-Tengiz containers, dangling images, unused networks, and build cache with label-based protection. Dry-run by default; `--apply` to reclaim disk space.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
 
@@ -414,6 +415,28 @@ List all secrets for an application. Values are masked for security.
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name |
+
+### `tengiz cleanup`
+
+Prune unused Docker resources to reclaim disk space on the host. Defaults to a **dry run** that lists what would be removed — pass `--apply` to actually delete.
+
+| Flag | Description |
+|------|-------------|
+| `--apply` | Actually prune (default: dry run) |
+| `--df` | Print a Docker disk usage summary and exit |
+| `--volumes` | Also remove unused volumes (data risk; never enabled by default) |
+| `--containers` | Only remove stopped non-Tengiz containers |
+| `--images` | Only remove dangling (untagged) images |
+| `--networks` | Only remove unused networks |
+| `--cache` | Only remove build cache |
+
+Safety guarantees: containers managed by Tengiz (identified by the `tengiz-app` label, including scale-to-zero stopped containers) are never removed; tagged images used for rollback are never removed; volumes are only touched with `--volumes`. When no category flags are given, the default categories are `containers`, `images`, `networks`, and `cache`.
+
+```bash
+tengiz cleanup            # dry run: show what would be freed
+tengiz cleanup --apply    # reclaim disk space
+tengiz cleanup --df       # disk usage summary only
+```
 
 ## Configuration
 
