@@ -1,7 +1,9 @@
 package housekeeping
 
 import (
+	"context"
 	"fmt"
+	"os/exec"
 )
 
 const tengizLabelKey = "tengiz-app"
@@ -47,4 +49,86 @@ func networkCandidatesArgs() []string {
 		"--filter", "dangling=true",
 		"--format", "{{.ID}} {{.Name}}",
 	}
+}
+func NewDocker() (Manager, error) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		return nil, fmt.Errorf("docker not found in PATH: %w", err)
+	}
+	return &dockerManager{}, nil
+}
+
+func (m *dockerManager) DiskUsage(ctx context.Context) (*Usage, error) {
+	cmd := exec.CommandContext(ctx, "docker", "system", "df")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker system df: %w\n%s", err, string(out))
+	}
+	return parseDfOutput(string(out))
+}
+
+func (m *dockerManager) Prune(ctx context.Context, opts Options) (*PruneResult, error) {
+	cats := opts.Categories
+	if len(cats) == 0 {
+		cats = DefaultCategories
+	}
+
+	result := &PruneResult{
+		Applied:             opts.Apply,
+		ReclaimedByCategory: make(map[Category]int64),
+	}
+
+	if !opts.Apply {
+		for _, cat := range cats {
+			switch cat {
+			case CategoryContainers:
+				cands, err := m.listCandidates(ctx, cat, containerCandidatesArgs())
+				if err != nil {
+					return nil, err
+				}
+				result.Candidates = append(result.Candidates, cands...)
+			case CategoryImages:
+				cands, err := m.listCandidates(ctx, cat, imageCandidatesArgs())
+				if err != nil {
+					return nil, err
+				}
+				result.Candidates = append(result.Candidates, cands...)
+			case CategoryNetworks:
+				cands, err := m.listCandidates(ctx, cat, networkCandidatesArgs())
+				if err != nil {
+					return nil, err
+				}
+				result.Candidates = append(result.Candidates, cands...)
+			case CategoryCache:
+				// build cache cannot be enumerated cheaply; the CLI reports
+				// its reclaimable bytes from DiskUsage
+			}
+		}
+		return result, nil
+	}
+
+	for _, cat := range cats {
+		args, err := pruneArgs(cat)
+		if err != nil {
+			return nil, err
+		}
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("docker %s: %w\n%s", args[0], err, string(out))
+		}
+		if reclaimed, perr := parseReclaimed(string(out)); perr == nil {
+			result.ReclaimedBytes += reclaimed
+			result.ReclaimedByCategory[cat] = reclaimed
+		}
+	}
+	return result, nil
+}
+
+func (m *dockerManager) listCandidates(ctx context.Context, cat Category, args []string) ([]Candidate, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker %s: %w\n%s", args[0], err, string(out))
+	}
+	return parseCandidates(string(out), cat), nil
 }
