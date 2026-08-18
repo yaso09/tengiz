@@ -1666,3 +1666,149 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** `getDockerEvents` (`services/docker.ts` lines 885-927) runs `docker events --since --until --format json` and returns recent container events as structured JSON — start/stop/die/restart/kill/create/destroy events with timestamps and container names. Used to power activity/audit feeds across the platform.
 - **Why add to Tengiz:** Tengiz's Event Logging & Audit Trail (#7) records platform-initiated actions but is blind to container-level events the platform didn't trigger: a container crash (OOM kill), a healthcheck restart, an external `docker stop`, or the idle-timeout stop. `docker events` closes that gap — `tengiz events <app>` or a background collector writing to the audit store surfaces "why did this container die?" with evidence. Native Go support (`github.com/moby/moby/api/types/events` via `docker events --filter`) fits the exec-based runtime, and Docker's `--filter container=<name>` narrows to one app. Low effort (one `os/exec` call + JSON parsing), feeds both the audit trail and the notification system (#24) for crash alerts.
 - **Detected:** 2026-08-18
+
+---
+
+## Cron Task System with Concurrency Policies, TTL & Maintenance (Dokku cron plugin)
+- **Source:** Dokku
+- **Description:** Full per-app scheduled task engine (`plugins/cron/`). Tasks declared in `app.json` `cron` section or via `cron:add`. Each task gets a deterministic base36 ID and supports: **concurrency policies** (`allow`/`forbid`/`replace` — enforced via the `com.dokku.concurrency-policy` container label by `scheduler-run`), **TTL/timeout** (`--ttl-seconds`, default 86400, stamped as `com.dokku.active-deadline-seconds` for auto-reap of overrunning tasks), **maintenance mode** per task (`cron:suspend`/`cron:resume`) and per app, **mail reporting** (`cron:set --global mailto/mailfrom` renders a real host crontab with `MAILTO`), and **global cron tasks** (`cron:list --global`, scheduler-injected entries). Commands are shell-tokenized and validated at deploy time (`ValidateCronCommand`), and schedules validated against the cron parser. `cron:run <app> <id>` executes any task on-demand with the same TTL/concurrency semantics.
+- **Why add to Tengiz:** The recorded "Scheduled Tasks / Cron Jobs" (#74, Coolify) covers running commands in containers on a timer, but Dokku's cron system adds the production controls a PaaS needs: concurrent runs must be bounded (a 5-minute task overlapping itself is a bug), runaway tasks must be reaped by TTL, and scheduled jobs must be suspendable during maintenance windows without deleting them. The deterministic-ID + deploy-time validation model fits `.tengiz.yaml`'da `cron:` declarations merged with `robfig/cron` scheduling. The TTL auto-reap mechanism (`docker run --label com.tengiz.active-deadline-seconds=N` + a sweeper) is directly portable to Tengiz's exec-based runtime.
+- **Detected:** 2026-08-18
+
+## Detached Run Containers with TTL Reaping (run:detached/run:list/run:stop)
+- **Source:** Dokku
+- **Description:** Beyond synchronous `dokku run`, the `run` plugin + `scheduler-docker-local` manage a class of throwaway **detached run containers**: `run:detached [-e KEY=VALUE] [--force-tty] [--ttl-seconds]`, `run:list [--format json]`, `run:logs <app> [--container ID]`, `run:stop`, and `run:retire`. Detached containers carry the `com.dokku.container-type=run` label; `run:retire` inspects the `com.dokku.active-deadline-seconds` label and automatically stops/removes containers that outlived their TTL. `--cron-id` and `--concurrency-policy` flags wire cron runs through the same lifecycle.
+- **Why add to Tengiz:** Tengiz's `tengiz run` (implemented) is synchronous — the CLI blocks until the command exits. Real ops need background tasks (long migrations, data imports, report generation) that survive the terminal session and get cleaned up automatically. `tengiz run --detached` + `tengiz run:list/logs/stop` + TTL-based reaping prevents orphaned one-off containers from piling up on a single server. Low effort on top of the existing `run` implementation: an `--detach` flag, a `~/.tengiz/runs.json` registry, and a periodic reaper reading the deadline label.
+- **Detected:** 2026-08-18
+
+## Named Storage Entries & Advanced Volume Attachments (storage:create/mount/exec)
+- **Source:** Dokku
+- **Description:** The `storage` plugin turns plain bind mounts into a real volume system. **Named entries** (`storage:create <app|--global> <name>`) register reusable volumes with `Name`, `Path`, `Scheduler` (docker-local/k3s), `Size`, `AccessMode`, `StorageClass`, `Namespace`, `Chown`, `Mode`, `ReclaimPolicy` (Retain/Delete), `Annotations`, and `Labels` (DNS-1123 + octal-mode + 45-char-name validation). **Attachments** (`storage:mount`) add `--container-dir`, `--phases` (deploy/run), `--process-type`, `--subpath`, `--readonly`, `--volume-options`, and `--volume-chown` with ownership presets (`herokuish=32767`, `heroku=1000`, `paketo=2000`, `root=0`). `storage:exec <app> <name> <cmd>` runs a command in a throwaway container mounting the volume at `/data`. Supporting commands: `storage:info`, `storage:list-entries`, `storage:migrate`, `storage:wait`.
+- **Why add to Tengiz:** Tengiz's Persistent Storage (implemented) supports raw `host:container` volume mounts. Named, reusable volume entries add: phase-scoped mounts (volume present for `run` one-offs but not deploy), process-type-specific mounts, read-only/subpath variants, ownership presets that match the app's user (32767 for Nixpacks-style users), and a command to inspect/exec into volume contents without entering the running app container. For scale-to-zero apps, a `Retain` reclaim policy on a named volume is the difference between "data survives cold starts" and "data lost on container teardown". `.tengiz.yaml`'da `volumes:` named entries + `tengiz volume create/mount/exec` command family.
+- **Detected:** 2026-08-18
+
+## Resource Reservations & Extended Limits (Swap, Network Bandwidth, GPU)
+- **Source:** Dokku
+- **Description:** The `resource` plugin distinguishes **limits** (hard caps: `resource:limit <app> <proc> cpu=1 memory=512M`) from **reservations** (guarantees: `resource:reserve ... memory=256M`), with separate clear commands. Valid limit types extend beyond CPU/memory: `memory-swap`, `network-ingress`, `network-egress`, and `nvidia-gpu` (mapped to Docker `--cpus`, `--memory`, `--memory-swap`, `--network`, `--gpus` flags). Bare memory numbers get an automatic `m` suffix (`addMemorySuffixForDocker`), and `DOKKU_OMIT_RESOURCE_ARGS=true` skips resource arg injection entirely per deploy.
+- **Why add to Tengiz:** The implemented Resource Limits feature caps CPU/memory per app, but production single-host operations need the distinction between "guaranteed" and "capped": a memory reservation prevents a busy neighbor from starving an app below its working set, while a cap prevents runaway allocation. Swap and network-bandwidth limits give operators control over noisy neighbors, and the GPU limit extends the existing GPU Passthrough (#133) from "enable GPU" to "allocate N GPUs" per process type. The `--cpus`/`--memory-swap`/`--gpus` flags map 1:1 to `runtime.Run()` args.
+- **Detected:** 2026-08-18
+
+## PID-1 Init Process Injection (Zombie Reaping)
+- **Source:** Dokku
+- **Description:** `scheduler-docker-local/internal-functions` computes an `init-process` property (app → global → default `true`) and `scheduler-deploy-process-container` injects Docker's `--init` flag (tiny tini-based init as PID 1) into every app container. Prevents zombie processes accumulating when apps spawn child processes that outlive their parents.
+- **Why add to Tengiz:** Node.js/Python/Go apps that fork children (web workers, shell-out helpers) will accumulate zombie processes inside a container that has no init as PID 1 — over time this leaks PIDs and file descriptors and can destabilize the container. For a scale-to-zero platform that starts/stops containers frequently, `--init` on every `runtime.CreateFromImage` call is a one-flag correctness fix. `.tengiz.yaml`'da `process.init: false` opt-out.
+- **Detected:** 2026-08-18
+
+## Configurable Graceful Stop Timeout (stop-timeout-seconds)
+- **Source:** Dokku
+- **Description:** The `ps` plugin exposes a `stop-timeout-seconds` property (default `30`) that is threaded through every shutdown path: `scheduler-stop` (`docker stop -t=$DOKKU_DOCKER_STOP_TIMEOUT`), `run-stop`, the retire path, and the deploy-time container replacement. One per-app/global knob controls how long Docker waits for graceful shutdown before SIGKILL.
+- **Why add to Tengiz:** Tengiz's `runtime.Stop()` currently uses whatever Docker default applies. Different apps need different graceful-shutdown windows — a Rails app draining an in-flight queue may need 60s, a health-ping server is fine with 5s. The existing Readiness Delay & Deploy Timeouts (#27) covers start/drain during deploy; this is the stop-side timeout and should be wired through scale-to-zero idle stops too, so a cold start that happens mid-shutdown doesn't force-kill the app mid-request.
+- **Detected:** 2026-08-18
+
+## Secret-Masked Container Inspect (ps:inspect)
+- **Source:** Dokku
+- **Description:** `ps:inspect` pipes `docker container inspect` output through a filter that keeps only allow-listed env var prefixes (`PATH=`, `PORT=`, `USER=`, `DYNO=`, `DOCKER_`, `DOKKU_`, `CACHE_PATH=`) and rewrites every other env value to `KEY=XXXXXX` before printing. Debugging access to container config without leaking secrets.
+- **Why add to Tengiz:** Tengiz already encrypts secrets at rest, but `docker inspect` on a running container dumps all env vars — including decrypted secret values — in plaintext. `tengiz inspect <app>` (or `tengiz ps --inspect`) with the same allow-list masking gives operators the diagnostic view (image, labels, mounts, ports) while redacting `*_PASSWORD`, `*_KEY`, `*_TOKEN` and app secrets. Trivial to port (~20 lines of Go string filtering), aligns with the existing `secrets`/`encrypt` packages.
+- **Detected:** 2026-08-18
+
+## Per-Process-Type Docker Options (docker-options:add --process)
+- **Source:** Dokku
+- **Description:** The `docker-options` plugin scopes Docker flags by **phase** (build/deploy/run) and, for the deploy phase, by **process type**: `docker-options:add <app> deploy --process worker --memory=2g`, `docker-options:list --process --phase`, `docker-options:clear --process`. Invalid process types (not in the Procfile) produce a warning. The option string is shell-tokenized safely (`SplitOptionString`) so values with spaces/quotes survive.
+- **Why add to Tengiz:** The recorded Custom Docker Options (#36) is app-wide. Once Tengiz gains process scaling (#72) or Procfile support (#90), per-process options let a `worker` process carry a bigger memory cap or extra mounts while `web` stays lean — without duplicating app config. The safe-tokenization utility is also directly reusable in `runtime.Create()` to avoid shell-quoting bugs when passing `--sysctl`, `--log-opt`, etc.
+- **Detected:** 2026-08-18
+
+## Declarative CHECKS File for Deploy-Time Verification
+- **Source:** Dokku
+- **Description:** `scheduler-docker-local/check-deploy` parses a `CHECKS` file in the app repo (a simple line format: `<path> [expected content]`, with `WAIT=`, `TIMEOUT=`, `ATTEMPTS=`, hostname-relative URLs, and HTTPS schemes) into a structured check list. It auto-appends a default listening-port check for `web` and an `--uptime` wait, and honors `disabled`/`skipped` per process-type (with `_all_` wildcard) so checks can be turned off for specific process types or apps. `checks:run` re-runs the pipeline on demand.
+- **Why add to Tengiz:** Health checks today are configured in `.tengiz.yaml`. A committed `CHECKS` file moves deploy-time verification into the repo (works across platforms, survives app clones, reviewable in PRs) — the standard Heroku/Dokku migration path. The `WAIT/TIMEOUT/ATTEMPTS` directives map to the existing `health` package knobs, and `checks:run` gives operators an on-demand re-validation after a deploy or container restart. `.tengiz.yaml`'da `checks.enabled: false` disables, `checks.skip: [worker]` opts out per process type.
+- **Detected:** 2026-08-18
+
+## Deferred Container & Image Retirement Queue (Crash-Safe Cleanup)
+- **Source:** Dokku
+- **Description:** `scheduler-register-retired` records retired containers (and their image IDs, including alternate tags) into timestamped `dead-containers`/`dead-images` files; `fn-scheduler-docker-local-retire-containers`/`retire-images` sweep them after a `DEAD_TIME` delay. The sweeper handles edge cases: `restarting` state, force-kill fallback, "image has dependent child images", "image in use by a running container", and per-skip flags (`DOKKU_SKIP_IMAGE_RETIRE`, `DOKKU_SKIP_IMAGE_CLEANUP_REGISTRATION`). Retiring an image that is still referenced defers it to a later sweep instead of erroring.
+- **Why add to Tengiz:** Container Retention Policy (#22) and Stale Container Detection (#47) address keeping and detecting old containers; this is the crash-safe **cleanup mechanism** that actually reclaims disk. A file-based deferred queue (write timestamp → sweep after N) survives Tengiz restarts mid-sweep, retries on failure, and never deletes an image still in use. Fits Tengiz's `~/.tengiz/` state model perfectly and complements Docker Housekeeping (#6) with per-app, deploy-time-aware garbage collection.
+- **Detected:** 2026-08-18
+
+## Archive Security Hardening (Zip-Bomb & Path-Traversal Protection)
+- **Source:** Dokku
+- **Description:** `common/archive-functions` (`fn-archive-extract-tar`/`fn-archive-extract-zip`) enforces `archive-max-size` (default 1 GiB) and `archive-max-files` (default 10000) on any uploaded/extracted archive; rejects absolute paths, `..` traversal entries, and symlinks with absolute or traversal targets (pre- and post-extraction validation); passes `tar --no-unsafe-links`; and emits structured `[archive-security]` audit events. Used by `git:from-archive`, plugin installs, and app.json handling.
+- **Why add to Tengiz:** Any feature that ingests third-party archives (source tarballs, `git:from-archive`-style deploys, future template/service imports, cert bundles) is an attack surface. A malicious 100MB zip that expands to 50GB, or a tar with `../../etc/passwd` entries, would crash or compromise a single-server Tengiz. Since deploy already shells out to `tar`/`unzip`, adding size/file-count/traversal guards is a few validation checks per entry. High security value for a public-facing platform.
+- **Detected:** 2026-08-18
+
+## Global Default Domains (domains:set-global / add-global / reset)
+- **Source:** Dokku
+- **Description:** The `domains` plugin supports a **global** domain set: `domains:set-global <domain>`, `add-global`, `remove-global`, `clear-global`, plus per-app `domains:reset` (resets an app's domains back to the global set) and `domains:setup`. New apps automatically inherit the global domains (`*.tengiz.local` by default, with a global vhost written from the hostname at install time). `domains:report` exposes both per-app and global `vhosts`/`enabled` flags.
+- **Why add to Tengiz:** Today every Tengiz app needs its domains configured individually. A global default domain gives every new app an immediately routable URL with zero setup — the "zero-config deploy" promise of a PaaS. `domains:reset` also provides the cleanup semantics for domain management. `.tengiz.yaml`'da `domains.global: ["*.tengiz.local"]` + `tengiz domain add-global <domain>`. Complements the implemented Custom Domain Management by adding the default-inheritance layer, matching the Global/Per-App Property Cascade (#92) model.
+- **Detected:** 2026-08-18
+
+## SSL Certificate Expiry & Detail Reporting (certs:report)
+- **Source:** Dokku
+- **Description:** `certs:report <app>` exposes machine-readable cert metadata: `--ssl-dir`, `--ssl-enabled`, `--ssl-hostnames` (CN + all SANs via openssl), `--ssl-expires-at`, `--ssl-issuer`, `--ssl-starts-at`, `--ssl-subject`, `--ssl-verified`. `certs:show <app> key|crt` dumps the actual key/cert material to stdout. Imports accept file paths or a tarball on stdin with `.crt`/`.key` extraction.
+- **Why add to Tengiz:** The recorded Manual SSL Certificate Management (#188) covers import/generate/inspect/remove but not structured **expiry monitoring**. `ssl-expires-at` per domain feeds the existing notification system (#24) — email/Slack alerts 30/14/7 days before expiry, and `ssl-verified` detects mis-issued or mismatched certs. `certs:show key` enables wiring Tengiz-managed certs into external load balancers/CDNs. Low effort: `crypto/x509` already parses certs; store cert metadata in `~/.tengiz/certs/` alongside the existing Let's Encrypt auto-provisioning (#65).
+- **Detected:** 2026-08-18
+
+## gRPC & HTTP/2 Proxy Support
+- **Source:** Dokku
+- **Description:** The nginx-vhosts template adds first-class **gRPC** (`grpc_pass`/`grpcs`) and **HTTP/2** proxying: HTTP/2 with version-aware config generation (`http2 on;` on nginx >= 1.25.1, legacy `listen ... http2` otherwise), HTTP/2 push preload, WebSocket upgrade headers, gzip with a rich MIME list, and `X-Request-Start $msec`. Scheme is selected per port map (`grpc:`, `grpcs:` schemes alongside `http:`/`https:`).
+- **Why add to Tengiz:** Tengiz's Go `httputil.ReverseProxy` is HTTP/1.1-only. Growing numbers of apps speak gRPC (microservices, protobuf APIs) or benefit from HTTP/2 (multiplexing, header compression). Supporting gRPC requires h2c (HTTP/2 cleartext) on the proxy side plus `application/grpc` content-type passthrough — a modest but deliberate change to `internal/proxy/proxy.go`. `.tengiz.yaml`'da `proxy.grpc: true` per app. Extends Port Mapping Protocol Selection (#111, TCP/UDP) with a real application-layer protocol.
+- **Detected:** 2026-08-18
+
+## Per-App Proxy Tunables (Timeouts, Buffering, Body Size, Bind Addresses)
+- **Source:** Dokku
+- **Description:** The nginx-vhosts plugin exposes 30+ per-app proxy properties via `nginx:set <app> <key> <value>` (all also settable `--global`): `client-max-body-size`, `client-body/header-timeout`, `keepalive-timeout`, `proxy-connect/read/send-timeout`, `send-timeout`, `proxy-buffer-size`, `proxy-buffering`, `proxy-buffers`, `proxy-busy-buffers-size`, `bind-address-ipv4/ipv6`, `underscore-in-headers`, `x-forwarded-for/port/proto/ssl`, `access-log-format/path`, `error-log-path`, and HSTS knobs (`hsts`, `hsts-include-subdomains`, `hsts-preload`, `hsts-max-age`).
+- **Why add to Tengiz:** The recorded Gelişmiş Proxy Konfigürasyonu (#76) and Custom HTTP Headers (#60) are generic; this is the concrete, proven tunable set. A file-upload app needs a bigger `client_max_body_size` (the most common 413 error), a streaming app needs a longer `proxy_read_timeout`, and multi-interface hosts need `bind_address`. `.tengiz.yaml`'da `proxy.client_max_body_size: 100m`, `proxy.read_timeout: 60s` — applied in `httputil.ReverseProxy` as `MaxBytesReader`/timeout middleware. High ops value, low effort per knob.
+- **Detected:** 2026-08-18
+
+## Custom Per-App Proxy Template with Build-Time Validation
+- **Source:** Dokku
+- **Description:** If an app image contains a `nginx.conf.sigil` template, nginx-vhosts copies it out and renders it **instead of** the built-in template, giving full control over the server block (locations, headers, rewrites). The custom template is pre-validated with `nginx -t` during the build phase (wrapped template with the rendered output dumped on failure), and `disable-custom-config` opts out. OpenResty extends this with per-app `http-includes/` and `http-location-includes/` dirs from the app repo (with unsafe-filename abort).
+- **Why add to Tengiz:** For apps needing proxy behavior Tengiz can't anticipate (exotic rewrites, custom location blocks, provider-specific headers), a per-app template is the power-user escape hatch — the same philosophy as Custom Docker Options (#36). Since Tengiz's proxy is in-process Go, the analogue is a per-app `proxy_config.go`-style handler or a rendered sigil-style template passed through `httputil.ReverseProxy`'s `Director`. Build-time validation (`proxy-config --validate`) catches errors before traffic switch-over instead of at runtime. `.tengiz.yaml`'da `proxy.custom_config: nginx.conf.sigil` path in the repo.
+- **Detected:** 2026-08-18
+
+## Proxy Config Inspection & Validation Commands (show-config / validate / access-logs)
+- **Source:** Dokku
+- **Description:** Operational proxy commands: `nginx:show-config <app>` / `nginx:show-conf` print the generated config for an app; `nginx:access-logs <app>` / `nginx:error-logs <app>` tail per-app nginx logs with `-t` follow; `nginx:validate-config [--clean]` validates every app's generated config and optionally deletes invalid ones; `nginx:start/stop/reload` manage the daemon with a persisted `proxy-status` global property; `reportLastVisitedAt` derives last-visit time from access-log mtime.
+- **Why add to Tengiz:** Tengiz's proxy is in-memory Go with no inspection surface — when routing misbehaves there's no way to see the effective route config, validate it, or tail proxy access logs per app. `tengiz proxy show-config <app>`, `tengiz proxy validate`, and `tengiz proxy access-logs <app>` give operators visibility and a pre-flight check. In-process implementation: dump the `routes` map (the proxy already holds it), validate route targets, and expose a `--log` capture of proxy access lines. Pairs with App Report (#10).
+- **Detected:** 2026-08-18
+
+## ACME DNS-01 Challenge for Wildcard Certificates
+- **Source:** Dokku
+- **Description:** The traefik-vhosts plugin supports `challenge-mode` (`tls` default, `dns` option) with a pluggable `dns-provider` and arbitrary `dns-provider-<ENV>` globals (e.g. `dns-provider-CLOUDFLARE_EMAIL`) that become provider env vars in the proxy compose file. DNS-01 lets ACME issue wildcard (`*.myapp.com`) and behind-NAT certificates — no inbound port 80/443 required for validation.
+- **Why add to Tengiz:** The recorded Let's Encrypt feature (#65) and Alternative ACME Providers (#160) assume HTTP-01 (port 80) validation. DNS-01 unlocks wildcard certs (one cert for all subdomains — the natural fit for Tengiz's `<app>.tengiz.local` model and Preview Deployments) and works on hosts behind NAT/firewalls. With DNS Provider Management (#199) already on the roadmap, the record-creation step can be fully automated. Go's `golang.org/x/crypto/acme` supports DNS-01 via `dns01Challenge` with a pluggable solver.
+- **Detected:** 2026-08-18
+
+## App Phase Scripts with Image Commit (predeploy / postdeploy / release)
+- **Source:** Dokku
+- **Description:** The app-json plugin executes phase scripts with unique semantics: `predeploy` runs in a **temporary container whose filesystem changes are `docker commit`-ed back into the image** (so build-time mutations persist); `release` runs the Procfile `release` process type in an ephemeral container; `postdeploy` (and idempotent `heroku.postdeploy`) runs after the release phase. Scripts receive rich env context and failures abort the deploy.
+- **Why add to Tengiz:** The recorded Pre-Deploy Hooks (#9) and Extended Hook System (#24) run host-side commands before deploy. Dokku's model is image-internal: a `predeploy` script that modifies the app filesystem (asset compile, config generation, DB migrations touching shared files) can commit those changes into the release image, and a `release` phase runs exactly once at deploy (not at every container start — important for scale-to-zero where containers restart often). `.tengiz.yaml`'da `scripts.predeploy`, `scripts.release`, `scripts.postdeploy` — executed via the existing one-off run mechanism (`tengiz run`) with a `docker commit` step.
+- **Detected:** 2026-08-18
+
+## System Report (Host Vitals + Version Matrix)
+- **Source:** Dokku
+- **Description:** `dokku report` (00_dokku-standard) dumps everything needed to troubleshoot an install: `uname -a`, memory (`free -m`), disk + inode utilization (scoped to btrfs/ext4/ext3/ext2/vfat/iso9660), `docker version`, `docker -D system info`, herokuish/pack/plugn/sigil/sshcommand/event-listener/healthchecker/image-labeler/lambda-builder/netrc versions, and the full plugin list. `--all` adds per-app report output. Also provides `dokku url`/`urls` printing the reachable URL(s) for an app.
+- **Why add to Tengiz:** App Report (#10) is per-app; `tengiz doctor` (#114) checks prerequisites. This is the **whole-system diagnostic** for bug reports and support: host OS/kernel/memory/disk + every relevant tool version + plugin inventory in one command. `tengiz report` trivially collects the same via `os/exec` (`uname`, `free`, `df`, `docker version`, `tengiz version`). Printing app URLs after deploy (`tengiz url <app>`) is a small UX win that completes the deploy flow.
+- **Detected:** 2026-08-18
+
+## Build Cancel (builds:cancel)
+- **Source:** Dokku
+- **Description:** `builds:cancel <app>` sends SIGTERM to the running build's process group, waits with a timeout, marks the build record `canceled`, and clears the app deploy lock. Complements the recorded Build Tracking feature with an abort path for stuck or long-running builds.
+- **Why add to Tengiz:** Build Tracking with Retention (#94) records builds but has no way to stop one. A hung `npm install` or a build that's been running for an hour currently forces users to kill the whole Tengiz process. `tengiz build cancel <app>` (or `tengiz deploy --cancel`) sends SIGTERM to the build's process group via `os/exec` (record the `cmd` handle + PID in the build record), marks the record `canceled`, and — critically — releases the deploy lock so subsequent deploys aren't blocked. Low effort, high operational value on a single server.
+- **Detected:** 2026-08-18
+
+## Per-App Registry Authentication Isolation (registry:login / logout)
+- **Source:** Dokku
+- **Description:** `registry:login` (with `--password-stdin`, and docker.io aliasing for `hub.docker.com`/`docker.com`) writes credentials into a **per-app** DOCKER_CONFIG dir (`/var/lib/dokku/config/registry/<app>`, mode 0700); `registry:logout` removes it. Builds receive the app-specific config dir via the `fn-registry-docker-config-dir` trigger, falling back to a global `.docker` config. Each app can thus use different registry credentials simultaneously.
+- **Why add to Tengiz:** The recorded Private Registry Authentication (#20) and Docker Registry Account Management (#201) are single-global-credential models. On a shared Tengiz server, app A pulling from org A's GHCR and app B pulling from org B's ECR need **isolated credentials** — a global `docker login` would leak one org's token to another's builds. A per-app DOCKER_CONFIG dir (`~/.tengiz/registry/<app>/.docker/config.json`) injected as `DOCKER_CONFIG` during `docker build`/`pull` is a clean isolation boundary. Complements Secrets Management (#4) for multi-tenant builds.
+- **Detected:** 2026-08-18
+
+## Ordered Multi-Buildpack Support (.buildpacks file + buildpacks:add --index)
+- **Source:** Dokku
+- **Description:** The `buildpacks` plugin manages an **ordered, indexable** list of buildpacks: `buildpacks:add [--index N]`, `buildpacks:remove [--index N]`, `buildpacks:set`, `buildpacks:clear`. Resolution order: configured properties → `app.json` `buildpacks` URLs → auto-detection. `rewriteBuildpacksFile` keeps a committed `.buildpacks` file canonical and git-friendly. `buildpacks:detect [--branch]` runs a detection dry-run against a checked-out repo without a full deploy.
+- **Why add to Tengiz:** The recorded buildpack features cover single-buildpack selection (BUILDPACK_URL) and Herokuish support (#68), but real apps chain buildpacks (Node frontend + Python backend, or a language buildpack + a `multi` buildpack). Ordered precedence with `--index` inserts and a canonical `.buildpacks` file gives Heroku-parity multi-buildpack deploys. `buildpacks:detect` gives users a cheap dry-run to see what framework detection decided before committing to a full build. `.tengiz.yaml`'da `buildpacks: [url1, url2]` (ordered) — natural extension of the `builder` package.
+- **Detected:** 2026-08-18
+
+## Archive & Image-Based Deployment Sources (git:from-archive / git:from-directory / git:load-image)
+- **Source:** Dokku
+- **Description:** Alternative deployment ingestion beyond `git push`: `git:from-archive <app> <url|-> [--archive-type tar|tar.gz|zip]` extracts a tarball/zip (URL or stdin) into the app's repo with commit message `from-archive`; `git:from-directory` initializes from an existing local directory; `git:from-image` wraps a pre-built Docker image as an app by generating a `FROM <image>` Dockerfile; `git:load-image` pipes a `docker load` stream into the app and deploys it (fully offline/air-gapped deploys). `source-image` property tracks the image source; `rev-env-var` makes the injected revision env var configurable.
+- **Why add to Tengiz:** The recorded Git-Sync Deployment (#142) mentions these as related commands but they're genuinely distinct ingestion paths with different use cases: CI pipelines that can only produce a tarball (no git client/server), migrating an existing deployed directory into Tengiz, deploying a pre-built image with zero source (`tengiz deploy --image` already exists but this wraps it as a tracked app repo), and air-gapped deploys from an image tarball. `tengiz deploy --archive <file.tar.gz>` and `tengiz deploy --load <image.tar>` complete the "bring your own artifact" story alongside source deploys.
+- **Detected:** 2026-08-18
