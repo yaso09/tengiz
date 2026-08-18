@@ -64,6 +64,7 @@ func init() {
 	rootCmd.AddCommand(volumeCmd)
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
@@ -83,6 +84,13 @@ func init() {
 	logsCmd.Flags().String("since", "", "show logs since timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
 	logsCmd.Flags().String("until", "", "show logs before timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
 	logsCmd.Flags().String("grep", "", "filter logs with a case-sensitive pattern (client-side)")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped non-Tengiz containers")
+	cleanupCmd.Flags().Bool("images", false, "prune dangling images")
+	cleanupCmd.Flags().Bool("all-images", false, "also prune all unused images (not just dangling)")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune Docker build cache")
+	cleanupCmd.Flags().Bool("dry-run", false, "show current disk usage without deleting anything")
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
@@ -1084,6 +1092,80 @@ Use --tail N to show only the last N lines of the latest build log.`,
 		fmt.Printf("Build logs for %s:\n", appName)
 		for _, id := range ids {
 			fmt.Printf("  %s\n", id)
+		}
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Clean up unused Docker resources",
+	Long: `Prune unused Docker resources to reclaim disk space.
+
+By default prunes stopped non-Tengiz containers and dangling images.
+Tengiz-managed containers (labeled tengiz-app) are always protected.
+
+Flags:
+  --containers   prune stopped non-Tengiz containers
+  --images       prune dangling images
+  --all-images   also prune all unused images (not just dangling)
+  --volumes      prune unused volumes
+  --networks     prune unused networks
+  --build-cache  prune Docker build cache
+  --dry-run      show current disk usage without deleting anything`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		containers, _ := cmd.Flags().GetBool("containers")
+		images, _ := cmd.Flags().GetBool("images")
+		allImages, _ := cmd.Flags().GetBool("all-images")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		networks, _ := cmd.Flags().GetBool("networks")
+		buildCache, _ := cmd.Flags().GetBool("build-cache")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		if !containers && !images && !volumes && !networks && !buildCache {
+			containers = true
+			images = true
+		}
+
+		cleaner, err := runtime.NewCleaner()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		if dryRun {
+			fmt.Println("[tengiz] DRY RUN — no changes will be made")
+		}
+
+		res, err := cleaner.Prune(cmd.Context(), runtime.PruneOptions{
+			Containers: containers,
+			Images:     images,
+			AllImages:  allImages,
+			Volumes:    volumes,
+			Networks:   networks,
+			BuildCache: buildCache,
+			DryRun:     dryRun,
+		})
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+
+		if res.Containers != "" {
+			fmt.Printf("[tengiz] pruned containers:\n%s", res.Containers)
+		}
+		if res.Images != "" {
+			fmt.Printf("[tengiz] pruned images:\n%s", res.Images)
+		}
+		if res.Volumes != "" {
+			fmt.Printf("[tengiz] pruned volumes:\n%s", res.Volumes)
+		}
+		if res.Networks != "" {
+			fmt.Printf("[tengiz] pruned networks:\n%s", res.Networks)
+		}
+		if res.BuildCache != "" {
+			fmt.Printf("[tengiz] pruned build cache:\n%s", res.BuildCache)
+		}
+		if res.Reclaimed != "" {
+			fmt.Printf("[tengiz] disk usage:\n%s", res.Reclaimed)
 		}
 		return nil
 	},
