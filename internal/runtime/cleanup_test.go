@@ -43,3 +43,96 @@ func TestStubCleanerPrune(t *testing.T) {
 		t.Fatalf("expected empty result, got %+v", res)
 	}
 }
+
+func TestBuildContainerPruneArgs(t *testing.T) {
+	got := buildContainerPruneArgs()
+	want := []string{"container", "prune", "-f", "--filter", "label!=tengiz-app"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("arg[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestBuildImagePruneArgs(t *testing.T) {
+	tests := []struct {
+		all  bool
+		want []string
+	}{
+		{false, []string{"image", "prune", "-f"}},
+		{true, []string{"image", "prune", "-f", "-a"}},
+	}
+	for _, tt := range tests {
+		got := buildImagePruneArgs(tt.all)
+		if len(got) != len(tt.want) {
+			t.Fatalf("all=%v: len = %d, want %d: %v", tt.all, len(got), len(tt.want), got)
+		}
+		for i := range tt.want {
+			if got[i] != tt.want[i] {
+				t.Fatalf("all=%v: arg[%d] = %q, want %q", tt.all, i, got[i], tt.want[i])
+			}
+		}
+	}
+}
+
+func TestBuildVolumePruneArgs(t *testing.T) {
+	got := buildVolumePruneArgs()
+	want := []string{"volume", "prune", "-f", "--filter", "label!=tengiz-app"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("arg[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestBuildNetworkPruneArgs(t *testing.T) {
+	got := buildNetworkPruneArgs()
+	want := []string{"network", "prune", "-f"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("arg[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestBuildBuildCachePruneArgs(t *testing.T) {
+	got := buildBuildCachePruneArgs()
+	want := []string{"builder", "prune", "-f"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("arg[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestBuildSystemDfArgs(t *testing.T) {
+	got := buildSystemDfArgs()
+	want := []string{"system", "df"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("arg[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestNewCleanerRequiresDocker(t *testing.T) {
+	_, err := NewCleaner()
+	if err != nil {
+		t.Logf("NewCleaner() returned error (docker may be absent): %v", err)
+	}
+}
