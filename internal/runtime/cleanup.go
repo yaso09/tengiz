@@ -57,27 +57,27 @@ func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (*PruneRes
 	res := &PruneResult{}
 	var err error
 
-	if opts.Containers {
+	if opts.Containers && !opts.DryRun {
 		if res.Containers, err = run(buildContainerPruneArgs()); err != nil {
 			return nil, err
 		}
 	}
-	if opts.Images {
+	if opts.Images && !opts.DryRun {
 		if res.Images, err = run(buildImagePruneArgs(opts.AllImages)); err != nil {
 			return nil, err
 		}
 	}
-	if opts.Volumes {
+	if opts.Volumes && !opts.DryRun {
 		if res.Volumes, err = run(buildVolumePruneArgs()); err != nil {
 			return nil, err
 		}
 	}
-	if opts.Networks {
+	if opts.Networks && !opts.DryRun {
 		if res.Networks, err = run(buildNetworkPruneArgs()); err != nil {
 			return nil, err
 		}
 	}
-	if opts.BuildCache {
+	if opts.BuildCache && !opts.DryRun {
 		if res.BuildCache, err = run(buildBuildCachePruneArgs()); err != nil {
 			return nil, err
 		}
