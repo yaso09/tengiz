@@ -26,12 +26,14 @@ func pruneArgs(cat Category) ([]string, error) {
 	return nil, fmt.Errorf("unknown category %q", cat)
 }
 
+// containerCandidatesArgs lists stopped containers, surfacing the tengiz-app
+// label so labeled containers can be excluded in Go. `docker ps` rejects the
+// negated `label!=` filter (only prune subcommands accept it).
 func containerCandidatesArgs() []string {
 	return []string{
 		"ps", "-a",
 		"--filter", "status=exited",
-		"--filter", "label!=" + tengizLabelKey,
-		"--format", "{{.ID}} {{.Names}}",
+		"--format", "{{.ID}} {{.Names}} {{.Label \"tengiz-app\"}}",
 	}
 }
 
@@ -81,7 +83,7 @@ func (m *dockerManager) Prune(ctx context.Context, opts Options) (*PruneResult, 
 		for _, cat := range cats {
 			switch cat {
 			case CategoryContainers:
-				cands, err := m.listCandidates(ctx, cat, containerCandidatesArgs())
+				cands, err := m.listContainerCandidates(ctx)
 				if err != nil {
 					return nil, err
 				}
@@ -131,4 +133,13 @@ func (m *dockerManager) listCandidates(ctx context.Context, cat Category, args [
 		return nil, fmt.Errorf("docker %s: %w\n%s", args[0], err, string(out))
 	}
 	return parseCandidates(string(out), cat), nil
+}
+
+func (m *dockerManager) listContainerCandidates(ctx context.Context) ([]Candidate, error) {
+	cmd := exec.CommandContext(ctx, "docker", containerCandidatesArgs()...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker %s: %w\n%s", "ps", err, string(out))
+	}
+	return parseContainerCandidates(string(out)), nil
 }

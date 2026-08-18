@@ -148,3 +148,31 @@ func parseCandidates(out string, cat Category) []Candidate {
 	}
 	return cands
 }
+
+// parseContainerCandidates parses `docker ps` output formatted as
+// "ID Name [tengiz-app-label]" and drops any container carrying the
+// tengiz-app label. `docker ps` does not accept the negated `label!=`
+// filter (unlike prune subcommands), so protection is enforced here.
+func parseContainerCandidates(out string) []Candidate {
+	var cands []Candidate
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		id := fields[0]
+		name := ""
+		if len(fields) >= 2 {
+			name = fields[1]
+		}
+		if len(fields) >= 3 && fields[2] != "" {
+			continue
+		}
+		cands = append(cands, Candidate{Category: CategoryContainers, ID: id, Name: name})
+	}
+	return cands
+}

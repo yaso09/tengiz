@@ -106,3 +106,40 @@ func TestParseCandidatesEmpty(t *testing.T) {
 		t.Errorf("expected no candidates, got %d", len(cands))
 	}
 }
+
+func TestParseContainerCandidates(t *testing.T) {
+	out := "8f2a1bc9 nginx-proxy\n7d3e4f5a redis\n"
+	cands := parseContainerCandidates(out)
+	if len(cands) != 2 {
+		t.Fatalf("expected 2 candidates, got %d", len(cands))
+	}
+	if cands[0].ID != "8f2a1bc9" || cands[0].Name != "nginx-proxy" {
+		t.Errorf("candidate[0] = %+v", cands[0])
+	}
+	if cands[1].Category != CategoryContainers {
+		t.Errorf("candidate[1].Category = %q, want %q", cands[1].Category, CategoryContainers)
+	}
+}
+
+func TestParseContainerCandidatesFiltersLabeled(t *testing.T) {
+	out := "8f2a1bc9 nginx-proxy\n" +
+		"deadbeef myapp tengiz-app\n" +
+		"cafe1234 other-app tengiz-app\n" +
+		"7d3e4f5a redis\n"
+	cands := parseContainerCandidates(out)
+	if len(cands) != 2 {
+		t.Fatalf("expected 2 candidates (labeled excluded), got %d: %+v", len(cands), cands)
+	}
+	if cands[0].ID != "8f2a1bc9" {
+		t.Errorf("candidate[0].ID = %q, want 8f2a1bc9", cands[0].ID)
+	}
+	if cands[1].ID != "7d3e4f5a" {
+		t.Errorf("candidate[1].ID = %q, want 7d3e4f5a", cands[1].ID)
+	}
+}
+
+func TestParseContainerCandidatesEmpty(t *testing.T) {
+	if cands := parseContainerCandidates(""); len(cands) != 0 {
+		t.Errorf("expected no candidates, got %d", len(cands))
+	}
+}

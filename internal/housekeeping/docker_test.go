@@ -40,11 +40,11 @@ func TestPruneArgsUnknownCategory(t *testing.T) {
 func TestContainerCandidatesArgsProtectTengiz(t *testing.T) {
 	args := containerCandidatesArgs()
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "label!=tengiz-app") {
-		t.Errorf("container candidates must exclude tengiz-app label, got: %v", args)
-	}
 	if !strings.Contains(joined, "status=exited") {
 		t.Errorf("container candidates must target stopped containers, got: %v", args)
+	}
+	if !strings.Contains(joined, `{{.Label "tengiz-app"}}`) {
+		t.Errorf("container candidates must surface the tengiz-app label for Go-side filtering, got: %v", args)
 	}
 }
 
@@ -184,6 +184,41 @@ func TestDockerPruneDryRun(t *testing.T) {
 	}
 	if len(res.Candidates) != 3 {
 		t.Fatalf("expected 3 candidates, got %d: %+v", len(res.Candidates), res.Candidates)
+	}
+	if res.Candidates[0].ID != "8f2a1bc9" || res.Candidates[0].Name != "nginx-proxy" {
+		t.Errorf("candidate[0] = %+v", res.Candidates[0])
+	}
+}
+
+const protectScript = `#!/bin/sh
+case "$1" in
+  ps)
+    printf '8f2a1bc9 nginx-proxy\n'
+    printf 'deadbeef myapp tengiz-app\n'
+    exit 0
+    ;;
+  images)
+    exit 0
+    ;;
+  network)
+    exit 0
+    ;;
+esac
+exit 1
+`
+
+func TestDockerPruneDryRunProtectsTengizContainers(t *testing.T) {
+	fakeDocker(t, protectScript)
+	m, err := NewDocker()
+	if err != nil {
+		t.Fatalf("NewDocker() error = %v", err)
+	}
+	res, err := m.Prune(context.Background(), Options{Apply: false})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if len(res.Candidates) != 1 {
+		t.Fatalf("expected 1 candidate (labeled container excluded), got %d: %+v", len(res.Candidates), res.Candidates)
 	}
 	if res.Candidates[0].ID != "8f2a1bc9" || res.Candidates[0].Name != "nginx-proxy" {
 		t.Errorf("candidate[0] = %+v", res.Candidates[0])
