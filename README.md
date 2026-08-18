@@ -235,6 +235,35 @@ Rollback to the previous deployment. The previous active container is started on
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup`
+
+Prune unused Docker resources and trim old Tengiz images — housekeeping for
+single-server deployments where disk space is the most common failure mode.
+
+Tengiz-managed containers (labeled `tengiz-app=*`) and images (`tengiz-apps/*`)
+are always protected from pruning.
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Prune stopped containers not managed by Tengiz |
+| `--images` | Prune dangling images (skips `tengiz-apps/*`) |
+| `--networks` | Prune unused networks |
+| `--build-cache` | Prune Docker build cache |
+| `--volumes` | Prune unused volumes (opt-in — volumes may hold data) |
+| `--keep-images N` | Keep last N images per app (default `5`, `0` disables) |
+| `--dry-run` | Show what would be removed without changing anything |
+| `--env` | Environment to scope per-app image retention |
+
+With no category flags, safe categories run by default (containers, images,
+networks, build-cache). Add `--volumes` to include unused volumes.
+
+```bash
+tengiz cleanup                # prune safe categories + keep last 5 images per app
+tengiz cleanup --volumes      # also prune unused volumes
+tengiz cleanup --dry-run      # preview only, makes no changes
+tengiz cleanup --keep-images 3
+```
+
 ### `tengiz domain`
 
 Manage custom domains for applications.
