@@ -58,6 +58,67 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	return nil
 }
 
+func buildPruneCommands(opts CleanupOptions) []string {
+	var cmds []string
+	if opts.Containers {
+		cmds = append(cmds, "docker container prune -f --filter label!=tengiz-app")
+	}
+	if opts.Images {
+		if opts.AllImages {
+			cmds = append(cmds, "docker image prune -a -f --filter reference!=tengiz-apps/*")
+		} else {
+			cmds = append(cmds, "docker image prune -f")
+		}
+	}
+	if opts.Volumes {
+		cmds = append(cmds, "docker volume prune -f")
+	}
+	if opts.Networks {
+		cmds = append(cmds, "docker network prune -f")
+	}
+	if opts.BuildCache {
+		cmds = append(cmds, "docker builder prune -f")
+	}
+	return cmds
+}
+
+func parseReclaimedSpace(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Total reclaimed space:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "Total reclaimed space:"))
+		}
+	}
+	return ""
+}
+
 func (r *dockerRuntime) Prune(ctx context.Context, opts CleanupOptions) (*PruneReport, error) {
-	return &PruneReport{}, nil
+	report := &PruneReport{Commands: buildPruneCommands(opts)}
+
+	if opts.DryRun {
+		dfCmd := exec.CommandContext(ctx, "docker", "system", "df")
+		out, err := dfCmd.CombinedOutput()
+		if err != nil {
+			return report, fmt.Errorf("docker system df: %w\n%s", err, string(out))
+		}
+		report.Details = append(report.Details, string(out))
+		return report, nil
+	}
+
+	for _, cmdStr := range report.Commands {
+		parts := strings.Split(cmdStr, " ")
+		cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return report, fmt.Errorf("%s: %w\n%s", cmdStr, err, string(out))
+		}
+		report.Details = append(report.Details, string(out))
+		if reclaimed := parseReclaimedSpace(string(out)); reclaimed != "" {
+			if report.ReclaimedSpace != "" {
+				report.ReclaimedSpace += ", "
+			}
+			report.ReclaimedSpace += reclaimed
+		}
+	}
+	return report, nil
 }
