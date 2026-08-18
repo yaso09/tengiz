@@ -67,6 +67,8 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	registerCleanupFlags(cleanupCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
 	notificationCmd.AddCommand(notificationDisableCmd)
 	notificationCmd.AddCommand(notificationConfigCmd)
@@ -1087,6 +1089,103 @@ Use --tail N to show only the last N lines of the latest build log.`,
 		}
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Clean up unused Docker resources",
+	Long: `Remove unused Docker containers, images, volumes, networks, and build cache.
+Tengiz-managed containers (labeled tengiz-app) and images (tengiz-apps/*) are protected.
+
+With no category flags, all categories are cleaned. Use flags to select specific categories.
+
+  --containers   remove stopped containers not managed by Tengiz
+  --images       remove dangling (untagged) images
+  --all-images   with --images, also remove all unused images (tengiz-apps/* are kept)
+  --volumes      remove unused anonymous volumes
+  --networks     remove unused networks
+  --build-cache  remove Docker build cache
+  --dry-run      show what would be cleaned and current disk usage without deleting anything`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts, err := cleanupOptionsFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		report, err := rt.Prune(cmd.Context(), opts)
+		if err != nil {
+			return err
+		}
+
+		if opts.DryRun {
+			fmt.Println("[tengiz] dry-run: no resources were deleted")
+			for _, c := range report.Commands {
+				fmt.Printf("[tengiz] would run: %s\n", c)
+			}
+			for _, d := range report.Details {
+				fmt.Print(d)
+			}
+			return nil
+		}
+
+		for _, c := range report.Commands {
+			fmt.Printf("[tengiz] ran: %s\n", c)
+		}
+		for _, d := range report.Details {
+			fmt.Print(d)
+		}
+		fmt.Printf("[tengiz] cleanup complete (reclaimed: %s)\n", report.ReclaimedSpace)
+		return nil
+	},
+}
+
+func registerCleanupFlags(cmd *cobra.Command) {
+	cmd.Flags().Bool("dry-run", false, "show what would be cleaned without deleting anything")
+	cmd.Flags().Bool("containers", false, "remove stopped containers not managed by Tengiz")
+	cmd.Flags().Bool("images", false, "remove dangling (untagged) images")
+	cmd.Flags().Bool("all-images", false, "with --images, also remove all unused images (tengiz-apps/* are kept)")
+	cmd.Flags().Bool("volumes", false, "remove unused anonymous volumes")
+	cmd.Flags().Bool("networks", false, "remove unused networks")
+	cmd.Flags().Bool("build-cache", false, "remove Docker build cache")
+}
+
+func cleanupOptionsFromFlags(cmd *cobra.Command) (runtime.CleanupOptions, error) {
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	containers, _ := cmd.Flags().GetBool("containers")
+	images, _ := cmd.Flags().GetBool("images")
+	allImages, _ := cmd.Flags().GetBool("all-images")
+	volumes, _ := cmd.Flags().GetBool("volumes")
+	networks, _ := cmd.Flags().GetBool("networks")
+	buildCache, _ := cmd.Flags().GetBool("build-cache")
+
+	if allImages && !images {
+		return runtime.CleanupOptions{}, fmt.Errorf("--all-images requires --images")
+	}
+
+	opts := runtime.CleanupOptions{
+		DryRun:     dryRun,
+		Containers: containers,
+		Images:     images,
+		AllImages:  allImages,
+		Volumes:    volumes,
+		Networks:   networks,
+		BuildCache: buildCache,
+	}
+
+	if !containers && !images && !volumes && !networks && !buildCache {
+		opts.Containers = true
+		opts.Images = true
+		opts.Volumes = true
+		opts.Networks = true
+		opts.BuildCache = true
+	}
+	return opts, nil
 }
 
 var runCmd = &cobra.Command{
