@@ -473,6 +473,38 @@ func buildRunArgs(cfg *types.AppConfig, imageTag string, cmd []string, opts RunO
 	return args
 }
 
+func cleanupContainerListArgs() []string {
+	return []string{"ps", "-a", "--filter", "label=" + labelKey, "--filter", "status=exited", "--format", "{{.Names}}"}
+}
+
+func cleanupContainerPruneArgs() []string {
+	return []string{"container", "prune", "-f", "--filter", "label=" + labelKey}
+}
+
+func cleanupImageListArgs() []string {
+	return []string{"images", "--filter", "dangling=true", "--format", "{{.ID}}"}
+}
+
+func cleanupImagePruneArgs() []string {
+	return []string{"image", "prune", "-f"}
+}
+
+func cleanupVolumeListArgs() []string {
+	return []string{"volume", "ls", "-q", "--filter", "dangling=true"}
+}
+
+func cleanupVolumePruneArgs() []string {
+	return []string{"volume", "prune", "-f"}
+}
+
+func cleanupBuilderListArgs() []string {
+	return []string{"builder", "du", "--format", "{{.ID}}"}
+}
+
+func cleanupBuilderPruneArgs() []string {
+	return []string{"builder", "prune", "-f"}
+}
+
 func (r *dockerRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
 	args := buildRunArgs(cfg, imageTag, cmd, opts)
 	dcmd := exec.CommandContext(ctx, "docker", args...)

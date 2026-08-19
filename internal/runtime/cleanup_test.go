@@ -34,3 +34,55 @@ func TestStubCleanup(t *testing.T) {
 		t.Errorf("stub Cleanup should return zeroed report, got %+v", report)
 	}
 }
+
+func requireArgsEqual(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("args = %v (len %d), want %v (len %d)", got, len(got), want, len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("args[%d] = %q, want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCleanupContainerListArgs(t *testing.T) {
+	requireArgsEqual(t, cleanupContainerListArgs(),
+		[]string{"ps", "-a", "--filter", "label=" + labelKey, "--filter", "status=exited", "--format", "{{.Names}}"})
+}
+
+func TestCleanupContainerPruneArgs(t *testing.T) {
+	requireArgsEqual(t, cleanupContainerPruneArgs(),
+		[]string{"container", "prune", "-f", "--filter", "label=" + labelKey})
+}
+
+func TestCleanupImageListArgs(t *testing.T) {
+	requireArgsEqual(t, cleanupImageListArgs(),
+		[]string{"images", "--filter", "dangling=true", "--format", "{{.ID}}"})
+}
+
+func TestCleanupImagePruneArgs(t *testing.T) {
+	requireArgsEqual(t, cleanupImagePruneArgs(),
+		[]string{"image", "prune", "-f"})
+}
+
+func TestCleanupVolumeListArgs(t *testing.T) {
+	requireArgsEqual(t, cleanupVolumeListArgs(),
+		[]string{"volume", "ls", "-q", "--filter", "dangling=true"})
+}
+
+func TestCleanupVolumePruneArgs(t *testing.T) {
+	requireArgsEqual(t, cleanupVolumePruneArgs(),
+		[]string{"volume", "prune", "-f"})
+}
+
+func TestCleanupBuilderListArgs(t *testing.T) {
+	requireArgsEqual(t, cleanupBuilderListArgs(),
+		[]string{"builder", "du", "--format", "{{.ID}}"})
+}
+
+func TestCleanupBuilderPruneArgs(t *testing.T) {
+	requireArgsEqual(t, cleanupBuilderPruneArgs(),
+		[]string{"builder", "prune", "-f"})
+}
