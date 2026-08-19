@@ -2114,3 +2114,45 @@ Aşağıdaki özellikler CapRover kaynak kodundan (`sources/caprover/`) analiz e
 - **Description:** Any value in the configs object (port numbers, image names, gzip defaults, max history) can be overridden at runtime by dropping a JSON file with matching keys into the data directory — no recompile, no env var; build-time overrides are layered under user overrides. `CaptainConstants.ts:10-15, 230-251`.
 - **Why add to Tengiz:** Tengiz already uses viper for `.tengiz.yaml`, but constants like the proxy listen port, port range (9000-9999), idle default, and image-name defaults are compiled in. A documented `~/.tengiz/override.json` layer gives operators an escape hatch for environment-specific tuning without touching code or environment plumbing. Low effort, medium value.
 - **Detected:** 2026-08-19
+
+## Docker Build Cloud Entegrasyonu (Bulut Builder)
+- **Source:** Kamal
+- **Description:** `builder.driver: cloud org-name/builder-name` ile build'ler Docker'ın yönetilen bulut builder'ında (`cloud builder`) çalıştırılır. Tüm mimariler (amd64/arm64) tek komutla build edilir, geliştirici makinesinin CPU/RAM'ini kullanmaz ve build cache'i bulutta saklanır. Cloud driver, `docker-container` driver ile aynı buildx özelliklerini (multi-arch, cache) destekler; `builder.local: false` ile lokal build tamamen kapatılabilir.
+- **Why add to Tengiz:** Tengiz build'leri varsayılan `docker` driver'ı ile lokal makinede yapar; büyük veya multi-arch image'lar geliştirici makinesini yorar ve deploy'u yavaşlatır. `build.builder: cloud` desteği CI ve yüksek CPU'lu projelerde hız kazandırır. Tengiz'in `builder` paketine `--driver cloud` passthrough'u ve Docker Build Cloud builder'ın varlık kontrolü olarak eklenebilir.
+- **Detected:** 2026-08-19
+
+## Build Provenance & SBOM Üretimi (Buildx Attestation)
+- **Source:** Kamal
+- **Description:** `builder.provenance` ve `builder.sbom` config anahtarlarıyla buildx image attestation'ları üretilir: build'in hangi kaynaktan/nasıl yapıldığını gösteren SLSA-provenance metadata'sı ve image içindeki paket/kütüphane listesini çıkaran SBOM (Software Bill of Materials). Varsayılan olarak provenance üretilir; SBOM string veya mode olarak yapılandırılabilir.
+- **Why add to Tengiz:** Supply-chain güvenliği (SLSA/SBOM) enterprise compliance'ın temelidir. Tengiz deploy ettiği her image için SBOM çıkarabilir, `tengiz sbom <app>` komutuyla kullanıcıya paket envanteri gösterebilir ve provenance sayesinde her deploy'un kaynağı doğrulanabilir. Dockerfile'a dokunmadan config-level kontrol sağlar ve Rollback (#8) ile birlikte sürüm başına doğrulanabilir artefakt üretir.
+- **Detected:** 2026-08-19
+
+## Buildtime SSH Agent İletimi (Özel Bağımlılıklar)
+- **Source:** Kamal
+- **Description:** `builder.ssh` ile geliştiricinin SSH agent socket'i veya explicit SSH key'leri build context'ine iletilir; Dockerfile'da `RUN --mount=type=ssh` kullanılarak private git dependency'leri (private npm/pip/go modülleri, submodule'ler) build sırasında indirilebilir. `--mount=type=ssh` sayesinde key'ler image katmanlarına gömülmez.
+- **Why add to Tengiz:** Private dependency içeren projeler build'de yetki hatası verir. Tengiz `.tengiz.yaml`'da `build.ssh: true` veya key yolu desteği ile private repo bağımlılıklarının build'ini mümkün kılmalı; key'lerin image'a sızmasını önleyen `--mount=type=ssh` kullanımı güvenlik açısından kritiktir.
+- **Detected:** 2026-08-19
+
+## Reproducible Clean Git-Clone Build (Deterministik Derleme)
+- **Source:** Kamal
+- **Description:** `builder.context` tanımsız bırakıldığında Kamal çalışma dizinindeki local checkout yerine repo'nun *temiz bir git clone*'undan build alır: `git clone --recurse-submodules <url> <tmp>` ardından `git reset --hard <sha>`, `git clean -fdx` ve `git gc --auto`. Böylece commit edilmemiş local değişiklikler image'a asla giremez ve her build aynı kaynak koddan yapılır.
+- **Why add to Tengiz:** `tengiz deploy` build'i local dosyalardan yapar; commit edilmemiş değişiklikler farkında olmadan image'a girebilir ve makineden makineye farklı sonuç üretir. Clean-clone modu (ör. `deploy --clean`) üretim deployslarında deterministik sonuç garantisi verir; gitdeploy/webhook pipeline'ları her zaman temiz state'den build etmelidir.
+- **Detected:** 2026-08-19
+
+## Image Service-Label Doğrulaması (Yanlış Image Koruması)
+- **Source:** Kamal
+- **Description:** Pull sonrası `builder.validate_image` her host'ta `docker inspect` ile image'ın üzerinde `service` label'ının varlığını doğrular; eksikse "image doesn't have the service label" hatasıyla deploy durdurulur. Böylece yanlış repo'dan veya farklı servisten çekilen image'ın çalıştırılması engellenir.
+- **Why add to Tengiz:** Tengiz env-aware image tag'leri (`{env}-{deploymentID}`) kullanır; label doğrulaması registry'den çekilen image'ların doğru kaynaktan geldiğini garantiler. `tengiz deploy` öncesi image'ın `tengiz-app` label'ını kontrol etmek yanlış image deploy'unu ve Rollback (#8) sırasında yanlış sürümün başlatılmasını baştan engeller.
+- **Detected:** 2026-08-19
+
+## Per-Host Ortam Etiketleri (Env Tags)
+- **Source:** Kamal
+- **Description:** `env.tags.<name>` ile bir grup env değişkeni etiketlenir; `servers: "host: tag"` sözdizimiyle her host'a hangi env tag'inin uygulanacağı seçilir. Aynı servis farklı host'larda farklı env ile çalışabilir (bölgesel config, canary deneysel özellikler, per-bölge secret'lar).
+- **Why add to Tengiz:** Tengiz `.tengiz.yaml`'da tek `env:` bloğu sunar. Env tags ile kullanıcı aynı uygulamanın farklı sürümlerini farklı ortam değişkenleriyle (canary, bölge bazlı, feature flag) çalıştırabilir; `.tengiz.{env}.yaml` override mekanizmasıyla kombine edilebilir ve multi-server desteği için temel yapı taşıdır.
+- **Detected:** 2026-08-19
+
+## Secret Alias & Dotenv İnline Komut Substitüsyonu
+- **Source:** Kamal
+- **Description:** `.kamal/secrets` dotenv dosyasında `ENV_KEY: SECRET_NAME` sözdizimi ile secret alias tanımlanır (env var adı farklı secret key'e map edilir); ayrıca `$(...)` ile secrets dosyası içinde shell komutu çalıştırılır — örn. `KAMAL_REGISTRY_PASSWORD=$(kamal secrets fetch --adapter 1password --account x --from y --inline z)`. İç içe parantezli komutlar ve çıktıdaki tab/boşluk trim'lenir. `kamal secrets fetch --adapter <name>` ile 1Password, Bitwarden, Bitwarden SM, AWS SM, GCP SM, LastPass, Enpass, Passbolt, Doppler'dan CLI üzerinden secret çekilir.
+- **Why add to Tengiz:** Tengiz'in secrets sistemi `[[secret.NAME]]` interpolasyonu yapar ama alias ve canlı komut çağrısı desteklemez. Alias ile env değişkeni adı ile vault key adı arasındaki eşleşme `.tengiz.yaml`'da merkezi tutulabilir; `$(...)` substitüsyonu LastPass/Enpass/Passbolt gibi native provider'ı olmayan vault'lar için `tengiz secret set` sırasında çağrılabilir komutla genişletilebilirlik sağlar (mevcut #32 Secrets Management'ı tamamlar).
+- **Detected:** 2026-08-19
