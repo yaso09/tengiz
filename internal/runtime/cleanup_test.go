@@ -86,3 +86,36 @@ func TestCleanupBuilderPruneArgs(t *testing.T) {
 	requireArgsEqual(t, cleanupBuilderPruneArgs(),
 		[]string{"builder", "prune", "-f"})
 }
+
+func TestNonEmptyLines(t *testing.T) {
+	input := "\n  line one \n\n line two \n\n"
+	got := nonEmptyLines(input)
+	want := []string{"line one", "line two"}
+	if len(got) != len(want) {
+		t.Fatalf("nonEmptyLines(%q) = %v, want %v", input, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("nonEmptyLines[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestNonEmptyLinesEmpty(t *testing.T) {
+	if got := nonEmptyLines("  \n\n  "); len(got) != 0 {
+		t.Fatalf("nonEmptyLines(whitespace) = %v, want empty", got)
+	}
+}
+
+func TestCountBuilderPruneOutput(t *testing.T) {
+	input := "abcdef123456\nfedcba654321\n\nTotal reclaimed space: 1.2GB\n"
+	if got := countBuilderPruneOutput(input); got != 2 {
+		t.Errorf("countBuilderPruneOutput() = %d, want 2", got)
+	}
+}
+
+func TestCountBuilderPruneOutputEmpty(t *testing.T) {
+	if got := countBuilderPruneOutput("\n"); got != 0 {
+		t.Errorf("countBuilderPruneOutput(empty) = %d, want 0", got)
+	}
+}

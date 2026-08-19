@@ -85,10 +85,6 @@ func NewDocker() (Manager, error) {
 	return &dockerRuntime{}, nil
 }
 
-func (r *dockerRuntime) Cleanup(ctx context.Context, opts types.CleanupOptions) (types.CleanupReport, error) {
-	return types.CleanupReport{}, nil
-}
-
 func (r *dockerRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error {
 	internalPort := cfg.Port
 	if internalPort == 0 {
@@ -503,6 +499,106 @@ func cleanupBuilderListArgs() []string {
 
 func cleanupBuilderPruneArgs() []string {
 	return []string{"builder", "prune", "-f"}
+}
+
+func (r *dockerRuntime) runDocker(ctx context.Context, args []string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	return cmd.CombinedOutput()
+}
+
+func nonEmptyLines(out string) []string {
+	var lines []string
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines
+}
+
+func countBuilderPruneOutput(out string) int {
+	count := 0
+	for _, line := range nonEmptyLines(out) {
+		if !strings.HasPrefix(line, "Total reclaimed") {
+			count++
+		}
+	}
+	return count
+}
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts types.CleanupOptions) (types.CleanupReport, error) {
+	report := types.CleanupReport{DryRun: opts.DryRun}
+
+	if opts.Containers {
+		if opts.DryRun {
+			out, err := r.runDocker(ctx, cleanupContainerListArgs())
+			if err != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("list containers: %v", err))
+			} else {
+				report.ContainersRemoved = len(nonEmptyLines(string(out)))
+			}
+		} else {
+			if out, err := r.runDocker(ctx, cleanupContainerPruneArgs()); err != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("prune containers: %v", err))
+			} else {
+				report.ContainersRemoved = len(nonEmptyLines(string(out)))
+			}
+		}
+	}
+
+	if opts.Images {
+		if opts.DryRun {
+			out, err := r.runDocker(ctx, cleanupImageListArgs())
+			if err != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("list images: %v", err))
+			} else {
+				report.ImagesRemoved = len(nonEmptyLines(string(out)))
+			}
+		} else {
+			if out, err := r.runDocker(ctx, cleanupImagePruneArgs()); err != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("prune images: %v", err))
+			} else {
+				report.ImagesRemoved = len(nonEmptyLines(string(out)))
+			}
+		}
+	}
+
+	if opts.Volumes {
+		if opts.DryRun {
+			out, err := r.runDocker(ctx, cleanupVolumeListArgs())
+			if err != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("list volumes: %v", err))
+			} else {
+				report.VolumesRemoved = len(nonEmptyLines(string(out)))
+			}
+		} else {
+			if out, err := r.runDocker(ctx, cleanupVolumePruneArgs()); err != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("prune volumes: %v", err))
+			} else {
+				report.VolumesRemoved = len(nonEmptyLines(string(out)))
+			}
+		}
+	}
+
+	if opts.BuildCache {
+		if opts.DryRun {
+			out, err := r.runDocker(ctx, cleanupBuilderListArgs())
+			if err != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("list build cache: %v", err))
+			} else {
+				report.BuildCacheRemoved = len(nonEmptyLines(string(out)))
+			}
+		} else {
+			if out, err := r.runDocker(ctx, cleanupBuilderPruneArgs()); err != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("prune build cache: %v", err))
+			} else {
+				report.BuildCacheRemoved = countBuilderPruneOutput(string(out))
+			}
+		}
+	}
+
+	return report, nil
 }
 
 func (r *dockerRuntime) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
