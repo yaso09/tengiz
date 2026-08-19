@@ -18,6 +18,7 @@
 - **Multi-environment** — Isolate dev/staging/production with `--env` flag, env-scoped config overrides, and separate state files.
 - **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
+- **Docker housekeeping** — `tengiz cleanup` prunes stopped non-Tengiz containers, dangling images, unused volumes/networks, and the build cache. Label-based filtering protects Tengiz apps; `--dry-run` previews, `--interval` schedules.
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
@@ -226,6 +227,22 @@ Remove an application completely — stops the container, deletes it, and cleans
 | Argument | Description |
 |----------|-------------|
 | `app` | Application name (required) |
+
+### `tengiz cleanup [--dry-run] [--containers|--images|--volumes|--networks|--cache] [--interval <duration>]`
+
+Prune unused Docker resources to reclaim disk space.
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Preview what would be removed (lists candidates, deletes nothing) |
+| `--containers` | Prune stopped containers NOT managed by Tengiz |
+| `--images` | Prune dangling images |
+| `--volumes` | Prune unused volumes |
+| `--networks` | Prune unused networks |
+| `--cache` | Prune the Docker build cache |
+| `--interval` | Run cleanup periodically (e.g. `6h`) until interrupted |
+
+With no category flags, all categories are cleaned. Tengiz-managed containers are always protected via the `tengiz-app` label filter. Use `--interval 6h` (or with `--dry-run`) for scheduled housekeeping.
 
 ### `tengiz rollback <app>`
 
