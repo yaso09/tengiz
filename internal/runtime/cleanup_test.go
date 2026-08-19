@@ -29,3 +29,17 @@ func TestStubCleanup(t *testing.T) {
 		t.Fatalf("expected empty result, got %+v", res)
 	}
 }
+
+func TestDockerCleanupNoCategoriesDoesNothing(t *testing.T) {
+	r := &dockerRuntime{}
+	res, err := r.Cleanup(context.Background(), CleanupOptions{})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if res.ReclaimedBytes != 0 {
+		t.Errorf("ReclaimedBytes = %d, want 0", res.ReclaimedBytes)
+	}
+	if res.Details != "" {
+		t.Errorf("Details = %q, want empty", res.Details)
+	}
+}

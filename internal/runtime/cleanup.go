@@ -10,7 +10,79 @@ import (
 )
 
 func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
-	return CleanupResult{}, nil
+	var details strings.Builder
+	var total uint64
+
+	execCmd := func(category string, args []string, parseReclaim bool) error {
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Printf("[runtime] cleanup %s failed: %v\n%s", category, err, string(out))
+			return fmt.Errorf("docker %s cleanup: %w", category, err)
+		}
+		details.WriteString(string(out))
+		if parseReclaim {
+			total += parseReclaimedBytes(string(out))
+		}
+		return nil
+	}
+
+	if opts.DryRun {
+		if opts.Containers {
+			if err := execCmd("containers", listContainerArgs(), false); err != nil {
+				return CleanupResult{}, err
+			}
+		}
+		if opts.Images {
+			if err := execCmd("images", listDanglingImageArgs(), false); err != nil {
+				return CleanupResult{}, err
+			}
+		}
+		if opts.Volumes {
+			if err := execCmd("volumes", listDanglingVolumeArgs(), false); err != nil {
+				return CleanupResult{}, err
+			}
+		}
+		if opts.Networks {
+			if err := execCmd("networks", listDanglingNetworkArgs(), false); err != nil {
+				return CleanupResult{}, err
+			}
+		}
+		if opts.Cache {
+			if err := execCmd("cache", cacheUsageArgs(), false); err != nil {
+				return CleanupResult{}, err
+			}
+		}
+		return CleanupResult{Details: details.String()}, nil
+	}
+
+	if opts.Containers {
+		if err := execCmd("containers", cleanupContainerArgs(), true); err != nil {
+			return CleanupResult{}, err
+		}
+	}
+	if opts.Images {
+		if err := execCmd("images", cleanupImageArgs(), true); err != nil {
+			return CleanupResult{}, err
+		}
+	}
+	if opts.Volumes {
+		if err := execCmd("volumes", cleanupVolumeArgs(), true); err != nil {
+			return CleanupResult{}, err
+		}
+	}
+	if opts.Networks {
+		if err := execCmd("networks", cleanupNetworkArgs(), true); err != nil {
+			return CleanupResult{}, err
+		}
+	}
+	if opts.Cache {
+		if err := execCmd("cache", cleanupCacheArgs(), true); err != nil {
+			return CleanupResult{}, err
+		}
+	}
+
+	return CleanupResult{ReclaimedBytes: total, Details: details.String()}, nil
 }
 
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
