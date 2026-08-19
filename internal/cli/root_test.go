@@ -378,3 +378,139 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not found: %v", err)
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCommandFlags(t *testing.T) {
+	for _, flag := range []string{"containers", "images", "volumes", "networks", "build-cache", "all", "dry-run", "yes"} {
+		if cleanupCmd.Flags().Lookup(flag) == nil {
+			t.Errorf("cleanupCmd missing --%s flag", flag)
+		}
+	}
+}
+
+func newTestCleanupCmd() *cobra.Command {
+	c := &cobra.Command{Use: "cleanup"}
+	c.Flags().Bool("containers", true, "")
+	c.Flags().Bool("images", true, "")
+	c.Flags().Bool("volumes", false, "")
+	c.Flags().Bool("networks", false, "")
+	c.Flags().Bool("build-cache", false, "")
+	c.Flags().Bool("all", false, "")
+	return c
+}
+
+func TestBuildCleanupOptionsDefaults(t *testing.T) {
+	c := newTestCleanupCmd()
+	opts, err := buildCleanupOptions(c)
+	if err != nil {
+		t.Fatalf("buildCleanupOptions() error = %v", err)
+	}
+	if !opts.Containers || !opts.Images {
+		t.Error("default cleanup should include containers and images")
+	}
+	if opts.Volumes || opts.Networks || opts.BuildCache {
+		t.Error("default cleanup should NOT include volumes/networks/build-cache")
+	}
+}
+
+func TestBuildCleanupOptionsAll(t *testing.T) {
+	c := newTestCleanupCmd()
+	if err := c.Flags().Set("all", "true"); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := buildCleanupOptions(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.Containers || !opts.Images || !opts.Volumes || !opts.Networks || !opts.BuildCache {
+		t.Error("--all should enable every category")
+	}
+}
+
+func TestBuildCleanupOptionsVolumesAdditive(t *testing.T) {
+	c := newTestCleanupCmd()
+	if err := c.Flags().Set("volumes", "true"); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := buildCleanupOptions(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.Containers || !opts.Images || !opts.Volumes {
+		t.Error("category flags should add to the default containers+images set")
+	}
+}
+
+func TestBuildCleanupOptionsDisableContainers(t *testing.T) {
+	c := newTestCleanupCmd()
+	if err := c.Flags().Set("containers", "false"); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := buildCleanupOptions(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Containers {
+		t.Error("containers should be disabled when --containers=false")
+	}
+	if !opts.Images {
+		t.Error("images should still be enabled")
+	}
+}
+
+func TestBuildCleanupOptionsNoCategoriesError(t *testing.T) {
+	c := newTestCleanupCmd()
+	if err := c.Flags().Set("containers", "false"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Flags().Set("images", "false"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := buildCleanupOptions(c); err == nil {
+		t.Error("expected error when no categories selected")
+	}
+}
+
+func TestConfirmWithReader(t *testing.T) {
+	if !confirmWithReader(strings.NewReader("y\n")) {
+		t.Error("expected confirm for 'y'")
+	}
+	if !confirmWithReader(strings.NewReader("YES\n")) {
+		t.Error("expected confirm for 'YES'")
+	}
+	if confirmWithReader(strings.NewReader("n\n")) {
+		t.Error("expected decline for 'n'")
+	}
+	if confirmWithReader(strings.NewReader("")) {
+		t.Error("expected decline on EOF")
+	}
+}
+
+func TestOptsStrings(t *testing.T) {
+	got := optsStrings(types.PruneOptions{Containers: true, Images: true, Volumes: true})
+	want := []string{"containers", "images", "volumes"}
+	if len(got) != 3 || got[0] != "containers" || got[1] != "images" || got[2] != "volumes" {
+		t.Errorf("optsStrings() = %v, want %v", got, want)
+	}
+}
+
+func TestCleanupDryRunWithoutDocker(t *testing.T) {
+	output := captureOutput(func() {
+		rootCmd.SetArgs([]string{"cleanup", "--dry-run"})
+		if err := rootCmd.Execute(); err != nil {
+			t.Errorf("Execute() error = %v", err)
+		}
+	})
+	if !strings.Contains(output, "dry-run") || !strings.Contains(output, "containers, images") {
+		t.Errorf("unexpected dry-run output: %s", output)
+	}
+}
