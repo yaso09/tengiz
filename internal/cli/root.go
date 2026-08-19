@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -62,6 +63,7 @@ func init() {
 	volumeCmd.AddCommand(volumeRemoveCmd)
 	volumeCmd.AddCommand(volumeListCmd)
 	rootCmd.AddCommand(volumeCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
@@ -86,6 +88,15 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("containers", true, "remove stopped containers (Tengiz-managed containers are protected)")
+	cleanupCmd.Flags().Bool("images", true, "remove unused images (Tengiz-built images are protected)")
+	cleanupCmd.Flags().Bool("volumes", false, "remove unused anonymous volumes")
+	cleanupCmd.Flags().Bool("networks", false, "remove unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "remove build cache")
+	cleanupCmd.Flags().Bool("all", false, "remove every category of unused resources")
+	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without removing anything")
+	cleanupCmd.Flags().BoolP("yes", "y", false, "skip the confirmation prompt")
+	cleanupCmd.Flags().String("interval", "", "repeat cleanup every <duration> (e.g. 24h) until stopped (requires --yes)")
 }
 
 var rootCmd = &cobra.Command{
@@ -936,6 +947,167 @@ var volumeListCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources (containers, images, volumes, networks, build cache)",
+	Long: `Removes unused Docker resources to free disk space on the host.
+
+By default removes stopped containers (Tengiz-managed containers are always
+protected) and unused images (Tengiz-built images are always protected). Add
+--volumes, --networks, or --build-cache to include more categories. Use --all
+to clean every category.
+
+Confirmation is required unless --yes is passed; non-interactive terminals
+cannot confirm and must pass --yes. Use --dry-run to preview what would be
+removed without removing anything.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		intervalStr, _ := cmd.Flags().GetString("interval")
+		if intervalStr != "" {
+			interval, err := time.ParseDuration(intervalStr)
+			if err != nil {
+				return fmt.Errorf("invalid --interval %q: %w", intervalStr, err)
+			}
+			yes, _ := cmd.Flags().GetBool("yes")
+			if !yes {
+				return fmt.Errorf("cleanup --interval requires --yes (non-interactive periodic runs cannot confirm)")
+			}
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
+			defer stop()
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				if err := runCleanupOnce(cmd); err != nil {
+					return err
+				}
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-ticker.C:
+				}
+			}
+		}
+		return runCleanupOnce(cmd)
+	},
+}
+
+func runCleanupOnce(cmd *cobra.Command) error {
+	opts, err := buildCleanupOptions(cmd)
+	if err != nil {
+		return err
+	}
+
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	yes, _ := cmd.Flags().GetBool("yes")
+
+	if dryRun {
+		if rt, err := runtime.NewDocker(); err == nil {
+			if usage, err := rt.DiskUsage(cmd.Context()); err == nil && strings.TrimSpace(usage) != "" {
+				fmt.Println(usage)
+			}
+		}
+		fmt.Printf("[tengiz] dry-run: would prune %s\n", strings.Join(optsStrings(opts), ", "))
+		return nil
+	}
+
+	if !yes && !confirmCleanup() {
+		fmt.Println("[tengiz] cleanup cancelled")
+		return nil
+	}
+
+	rt, err := runtime.NewDocker()
+	if err != nil {
+		return err
+	}
+
+	if usage, err := rt.DiskUsage(cmd.Context()); err == nil && strings.TrimSpace(usage) != "" {
+		fmt.Println(usage)
+	}
+
+	result, err := rt.Prune(cmd.Context(), opts)
+	if err != nil {
+		return err
+	}
+
+	for _, l := range result.Detail {
+		fmt.Println(l)
+	}
+	if result.TotalReclaimed != "" {
+		fmt.Printf("[tengiz] total reclaimed space: %s\n", result.TotalReclaimed)
+	}
+	return nil
+}
+
+func buildCleanupOptions(cmd *cobra.Command) (types.PruneOptions, error) {
+	all, _ := cmd.Flags().GetBool("all")
+	if all {
+		return types.PruneOptions{
+			Containers: true,
+			Images:     true,
+			Volumes:    true,
+			Networks:   true,
+			BuildCache: true,
+		}, nil
+	}
+
+	opts := types.PruneOptions{Containers: true, Images: true}
+	if cmd.Flags().Changed("containers") {
+		opts.Containers, _ = cmd.Flags().GetBool("containers")
+	}
+	if cmd.Flags().Changed("images") {
+		opts.Images, _ = cmd.Flags().GetBool("images")
+	}
+	if cmd.Flags().Changed("volumes") {
+		opts.Volumes, _ = cmd.Flags().GetBool("volumes")
+	}
+	if cmd.Flags().Changed("networks") {
+		opts.Networks, _ = cmd.Flags().GetBool("networks")
+	}
+	if cmd.Flags().Changed("build-cache") {
+		opts.BuildCache, _ = cmd.Flags().GetBool("build-cache")
+	}
+
+	if !opts.Containers && !opts.Images && !opts.Volumes && !opts.Networks && !opts.BuildCache {
+		return opts, fmt.Errorf("cleanup cancelled: no categories selected (pass --all or a category flag)")
+	}
+	return opts, nil
+}
+
+func confirmCleanup() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	fmt.Print("[tengiz] continue with cleanup? [y/N] ")
+	return confirmWithReader(os.Stdin)
+}
+
+func confirmWithReader(r io.Reader) bool {
+	answer, _ := bufio.NewReader(r).ReadString('\n')
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	return answer == "y" || answer == "yes"
+}
+
+func optsStrings(opts types.PruneOptions) []string {
+	var s []string
+	if opts.Containers {
+		s = append(s, "containers")
+	}
+	if opts.Images {
+		s = append(s, "images")
+	}
+	if opts.Volumes {
+		s = append(s, "volumes")
+	}
+	if opts.Networks {
+		s = append(s, "networks")
+	}
+	if opts.BuildCache {
+		s = append(s, "build-cache")
+	}
+	return s
 }
 
 var rollbackCmd = &cobra.Command{

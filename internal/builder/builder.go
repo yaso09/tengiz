@@ -54,6 +54,21 @@ func (b *Builder) ensureDockerfile(dir string, detection *Detection) error {
 	return os.WriteFile(dfPath, []byte(content), 0644)
 }
 
+func dockerBuildArgs(secretArgs []string, tag, dir string) []string {
+	args := []string{"build"}
+	args = append(args, secretArgs...)
+	args = append(args, "-t", tag)
+	args = append(args, "--label", fmt.Sprintf("%s=true", types.ManagedImageLabel))
+	args = append(args, dir)
+	return args
+}
+
+func nixpacksBuildArgs(tag, dir string, extra []string) []string {
+	args := []string{"build", dir, "--name", tag, "--label", fmt.Sprintf("%s=true", types.ManagedImageLabel)}
+	args = append(args, extra...)
+	return args
+}
+
 func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName string, env string, deploymentID string) (string, string, error) {
 	if env == "" {
 		env = "production"
@@ -66,9 +81,7 @@ func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName s
 	}
 	defer cleanup()
 
-	args := []string{"build"}
-	args = append(args, b.buildSecretArgs()...)
-	args = append(args, "-t", tag, dir)
+	args := dockerBuildArgs(b.buildSecretArgs(), tag, dir)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 
@@ -136,7 +149,7 @@ func (b *Builder) buildWithNixpacks(ctx context.Context, dir, appName, env, depl
 	}
 	tag := fmt.Sprintf("tengiz-apps/%s:%s-%s", appName, env, deploymentID)
 
-	args := []string{"build", dir, "--name", tag}
+	args := nixpacksBuildArgs(tag, dir, nil)
 	if b.nixpacksCfg != nil {
 		if len(b.nixpacksCfg.Packages) > 0 {
 			args = append(args, "--pkgs", strings.Join(b.nixpacksCfg.Packages, ","))
