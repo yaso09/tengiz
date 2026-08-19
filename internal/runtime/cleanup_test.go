@@ -119,6 +119,163 @@ func TestParseSystemDFBuildCacheMissing(t *testing.T) {
 	}
 }
 
+func TestSplitRepoTag(t *testing.T) {
+	tests := []struct {
+		in   string
+		repo string
+		tag  string
+	}{
+		{"alpine", "alpine", "latest"},
+		{"alpine:latest", "alpine", "latest"},
+		{"alpine:3.19", "alpine", "3.19"},
+		{"tengiz-apps/myapp:v1", "tengiz-apps/myapp", "v1"},
+		{"localhost:5000/myapp:tag", "localhost:5000/myapp", "tag"},
+		{"nginx", "nginx", "latest"},
+	}
+	for _, tt := range tests {
+		repo, tag := splitRepoTag(tt.in)
+		if repo != tt.repo || tag != tt.tag {
+			t.Errorf("splitRepoTag(%q) = (%q, %q), want (%q, %q)", tt.in, repo, tag, tt.repo, tt.tag)
+		}
+	}
+}
+
+func TestShortID(t *testing.T) {
+	if got := shortID("sha256:abcdef1234567890"); got != "abcdef123456" {
+		t.Errorf("shortID() = %q, want %q", got, "abcdef123456")
+	}
+}
+
+func TestHasTengizLabel(t *testing.T) {
+	if !hasTengizLabel("tengiz-app=myapp") {
+		t.Error("hasTengizLabel(\"tengiz-app=myapp\") = false, want true")
+	}
+	if !hasTengizLabel("tengiz-app=myapp,tengiz-env=production") {
+		t.Error("hasTengizLabel with two labels = false, want true")
+	}
+	if hasTengizLabel("com.docker.compose.project=foo") {
+		t.Error("hasTengizLabel(other) = true, want false")
+	}
+	if hasTengizLabel("") {
+		t.Error("hasTengizLabel(\"\") = true, want false")
+	}
+}
+
+func TestFilterUnmanagedContainers(t *testing.T) {
+	out := "web-test\t\n" +
+		"myapp\ttengiz-app=myapp,tengiz-env=production\n" +
+		"temp-build\tcom.docker.compose.project=foo\n"
+	got := filterUnmanagedContainers(out)
+	want := []string{"web-test", "temp-build"}
+	if len(got) != len(want) {
+		t.Fatalf("filterUnmanagedContainers() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("filterUnmanagedContainers()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestFilterUnmanagedContainersEmpty(t *testing.T) {
+	if got := filterUnmanagedContainers(""); len(got) != 0 {
+		t.Fatalf("filterUnmanagedContainers(\"\") = %v, want empty", got)
+	}
+}
+
+func TestComputeUnusedImagesDangling(t *testing.T) {
+	all := "sha256:1111111111aaaa\t<none>:<none>\n" +
+		"sha256:2222222222bbbb\talpine:latest\n"
+	referenced := []string{"alpine:latest"}
+	got := computeUnusedImages(all, referenced, false)
+	want := []unusedImage{{ID: "sha256:1111111111aaaa", Ref: "1111111111aa"}}
+	if len(got) != len(want) {
+		t.Fatalf("computeUnusedImages() = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("computeUnusedImages()[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestComputeUnusedImagesNoDanglingWithoutAll(t *testing.T) {
+	all := "sha256:2222222222bbbb\talpine:latest\n"
+	got := computeUnusedImages(all, nil, false)
+	if len(got) != 0 {
+		t.Fatalf("computeUnusedImages() = %+v, want empty (tagged image needs --all)", got)
+	}
+}
+
+func TestComputeUnusedImagesAll(t *testing.T) {
+	all := "sha256:1111111111aaaa\t<none>:<none>\n" +
+		"sha256:2222222222bbbb\talpine:latest\n" +
+		"sha256:5555555555eeee\talpine:3.19\n" +
+		"sha256:3333333333cccc\ttengiz-apps/myapp:v1\n" +
+		"sha256:4444444444dddd\tredis:7\n"
+	referenced := []string{"alpine:latest", "sha256:1111111111aaaa"}
+	got := computeUnusedImages(all, referenced, true)
+	want := []unusedImage{
+		{ID: "sha256:5555555555eeee", Ref: "alpine:3.19"},
+		{ID: "sha256:4444444444dddd", Ref: "redis:7"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("computeUnusedImages() = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("computeUnusedImages()[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseDanglingVolumes(t *testing.T) {
+	out := "vol1\nvol2\n"
+	got := parseDanglingVolumes(out)
+	want := []string{"vol1", "vol2"}
+	if len(got) != len(want) {
+		t.Fatalf("parseDanglingVolumes() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("parseDanglingVolumes()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseDanglingVolumesEmpty(t *testing.T) {
+	if got := parseDanglingVolumes(""); len(got) != 0 {
+		t.Fatalf("parseDanglingVolumes(\"\") = %v, want empty", got)
+	}
+}
+
+func TestComputeUnusedNetworks(t *testing.T) {
+	lines := []string{
+		"54532e5ef3f2 bridge",
+		"ecb53337d4ee host",
+		"f61bb3e36b11 none",
+		"aa11bb22cc33 mynet",
+		"dd44ee55ff66 othernet",
+	}
+	inUse := map[string]bool{"aa11bb22cc33": true}
+	got := computeUnusedNetworks(lines, inUse)
+	want := []string{"othernet"}
+	if len(got) != len(want) {
+		t.Fatalf("computeUnusedNetworks() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("computeUnusedNetworks()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestComputeUnusedNetworksEmpty(t *testing.T) {
+	if got := computeUnusedNetworks(nil, nil); len(got) != 0 {
+		t.Fatalf("computeUnusedNetworks(nil) = %v, want empty", got)
+	}
+}
+
 func TestStubRemoveImage(t *testing.T) {
 	m := NewStub()
 	if err := m.RemoveImage(context.Background(), "tengiz-apps/testapp:v1"); err != nil {

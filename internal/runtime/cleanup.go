@@ -175,3 +175,149 @@ func parseSystemDFBuildCache(rows []byte) (int64, error) {
 	}
 	return 0, nil
 }
+
+type unusedImage struct {
+	ID  string
+	Ref string
+}
+
+func splitRepoTag(s string) (string, string) {
+	if i := strings.LastIndex(s, "/"); i != -1 {
+		if j := strings.LastIndex(s[i:], ":"); j != -1 {
+			return s[:i+j], s[i+j+1:]
+		}
+		return s, "latest"
+	}
+	if i := strings.LastIndex(s, ":"); i != -1 {
+		return s[:i], s[i+1:]
+	}
+	return s, "latest"
+}
+
+func shortID(id string) string {
+	s := strings.TrimPrefix(id, "sha256:")
+	if len(s) > 12 {
+		s = s[:12]
+	}
+	return s
+}
+
+func hasTengizLabel(labels string) bool {
+	for _, pair := range strings.Split(labels, ",") {
+		kv := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+		if len(kv) == 2 && kv[0] == CleanupProtectLabel {
+			return true
+		}
+	}
+	return false
+}
+
+func filterUnmanagedContainers(output string) []string {
+	var names []string
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		name := strings.TrimSpace(parts[0])
+		if name == "" {
+			continue
+		}
+		labels := ""
+		if len(parts) == 2 {
+			labels = parts[1]
+		}
+		if hasTengizLabel(labels) {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+func computeUnusedImages(allOutput string, referenced []string, all bool) []unusedImage {
+	type imageInfo struct {
+		id   string
+		repo string
+		tag  string
+	}
+	var images []imageInfo
+	for _, line := range strings.Split(strings.TrimSpace(allOutput), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		repo, tag := splitRepoTag(strings.TrimSpace(parts[1]))
+		images = append(images, imageInfo{id: strings.TrimSpace(parts[0]), repo: repo, tag: tag})
+	}
+
+	refs := make(map[string]bool)
+	ids := make(map[string]bool)
+	for _, ref := range referenced {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		if strings.HasPrefix(ref, "sha256:") {
+			ids[ref] = true
+			continue
+		}
+		repo, tag := splitRepoTag(ref)
+		if tag == "latest" {
+			refs[repo] = true
+		}
+		refs[repo+":"+tag] = true
+	}
+
+	var out []unusedImage
+	for _, img := range images {
+		if strings.HasPrefix(img.repo, "tengiz-apps/") {
+			continue
+		}
+		if img.repo == "<none>" {
+			if ids[img.id] {
+				continue
+			}
+			out = append(out, unusedImage{ID: img.id, Ref: shortID(img.id)})
+			continue
+		}
+		if ids[img.id] || refs[img.repo+":"+img.tag] || (img.tag == "latest" && refs[img.repo]) {
+			continue
+		}
+		if all {
+			out = append(out, unusedImage{ID: img.id, Ref: img.repo + ":" + img.tag})
+		}
+	}
+	return out
+}
+
+func parseDanglingVolumes(output string) []string {
+	var names []string
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if name := strings.TrimSpace(line); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+var defaultNetworks = map[string]bool{"bridge": true, "host": true, "none": true}
+
+func computeUnusedNetworks(lines []string, inUse map[string]bool) []string {
+	var out []string
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		id, name := fields[0], fields[1]
+		if defaultNetworks[name] || inUse[id] || inUse[name] {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
