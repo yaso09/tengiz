@@ -96,6 +96,7 @@ func init() {
 	cleanupCmd.Flags().Bool("all", false, "remove every category of unused resources")
 	cleanupCmd.Flags().Bool("dry-run", false, "show what would be removed without removing anything")
 	cleanupCmd.Flags().BoolP("yes", "y", false, "skip the confirmation prompt")
+	cleanupCmd.Flags().String("interval", "", "repeat cleanup every <duration> (e.g. 24h) until stopped (requires --yes)")
 }
 
 var rootCmd = &cobra.Command{
@@ -963,51 +964,80 @@ cannot confirm and must pass --yes. Use --dry-run to preview what would be
 removed without removing anything.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		opts, err := buildCleanupOptions(cmd)
-		if err != nil {
-			return err
-		}
-
-		dryRun, _ := cmd.Flags().GetBool("dry-run")
-		yes, _ := cmd.Flags().GetBool("yes")
-
-		if dryRun {
-			if rt, err := runtime.NewDocker(); err == nil {
-				if usage, err := rt.DiskUsage(cmd.Context()); err == nil && strings.TrimSpace(usage) != "" {
-					fmt.Println(usage)
+		intervalStr, _ := cmd.Flags().GetString("interval")
+		if intervalStr != "" {
+			interval, err := time.ParseDuration(intervalStr)
+			if err != nil {
+				return fmt.Errorf("invalid --interval %q: %w", intervalStr, err)
+			}
+			yes, _ := cmd.Flags().GetBool("yes")
+			if !yes {
+				return fmt.Errorf("cleanup --interval requires --yes (non-interactive periodic runs cannot confirm)")
+			}
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
+			defer stop()
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				if err := runCleanupOnce(cmd); err != nil {
+					return err
+				}
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-ticker.C:
 				}
 			}
-			fmt.Printf("[tengiz] dry-run: would prune %s\n", strings.Join(optsStrings(opts), ", "))
-			return nil
 		}
-
-		if !yes && !confirmCleanup() {
-			fmt.Println("[tengiz] cleanup cancelled")
-			return nil
-		}
-
-		rt, err := runtime.NewDocker()
-		if err != nil {
-			return err
-		}
-
-		if usage, err := rt.DiskUsage(cmd.Context()); err == nil && strings.TrimSpace(usage) != "" {
-			fmt.Println(usage)
-		}
-
-		result, err := rt.Prune(cmd.Context(), opts)
-		if err != nil {
-			return err
-		}
-
-		for _, l := range result.Detail {
-			fmt.Println(l)
-		}
-		if result.TotalReclaimed != "" {
-			fmt.Printf("[tengiz] total reclaimed space: %s\n", result.TotalReclaimed)
-		}
-		return nil
+		return runCleanupOnce(cmd)
 	},
+}
+
+func runCleanupOnce(cmd *cobra.Command) error {
+	opts, err := buildCleanupOptions(cmd)
+	if err != nil {
+		return err
+	}
+
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	yes, _ := cmd.Flags().GetBool("yes")
+
+	if dryRun {
+		if rt, err := runtime.NewDocker(); err == nil {
+			if usage, err := rt.DiskUsage(cmd.Context()); err == nil && strings.TrimSpace(usage) != "" {
+				fmt.Println(usage)
+			}
+		}
+		fmt.Printf("[tengiz] dry-run: would prune %s\n", strings.Join(optsStrings(opts), ", "))
+		return nil
+	}
+
+	if !yes && !confirmCleanup() {
+		fmt.Println("[tengiz] cleanup cancelled")
+		return nil
+	}
+
+	rt, err := runtime.NewDocker()
+	if err != nil {
+		return err
+	}
+
+	if usage, err := rt.DiskUsage(cmd.Context()); err == nil && strings.TrimSpace(usage) != "" {
+		fmt.Println(usage)
+	}
+
+	result, err := rt.Prune(cmd.Context(), opts)
+	if err != nil {
+		return err
+	}
+
+	for _, l := range result.Detail {
+		fmt.Println(l)
+	}
+	if result.TotalReclaimed != "" {
+		fmt.Printf("[tengiz] total reclaimed space: %s\n", result.TotalReclaimed)
+	}
+	return nil
 }
 
 func buildCleanupOptions(cmd *cobra.Command) (types.PruneOptions, error) {

@@ -514,3 +514,25 @@ func TestCleanupDryRunWithoutDocker(t *testing.T) {
 		t.Errorf("unexpected dry-run output: %s", output)
 	}
 }
+
+func TestCleanupIntervalFlagRegistered(t *testing.T) {
+	if cleanupCmd.Flags().Lookup("interval") == nil {
+		t.Error("cleanupCmd missing --interval flag")
+	}
+}
+
+func TestCleanupInvalidInterval(t *testing.T) {
+	rootCmd.SetArgs([]string{"cleanup", "--interval", "bogus"})
+	err := rootCmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "invalid --interval") {
+		t.Errorf("expected invalid interval error, got %v", err)
+	}
+}
+
+func TestCleanupIntervalRequiresYes(t *testing.T) {
+	rootCmd.SetArgs([]string{"cleanup", "--interval", "1h"})
+	err := rootCmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--yes") {
+		t.Errorf("expected --yes required error, got %v", err)
+	}
+}
