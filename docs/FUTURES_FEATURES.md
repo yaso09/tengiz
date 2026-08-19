@@ -1904,3 +1904,75 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Systematic credential hygiene across return paths: SSH private keys stripped from server records before they reach any client (`services/server.ts` `redactServerSshKey`); registry/vault secrets masked on read (`VAULT_SECRET_MASK = "********"`, `SENSITIVE_FIELDS`) and stripped from error messages (`registry.ts` `sanitizeRegistryError`); Docker logins never pass passwords via process args — `printf %s <pass> | docker login --password-stdin`.
 - **Why add to Tengiz:** Roadmap's Deployment Log Redaction covers build logs; this is broader — a CLI tool whose output lands in CI logs must never leak SSH keys, registry passwords, or vault secrets through `ps`/`logs`/`errors`. Cheap audit + redact helpers on every return path, plus switching to `--password-stdin` in `runtime`. Low effort, high security value.
 - **Detected:** 2026-08-19
+
+## HTTP/2 + gRPC Reverse Proxy Support
+- **Source:** Dokku
+- **Description:** The nginx-vhosts template (`plugins/nginx-vhosts/templates/nginx.conf.sigil`) emits dual-stack IPv4/IPv6 listeners with HTTP/2 — either the standalone `http2 on;` directive (nginx ≥1.25.1) or legacy `listen ... ssl http2` — plus `grpc_pass grpc://$APP-$upstream_port;` server blocks for `grpc`/`grpcs` port-map schemes (HTTP/2 required for gRPC), `http2_push_preload on;`, and named upstreams with `keepalive` for connection reuse.
+- **Why add to Tengiz:** Tengiz's proxy forwards plain HTTP/1.1 only. HTTP/2 gives multiplexing and header-compression wins for all HTTPS apps, and gRPC support lets users deploy microservices/RPC APIs (the exact apps that drove the recorded non-HTTP port mapping roadmap item) without terminating TLS in-app. `http/2 on` + `grpc_pass` are one-liners in the existing `httputil.ReverseProxy` path. Low-medium effort, high value for API-heavy workloads.
+- **Detected:** 2026-08-19
+
+## Dockerfile EXPOSE-Based Port Auto-Detection
+- **Source:** Dokku
+- **Description:** `builder-dockerfile/internal-functions` extracts ports from `EXPOSE` lines in the app Dockerfile (`fn-builder-dockerfile-get-ports-from-dockerfile`, dos2unix-normalized), falling back to `docker image inspect` exposed ports (`fn-builder-dockerfile-get-ports-from-image`), and auto-generates the detected port map (`http`, `https` for 443, `udp`) via the `ports-set-detected` trigger — falling back to `http:<proxy-port>:5000` only when nothing is exposed.
+- **Why add to Tengiz:** Tengiz allocates ports 9000-9999 but requires manual port configuration; apps that set `EXPOSE` in their Dockerfile (most containerized services) can be routed automatically with zero config — matching Dokku's convention of inferring `PORT`/`EXPOSE` from the image. Reuses Tengiz's existing port-allocator and ports persistence. Low effort, high DX value, pairs with the recorded Port Conflict Detection item.
+- **Detected:** 2026-08-19
+
+## Init Process Injection (tini) for Container Signal/Zombie Handling
+- **Source:** Dokku
+- **Description:** `scheduler-docker-local` injects `--init` (tini) into app containers via the `init-process` property (computed default `true`, app+global), automatically disabled for `linuxserver.io` images whose s6-overlay provides its own init. Ensures PID 1 reaps orphaned zombies and forwards signals (SIGTERM/SIGINT) to the child process so graceful shutdown works correctly.
+- **Why add to Tengiz:** Tengiz's `runtime` starts containers with `docker run` and no PID-1 init. Without tini, Node/Python/Go children become zombies and Ctrl-C/SIGTERM during scale-to-zero or rollback may not reach the app — directly hurting the graceful-shutdown and idle-timeout features. `docker run --init` is a single flag; no code change to the app. Low effort, high reliability value.
+- **Detected:** 2026-08-19
+
+## Proxy Catch-All Host Rejection (Unknown Host Blocking)
+- **Source:** Dokku
+- **Description:** On install, nginx-vhosts writes a default catch-all site (`templates/default-site.conf` → `/etc/nginx/conf.d/00-default-vhost.conf`) that rejects requests with unknown `Host`/SNI — `ssl_reject_handshake on;` on 443 and `return 444;` on 80 — so traffic for unconfigured domains never reaches an app.
+- **Why add to Tengiz:** Tengiz routes by host header with a fallback to the first subdomain part, so a request for a misspelled or unowned domain currently proxies somewhere (or hits a cold-start) instead of being dropped. A catch-all 444/connection-drop handler in the Go proxy before routing adds a hard security boundary against DNS-rebinding / domain-squatting / scanner noise. Very low effort, medium security value.
+- **Detected:** 2026-08-19
+
+## One-Off Run Container Lifecycle Management (List/Logs/Stop/TTL)
+- **Source:** Dokku
+- **Description:** `scheduler-docker-local` manages one-off containers beyond `run`: `scheduler-run-list` lists run containers (stdout table or JSON), `scheduler-run-logs` streams their output, `scheduler-run-stop` stops one or all run containers for an app, and `scheduler-run-retire` reaps run/cron containers past their TTL — `DOKKU_RUN_TTL_SECONDS` sets a `com.dokku.active-deadline-seconds` label, with a systemd timer (or cron) sweeping expired containers globally.
+- **Why add to Tengiz:** Tengiz's `tengiz run` creates an ephemeral container and forgets it — long-running maintenance shells, migration workers, or crash-on-start runs linger and consume resources with no way to list/log/stop them. `tengiz run --detach` + `tengiz run list|logs|stop` plus TTL-based auto-cleanup (reusing the existing idle timer pattern) turns one-off execution into a manageable primitive. Low-medium effort, high ops value.
+- **Detected:** 2026-08-19
+
+## Git Remote Authentication & Host Verification (netrc + known_hosts)
+- **Source:** Dokku
+- **Description:** The git plugin manages outbound git-deploy credentials: `git:allow-host <host>` adds a host to `$DOKKU_ROOT/.ssh/known_hosts` via `ssh-keyscan -t rsa`; `git:auth <host> [<username> <password>]` writes a chmod-600 `.netrc` (password piped on stdin, removal on empty) with `git:auth-status` to verify the entry. `git:sync`/`git-hook` then clone/fetch private repos without interactive prompts (`GIT_TERMINAL_PROMPT=0`).
+- **Why add to Tengiz:** Git-based deployment is Tengiz's core workflow but private-repo deploys today require manual SSH-key setup. A `tengiz git auth <host> --username u` (netrc, `--password-stdin`) and `tengiz git allow-host <host>` pair gives first-class private-repo support, complements the recorded Git Provider Account Management token flow with a non-OAuth alternative, and prevents MITM host-key warnings during automated deploys. Low effort, high DX value.
+- **Detected:** 2026-08-19
+
+## Config Bundle Export/Import (Tar)
+- **Source:** Dokku
+- **Description:** `config:bundle [--merged]` packages an app's (or global) environment into a single tarfile (`plugins/config/src/subcommands/subcommands.go`), making the full env set portable as one artifact alongside the recorded per-format `config:export` (`exports`/`envfile`/`docker-args`/`json`/etc.).
+- **Why add to Tengiz:** Config Export/Import covers single formats, but a self-contained tar bundle is the natural unit for moving an app between environments/hosts or storing alongside a backup — one file holds the complete env for disaster recovery or staging→prod promotion. Trivial in Go (`archive/tar` + the existing config store). Low effort, medium DR value.
+- **Detected:** 2026-08-19
+
+## Certificate-Domain Coverage Validation
+- **Source:** Dokku
+- **Description:** nginx-vhosts `validate_ssl_domains` converts the certificate's hostnames (CN + SANs, `*` wildcards → `[^.]*`) into a regex and checks them against the app's `VHOST` file, warning when configured domains aren't covered by the installed cert; `certs:report` exposes `--ssl-hostnames`, `--ssl-issuer`, `--ssl-expires-at`, and `--ssl-verified` (openssl verify against the CA bundle) for inspection.
+- **Why add to Tengiz:** Tengiz's Manual SSL and Let's Encrypt roadmap items add certs but no validation that they actually cover the app's domains — a user who adds a domain without re-issuing gets silent browser errors. A deploy/`domain add`-time check that warns "cert covers X, missing Y" plus a `certs:report`-style expiry/issuer/SAN view closes the loop. Low effort (Go `crypto/x509` SAN extraction), high operational value.
+- **Detected:** 2026-08-19
+
+## Web Listener Binding Controls (bind-all-interfaces / static-web-listener)
+- **Source:** Dokku
+- **Description:** The network plugin exposes `bind-all-interfaces` (whether web containers publish ports on all host interfaces vs loopback only — flows through to `-p <container_port>` for web processes) and `static-web-listener` (a fixed `host:port` for the web listener that bypasses per-container IP-file discovery), plus a `tld` property for docker network aliases.
+- **Why add to Tengiz:** Tengiz publishes and proxies app ports uniformly; operators hosting multi-tenant apps or services that need to be reachable only via the proxy (not directly on every interface) currently have no knob. `bind-all-interfaces: false` (default) + optional `static-web-listener` gives per-app control over direct port exposure — a security-relevant distinction for the recorded advanced-network-management roadmap item. Low effort, medium value.
+- **Detected:** 2026-08-19
+
+## Scheduled Task Concurrency Policies & Email Notifications
+- **Source:** Dokku
+- **Description:** The cron plugin renders a host crontab where each task carries a concurrency policy — `allow`/`forbid` (lock check) /`replace` (stop+kill running) via `com.dokku.concurrency-policy` labels on the run container — plus `MAILFROM`/`MAILTO` crontab headers so job output/errors are emailed, with per-task `maintenance.` property overrides and `cron:run --ttl-seconds` one-shot execution.
+- **Why add to Tengiz:** Tengiz's scheduled-tasks roadmap item covers basic cron but not the classic failure mode of overlapping runs (a long job stacking instances) or silent failure. Concurrency policies (forbid/replace) plus MAILTO tie-in to the existing notification system make cron production-safe. Low effort, high operational value.
+- **Detected:** 2026-08-19
+
+## Archive Bomb Protection (Max File Count/Size Limits)
+- **Source:** Dokku
+- **Description:** `plugins/common/archive-functions` gates archive deploys (`git:from-archive`, zip/tar/tgz) with `archive-max-files` (default 10000) and `archive-max-size` (default 1 GiB) properties, rejecting oversized archives via `fn-archive-check-bomb-protection` (security-event logs `rejected_archive_too_large` / `rejected_archive_too_many_files`), validating tar entries pre-extraction (absolute paths, `..` traversal, unsafe symlinks), and canonicalizing extracted symlinks post-extraction.
+- **Why add to Tengiz:** The recorded ZIP-archive item covers zip-slip, but not resource-exhaustion bombs — a malicious or malformed archive with millions of entries can fill disk during extraction, a real single-server risk. Configurable `archive.max_files`/`archive.max_size` in `.tengiz.yaml` plus the pre/post validation pass hardens the same code path. Low effort, high security value.
+- **Detected:** 2026-08-19
+
+## Named Storage Entries with Per-App Attachment Options
+- **Source:** Dokku
+- **Description:** Storage is modeled as globally-unique named entries (`storage:create <name>`, DNS-1123, ≤45 chars) that multiple apps attach to (`storage:mount <app> <name> --container-dir <path>`), each attachment carrying `ContainerPath`, `Phases` (deploy/run), `Subpath`, `Readonly`, `VolumeOptions`, `VolumeChown`, and `ProcessType`; legacy colon-form mounts auto-migrate to `legacy-<hash>` entries, and `storage:exec` runs an interactive command in a throwaway container mounting the entry at `/data`.
+- **Why add to Tengiz:** Tengiz's `volume add/remove/list` is a flat app↔path map; sharing one volume across apps, read-only mounts, deploy-vs-run phase separation, subpaths, and the volume-mounted `storage:exec` (debug a volume without finding its host path) are all missing. Named entries with per-attachment options upgrade volume management to the multi-app model the accessory-service roadmap item implies. Medium effort, medium-high value.
+- **Detected:** 2026-08-19
