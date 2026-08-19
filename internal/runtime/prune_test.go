@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -80,5 +81,12 @@ func TestAppendDetail(t *testing.T) {
 	want := []string{"line one", "line two"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("appendDetail() = %v, want %v", got, want)
+	}
+}
+
+func TestDockerRuntimePruneNoCategories(t *testing.T) {
+	r := &dockerRuntime{}
+	if _, err := r.Prune(context.Background(), types.PruneOptions{}); err == nil {
+		t.Error("Prune() with no categories should return an error")
 	}
 }

@@ -1,7 +1,9 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
+	"os/exec"
 	"regexp"
 	"strings"
 
@@ -78,4 +80,39 @@ func appendDetail(detail []string, out string) []string {
 		}
 	}
 	return detail
+}
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts types.PruneOptions) (types.PruneResult, error) {
+	cats := cleanupCategories(opts)
+	if len(cats) == 0 {
+		return types.PruneResult{}, fmt.Errorf("no cleanup categories selected")
+	}
+
+	var result types.PruneResult
+	var reclaimed []string
+
+	for _, cat := range cats {
+		cmd := exec.CommandContext(ctx, "docker", buildPruneArgs(cat)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return result, fmt.Errorf("docker %s prune: %w\n%s", cat, err, string(out))
+		}
+		result.Categories = append(result.Categories, cat)
+		result.Detail = appendDetail(result.Detail, string(out))
+		if space, ok := extractReclaimedSpace(string(out)); ok {
+			reclaimed = append(reclaimed, space)
+		}
+	}
+
+	result.TotalReclaimed = summarizeReclaimed(reclaimed)
+	return result, nil
+}
+
+func (r *dockerRuntime) DiskUsage(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", buildDiskUsageArgs()...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker system df: %w\n%s", err, string(out))
+	}
+	return string(out), nil
 }
