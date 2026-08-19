@@ -2,8 +2,13 @@ package runtime
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestStubRemoveImage(t *testing.T) {
@@ -154,4 +159,59 @@ func TestDockerPruneNoCategories(t *testing.T) {
 	if res.Total() != 0 {
 		t.Errorf("Prune() total = %d, want 0", res.Total())
 	}
+}
+
+func TestDockerPruneProtectsTengizContainers(t *testing.T) {
+	if !dockerAvailable(t) {
+		return
+	}
+	ctx := context.Background()
+	id := fmt.Sprintf("%d", os.Getpid())
+	img := "tengiz-prune-test-" + id
+	stray := "tengiz-stray-" + id
+	prot := "tengiz-protected-" + id
+
+	build := exec.CommandContext(ctx, "docker", "build", "-q", "-t", img, "-f", "-", ".")
+	build.Stdin = strings.NewReader("FROM scratch\n")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("docker build: %v\n%s", err, out)
+	}
+	t.Cleanup(func() {
+		exec.CommandContext(context.Background(), "docker", "rm", "-f", stray, prot).Run()
+		exec.CommandContext(context.Background(), "docker", "rmi", "-f", img).Run()
+	})
+
+	// Stray container: no tengiz-app label.
+	if out, err := exec.CommandContext(ctx, "docker", "create", "--name", stray, img, "/nonexistent").CombinedOutput(); err != nil {
+		t.Fatalf("create stray: %v\n%s", err, out)
+	}
+	// Tengiz-managed container: has tengiz-app label.
+	if out, err := exec.CommandContext(ctx, "docker", "create", "--name", prot, "--label", "tengiz-app=myapp", img, "/nonexistent").CombinedOutput(); err != nil {
+		t.Fatalf("create protected: %v\n%s", err, out)
+	}
+
+	r := &dockerRuntime{}
+	if _, err := r.Prune(ctx, PruneOptions{Containers: true}); err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+
+	if err := exec.CommandContext(ctx, "docker", "inspect", stray).Run(); err == nil {
+		t.Errorf("stray container %s still exists after prune", stray)
+	}
+	if err := exec.CommandContext(ctx, "docker", "inspect", prot).Run(); err != nil {
+		t.Errorf("protected container %s was removed by prune: %v", prot, err)
+	}
+}
+
+func dockerAvailable(t *testing.T) bool {
+	t.Helper()
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not installed")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := exec.CommandContext(ctx, "docker", "ps").Run(); err != nil {
+		t.Skip("docker daemon not available")
+	}
+	return true
 }
