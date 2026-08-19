@@ -66,9 +66,7 @@ func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName s
 	}
 	defer cleanup()
 
-	args := []string{"build"}
-	args = append(args, b.buildSecretArgs()...)
-	args = append(args, "-t", tag, dir)
+	args := dockerBuildArgs(appName, env, tag, dir, b.buildSecretArgs())
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 
@@ -119,6 +117,15 @@ func (b *Builder) writeBuildSecrets() (func(), error) {
 
 func (b *Builder) buildSecretFilePath(key string) string {
 	return filepath.Join(b.secretDir, key)
+}
+
+func dockerBuildArgs(appName, env, tag, dir string, secretArgs []string) []string {
+	args := []string{"build"}
+	args = append(args, secretArgs...)
+	args = append(args, "--label", fmt.Sprintf("tengiz-app=%s", appName))
+	args = append(args, "--label", fmt.Sprintf("tengiz-env=%s", env))
+	args = append(args, "-t", tag, dir)
+	return args
 }
 
 func (b *Builder) nixpacksAvailable() bool {
