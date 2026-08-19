@@ -57,3 +57,24 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	}
 	return nil
 }
+
+type CleanupOptions struct {
+	Containers bool
+	Images     bool
+	Networks   bool
+	Volumes    bool
+	DryRun     bool
+}
+
+type CleanupReport struct {
+	DryRun            bool
+	ContainersRemoved []string
+	ImagesRemoved     int
+	NetworksRemoved   int
+	VolumesRemoved    int
+	BytesReclaimed    int64
+}
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (*CleanupReport, error) {
+	return &CleanupReport{DryRun: opts.DryRun}, nil
+}
