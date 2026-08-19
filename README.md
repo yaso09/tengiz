@@ -20,6 +20,7 @@
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
+- **Docker housekeeping** — `tengiz cleanup` prunes stopped containers, dangling images, unused networks, volumes, and build cache with label-based safety for Tengiz-managed apps.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
 
 ## Prerequisites
@@ -179,6 +180,24 @@ Show build logs from previous deployments.
 | `deployment-id` | Specific deployment ID to view (optional) |
 
 Without a deployment ID, lists all available build log IDs. With a deployment ID, shows the full build output. Use `--tail N` to show only the last N lines.
+
+### `tengiz cleanup`
+
+Clean up Docker resources to free disk space on the host.
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Prune stopped non-Tengiz containers |
+| `--images` | Prune dangling images |
+| `--networks` | Prune unused networks |
+| `--volumes` | Prune unused volumes (opt-in — may remove volumes used by other tools) |
+| `--build-cache` | Prune Docker build cache |
+| `--all` | Enable all categories (containers, images, networks, volumes, build cache) |
+| `--dry-run` | Print what would be pruned without removing anything |
+
+By default (no category flags) prunes **containers, images, and networks**.
+Tengiz-managed containers (labeled `tengiz-app=*`) are always protected and never removed.
+When any category flag is set, only the explicitly requested categories run.
 
 ### `tengiz run <app> [--] <command> [args...]`
 

@@ -65,6 +65,7 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
@@ -86,6 +87,13 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("all", false, "prune all categories (containers, images, networks, volumes, build cache)")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped non-Tengiz containers")
+	cleanupCmd.Flags().Bool("images", false, "prune dangling images")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes (opt-in, may remove volumes used by other tools)")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune Docker build cache")
+	cleanupCmd.Flags().Bool("dry-run", false, "print what would be pruned without removing anything")
 }
 
 var rootCmd = &cobra.Command{
@@ -1159,6 +1167,90 @@ Examples:
 
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Clean up Docker resources (containers, images, networks, volumes, build cache)",
+	Long: `Remove Docker waste to free disk space on the host.
+
+By default prunes stopped non-Tengiz containers, dangling images, and unused
+networks. Containers managed by Tengiz (labeled tengiz-app=*) are always
+protected and never removed. Volumes and build cache are opt-in.
+
+When any category flag is set, only the explicitly requested categories run.
+Use --dry-run to print the actions without removing anything.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts, err := resolvePruneOptions(cmd)
+		if err != nil {
+			return err
+		}
+
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		if dryRun {
+			for _, cat := range opts.Enabled() {
+				fmt.Printf("[tengiz] would prune %s\n", cat)
+			}
+			return nil
+		}
+
+		res, err := rt.Prune(context.Background(), opts)
+		if err != nil {
+			return err
+		}
+
+		for _, cat := range opts.Enabled() {
+			fmt.Printf("[tengiz] pruned %s (reclaimed %s)\n", cat, humanBytes(res.Reclaimed(cat)))
+		}
+		fmt.Printf("[tengiz] cleanup complete: %s reclaimed\n", humanBytes(res.Total()))
+		return nil
+	},
+}
+
+func resolvePruneOptions(cmd *cobra.Command) (runtime.PruneOptions, error) {
+	all, _ := cmd.Flags().GetBool("all")
+	containers, _ := cmd.Flags().GetBool("containers")
+	images, _ := cmd.Flags().GetBool("images")
+	networks, _ := cmd.Flags().GetBool("networks")
+	volumes, _ := cmd.Flags().GetBool("volumes")
+	buildCache, _ := cmd.Flags().GetBool("build-cache")
+
+	opts := runtime.PruneOptions{
+		Containers: containers || all,
+		Images:     images || all,
+		Networks:   networks || all,
+		Volumes:    volumes || all,
+		BuildCache: buildCache || all,
+	}
+
+	// No category flag set: default to the safe categories.
+	explicit := containers || images || networks || volumes || buildCache || all
+	if !explicit {
+		opts.Containers = true
+		opts.Images = true
+		opts.Networks = true
+	}
+	return opts, nil
+}
+
+func humanBytes(n uint64) string {
+	const unit = 1000
+	if n < unit {
+		return fmt.Sprintf("%dB", n)
+	}
+	div, exp := uint64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "kMGTPE"[exp])
 }
 
 var gitCmd = &cobra.Command{
