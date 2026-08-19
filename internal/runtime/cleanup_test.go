@@ -44,3 +44,25 @@ func TestParseReclaimed(t *testing.T) {
 		})
 	}
 }
+
+func TestStubPrune(t *testing.T) {
+	m := NewStub()
+	res, err := m.Prune(context.Background(), PruneOptions{All: true, Volumes: true})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if res.ReclaimedBytes != 0 || res.Output != "" {
+		t.Errorf("unexpected result: %+v", res)
+	}
+}
+
+func TestStubSystemDF(t *testing.T) {
+	m := NewStub()
+	out, err := m.SystemDF(context.Background())
+	if err != nil {
+		t.Fatalf("SystemDF() error = %v", err)
+	}
+	if out != "" {
+		t.Errorf("unexpected output: %q", out)
+	}
+}

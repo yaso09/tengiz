@@ -86,3 +86,29 @@ func parseReclaimed(output string) int64 {
 	}
 	return int64(value * mult)
 }
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
+	args := []string{"system", "prune", "--filter", "label!=tengiz-app", "-f"}
+	if opts.All {
+		args = append(args, "-a")
+	}
+	if opts.Volumes {
+		args = append(args, "--volumes")
+	}
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return PruneResult{}, fmt.Errorf("docker system prune: %w\n%s", err, string(out))
+	}
+	output := string(out)
+	return PruneResult{ReclaimedBytes: parseReclaimed(output), Output: output}, nil
+}
+
+func (r *dockerRuntime) SystemDF(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "system", "df")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker system df: %w\n%s", err, string(out))
+	}
+	return string(out), nil
+}
