@@ -68,6 +68,7 @@ func (b *Builder) buildWithDockerfile(ctx context.Context, dir string, appName s
 
 	args := []string{"build"}
 	args = append(args, b.buildSecretArgs()...)
+	args = append(args, buildLabelArgs(appName, env)...)
 	args = append(args, "-t", tag, dir)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
@@ -96,6 +97,16 @@ func (b *Builder) buildSecretArgs() []string {
 		args = append(args, "--secret", fmt.Sprintf("id=%s,src=%s", k, b.buildSecretFilePath(k)))
 	}
 	return args
+}
+
+func buildLabelArgs(appName, env string) []string {
+	if env == "" {
+		env = "production"
+	}
+	return []string{
+		"--label", fmt.Sprintf("tengiz-app=%s", appName),
+		"--label", fmt.Sprintf("tengiz-env=%s", env),
+	}
 }
 
 func (b *Builder) writeBuildSecrets() (func(), error) {
@@ -137,6 +148,7 @@ func (b *Builder) buildWithNixpacks(ctx context.Context, dir, appName, env, depl
 	tag := fmt.Sprintf("tengiz-apps/%s:%s-%s", appName, env, deploymentID)
 
 	args := []string{"build", dir, "--name", tag}
+	args = append(args, buildLabelArgs(appName, env)...)
 	if b.nixpacksCfg != nil {
 		if len(b.nixpacksCfg.Packages) > 0 {
 			args = append(args, "--pkgs", strings.Join(b.nixpacksCfg.Packages, ","))
