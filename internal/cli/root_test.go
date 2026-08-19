@@ -114,6 +114,75 @@ func TestMockRTForDeployImplementsManager(t *testing.T) {
 	}
 }
 
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupFlagsParsed(t *testing.T) {
+	var gotAll, gotVolumes, gotForce, gotDryRun bool
+	originalRunE := cleanupCmd.RunE
+	defer func() { cleanupCmd.RunE = originalRunE }()
+	cleanupCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		gotAll, _ = cmd.Flags().GetBool("all")
+		gotVolumes, _ = cmd.Flags().GetBool("volumes")
+		gotForce, _ = cmd.Flags().GetBool("force")
+		gotDryRun, _ = cmd.Flags().GetBool("dry-run")
+		return nil
+	}
+
+	rootCmd.SetArgs([]string{"cleanup", "--all", "--volumes", "--force", "--dry-run"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !gotAll || !gotVolumes || !gotForce || !gotDryRun {
+		t.Errorf("flags not parsed: all=%v volumes=%v force=%v dry-run=%v", gotAll, gotVolumes, gotForce, gotDryRun)
+	}
+}
+
+func TestConfirm(t *testing.T) {
+	cases := []struct {
+		input string
+		want  bool
+	}{
+		{"y\n", true},
+		{"Y\n", true},
+		{"yes\n", true},
+		{"n\n", false},
+		{"\n", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		got := confirm("Continue? [y/N] ", strings.NewReader(tc.input))
+		if got != tc.want {
+			t.Errorf("confirm(%q) = %v, want %v", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestHumanBytes(t *testing.T) {
+	cases := []struct {
+		in   int64
+		want string
+	}{
+		{0, "0B"},
+		{999, "999B"},
+		{1500, "1.5KB"},
+		{3500000, "3.5MB"},
+		{1250000000, "1.3GB"},
+	}
+	for _, tc := range cases {
+		if got := humanBytes(tc.in); got != tc.want {
+			t.Errorf("humanBytes(%d) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestDeployZeroDowntimeCreatesVersionedContainer(t *testing.T) {
 	var m interface{} = &mockRTForDeploy{}
 	if m == nil {
