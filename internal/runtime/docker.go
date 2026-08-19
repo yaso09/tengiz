@@ -85,6 +85,10 @@ func NewDocker() (Manager, error) {
 	return &dockerRuntime{}, nil
 }
 
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts types.CleanupOptions) (types.CleanupReport, error) {
+	return types.CleanupReport{}, nil
+}
+
 func (r *dockerRuntime) Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error {
 	internalPort := cfg.Port
 	if internalPort == 0 {
