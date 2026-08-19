@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -73,6 +74,9 @@ func init() {
 	notificationCmd.AddCommand(notificationSetChannelCmd)
 	notificationCmd.AddCommand(notificationShowCmd)
 	rootCmd.AddCommand(notificationCmd)
+	cleanupCmd.Flags().Bool("force", false, "skip confirmation prompt")
+	cleanupCmd.Flags().Int("keep", 5, "number of images to retain per app")
+	rootCmd.AddCommand(cleanupCmd)
 	deployCmd.Flags().String("env", "production", "deployment environment (e.g. production, staging, dev)")
 	runCmd.Flags().BoolP("interactive", "i", false, "enable interactive TTY mode")
 	runCmd.Flags().StringArrayP("env", "e", nil, "set additional env vars (can be repeated: -e KEY=VALUE)")
@@ -1087,6 +1091,65 @@ Use --tail N to show only the last N lines of the latest build log.`,
 		}
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources to reclaim disk space",
+	Long: `Prunes stopped containers, dangling images, unused networks, and unused volumes.
+Tengiz-managed containers are protected via labels. Per-app image retention
+keeps the last N images for rollback (--keep, default 5).
+
+Use --force to skip the confirmation prompt.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		force, _ := cmd.Flags().GetBool("force")
+		keep, _ := cmd.Flags().GetInt("keep")
+
+		reader := bufio.NewReader(os.Stdin)
+		input, _ := reader.ReadString('\n')
+		if !confirmCleanup(force, input) {
+			fmt.Println("[tengiz] cleanup aborted")
+			return nil
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		store := config.NewStoreWithEnv(dataDir, env)
+		report, err := runCleanup(cmd.Context(), rt, store, keep)
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+
+		fmt.Printf("[tengiz] removed: %d containers, %d images, %d networks, %d volumes\n",
+			report.Containers, report.Images, report.Networks, report.Volumes)
+		fmt.Printf("[tengiz] reclaimed: %s\n", report.Reclaimed)
+		return nil
+	},
+}
+
+func runCleanup(ctx context.Context, rt runtime.Manager, store *config.Store, keep int) (runtime.PruneReport, error) {
+	apps, err := store.ListApps()
+	if err != nil {
+		return runtime.PruneReport{}, fmt.Errorf("list apps: %w", err)
+	}
+	for _, app := range apps {
+		if err := rt.KeepLastNImages(ctx, app.Name, keep); err != nil {
+			log.Printf("[tengiz] warning: image retention for %s: %v", app.Name, err)
+		}
+	}
+	return rt.Prune(ctx)
+}
+
+func confirmCleanup(force bool, input string) bool {
+	if force {
+		return true
+	}
+	input = strings.TrimSpace(strings.ToLower(input))
+	return input == "y" || input == "yes"
 }
 
 var runCmd = &cobra.Command{
