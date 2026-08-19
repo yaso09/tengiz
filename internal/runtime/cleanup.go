@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -56,4 +58,31 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 		}
 	}
 	return nil
+}
+
+var reclaimPattern = regexp.MustCompile(`(?i)total reclaimed space:\s*([0-9.]+)\s*(b|kb|mb|gb|tb)`)
+
+func parseReclaimed(output string) int64 {
+	m := reclaimPattern.FindStringSubmatch(output)
+	if len(m) < 3 {
+		return 0
+	}
+	value, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		return 0
+	}
+	var mult float64
+	switch strings.ToUpper(m[2]) {
+	case "B":
+		mult = 1
+	case "KB":
+		mult = 1e3
+	case "MB":
+		mult = 1e6
+	case "GB":
+		mult = 1e9
+	case "TB":
+		mult = 1e12
+	}
+	return int64(value * mult)
 }
