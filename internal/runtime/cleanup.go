@@ -196,3 +196,35 @@ func parseSize(s string) (uint64, error) {
 	}
 	return uint64(val * float64(mult)), nil
 }
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
+	var res PruneResult
+	for _, cat := range opts.Enabled() {
+		args, err := pruneCommand(cat)
+		if err != nil {
+			return res, err
+		}
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return res, fmt.Errorf("docker %s prune: %w\n%s", cat, err, string(out))
+		}
+		reclaimed, err := parseReclaimedBytes(string(out))
+		if err != nil {
+			return res, err
+		}
+		switch cat {
+		case PruneContainers:
+			res.ContainersReclaimed = reclaimed
+		case PruneImages:
+			res.ImagesReclaimed = reclaimed
+		case PruneNetworks:
+			res.NetworksReclaimed = reclaimed
+		case PruneVolumes:
+			res.VolumesReclaimed = reclaimed
+		case PruneBuildCache:
+			res.BuildCacheReclaimed = reclaimed
+		}
+	}
+	return res, nil
+}

@@ -133,3 +133,25 @@ func TestPruneResultTotal(t *testing.T) {
 		t.Errorf("Reclaimed(bogus) = %d, want 0", got)
 	}
 }
+
+func TestStubPrune(t *testing.T) {
+	m := NewStub()
+	res, err := m.Prune(context.Background(), PruneOptions{Containers: true, Volumes: true})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if res.Total() != 0 {
+		t.Errorf("Prune() total = %d, want 0", res.Total())
+	}
+}
+
+func TestDockerPruneNoCategories(t *testing.T) {
+	r := &dockerRuntime{}
+	res, err := r.Prune(context.Background(), PruneOptions{})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if res.Total() != 0 {
+		t.Errorf("Prune() total = %d, want 0", res.Total())
+	}
+}
