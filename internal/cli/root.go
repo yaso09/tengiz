@@ -67,6 +67,7 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
 	notificationCmd.AddCommand(notificationDisableCmd)
 	notificationCmd.AddCommand(notificationConfigCmd)
@@ -86,6 +87,13 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("dry-run", false, "preview what would be removed without deleting anything")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers not managed by Tengiz")
+	cleanupCmd.Flags().Bool("images", false, "prune dangling images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("cache", false, "prune Docker build cache")
+	cleanupCmd.Flags().Duration("interval", 0, "run cleanup periodically (e.g. 6h) until interrupted")
 }
 
 var rootCmd = &cobra.Command{
