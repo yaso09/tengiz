@@ -248,6 +248,46 @@ func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }
 
+func TestDockerBuildArgsIncludeManagedLabel(t *testing.T) {
+	got := dockerBuildArgs([]string{"--secret", "id=foo,src=/tmp/foo"}, "tengiz-apps/testapp:v1", ".")
+	found := false
+	for _, a := range got {
+		if strings.HasPrefix(a, types.ManagedImageLabel+"=") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("dockerBuildArgs() missing managed label, got %v", got)
+	}
+	if got[len(got)-1] != "." {
+		t.Errorf("expected dir to be the last arg, got %v", got)
+	}
+}
+
+func TestNixpacksBuildArgsIncludeManagedLabel(t *testing.T) {
+	got := nixpacksBuildArgs("tengiz-apps/testapp:v1", ".", nil)
+	found := false
+	for _, a := range got {
+		if strings.HasPrefix(a, types.ManagedImageLabel+"=") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("nixpacksBuildArgs() missing managed label, got %v", got)
+	}
+	if got[0] != "build" {
+		t.Errorf("expected first arg 'build', got %v", got)
+	}
+}
+
+func TestNixpacksBuildArgsExtraAppended(t *testing.T) {
+	got := nixpacksBuildArgs("tag", ".", []string{"--pkgs", "curl"})
+	last := got[len(got)-1]
+	if last != "curl" {
+		t.Errorf("expected extra args appended, got %v", got)
+	}
+}
+
 func searchString(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
