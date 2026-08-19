@@ -1660,3 +1660,247 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** `LocalFileVolume` is a first-class file/directory storage attached to an app: `fs_path` + `mount_path`, with `content` **encrypted at rest**, optional `chown`/`chmod`, and two modes — `is_host_file` (user-controlled bind mount, never touched) vs Coolify-managed (content written to the server via SSH on save, read back into the DB with `[file too large to display]`/`[binary file]` placeholders for files >5MB or binary). Paths are shell-injection-validated. Relative paths resolve against the app workdir. Only managed directory storages are eligible for volume backups.
 - **Why add to Tengiz:** Apps commonly need a writable config file/directory shipped alongside the container: `nginx.conf`, `custom CA bundle`, `.npmrc`, upload directories. Today users must `docker cp` or bake files into the image. A `tengiz storage file myapp --path nginx.conf --content "..." --mount /etc/nginx/nginx.conf --chmod 644` command lets the control plane manage per-app config files — encrypted at rest, restored on redeploy, validated against path injection. This is a distinct complement to Persistent Storage (#7, volumes) and Blob Storage (#84, user-facing): it's operator-managed config/data. Implementation: `content` written via `base64` + `mkdir -p` + `tee` using the existing exec layer, stored in `~/.tengiz/storage/<app>/`, chown/chmod applied. Low-medium effort, closes a real "how do I inject a config file" gap.
 - **Detected:** 2026-08-19
+
+---
+
+# Dokploy Analyzi (2026-08-19)
+
+## DNS Provider Auto-Provisioning (Cloudflare/Route53 Record Management)
+- **Source:** Dokploy
+- **Description:** First-class DNS provider accounts (`dns-provider.ts`, secret-masked with `********` and merged config so credentials survive updates) with zone listing and full record CRUD: `listZones`, `listRecords`, `upsertRecord` (auto-create-or-update A/CNAME), `testConnection`, delete. Cloudflare adapter (`utils/dns/cloudflare.ts`) finds an existing record by type+name then PUT or POST; Route53 adapter (`utils/dns/route53.ts`) uses UPSERT batches.
+- **Why add to Tengiz:** Roadmap records DNS *validation* (checking records point at the host) but not auto-provisioning. This closes the final mile of zero-config domains: `tengiz domain add myapp.com --provider cloudflare --zone X` creates the A/CNAME record automatically and enables unattended, scripted domain onboarding. Pure Go `net/http` for Cloudflare, SigV4/AWS SDK for Route53. High value, medium effort.
+- **Detected:** 2026-08-19
+
+## Automatic sslip.io Domain Generation
+- **Source:** Dokploy
+- **Description:** `generateRandomDomain()` (`templates/index.ts:33-51`) produces an instant working URL from the server's public IP: `{appName-6hex}-{ip-with-dashes}.sslip.io`, with 40-char label truncation for app names. Preview deployments use `generateWildcardDomain()` substituting the IP into `*.sslip.io`. No DNS configuration needed — sslip.io resolves any subdomain to the embedded IP.
+- **Why add to Tengiz:** A Vercel-like killer DX for a CLI PaaS: `tengiz deploy` could print `https://myapp-a1b2c3-1-2-3-4.sslip.io` immediately with zero DNS setup, and preview deployments get working URLs without wildcard DNS. sslip.io also supports Let's Encrypt HTTP-01 for the concrete hostname, pairing with the auto-SSL roadmap item. Pure Go string work, very low effort.
+- **Detected:** 2026-08-19
+
+## Per-Domain Routing & TLS Matrix (Multiple Domains per App, Independent Path/Cert Config)
+- **Source:** Dokploy
+- **Description:** Each domain attached to an app is independently configurable (`db/schema/domain.ts`, `utils/traefik/domain.ts` `createRouterConfig`): its own path-prefix rule (`Host() && PathPrefix()`), optional path stripping (`stripPath`), optional internal-path prefixing (`internalPath`, e.g. serve `/api` from `/backend`), its own entrypoint, and its own certificate strategy (`certificateType`: letsencrypt / none / custom) — so one domain uses Let's Encrypt while another on the same app uses a custom cert or no TLS.
+- **Why add to Tengiz:** Custom Domain Management (implemented) is app-granular only. Per-domain semantics enable `api.example.com` → `/backend` path rewrite or a private no-TLS domain beside a public Let's-Encrypt domain on the same app. For a host-routing Go proxy this maps to `stripPrefix`/`addPrefix` route rules. Medium effort, medium-high value.
+- **Detected:** 2026-08-19
+
+## Domain Enable/Disable Toggle
+- **Source:** Dokploy
+- **Description:** Domains have an `enabled` flag (`db/schema/domain.ts`); a disabled domain is removed from routing but kept in the database with all its config (TLS type, redirects, paths) intact. Re-enabling restores the exact previous configuration. `manageDomain` (`utils/traefik/domain.ts:26-29`) simply stops emitting the router.
+- **Why add to Tengiz:** A `tengiz domain disable myapp.com` command is a safe way to take an endpoint offline (maintenance, abuse response, DNS cutover) while preserving full config — and gives the future auto-SSL re-issuance logic a clean "hold" state. Trivial addition to the existing domain store. Low effort, low-medium value.
+- **Detected:** 2026-08-19
+
+## IDN Punycode Conversion + RFC 1123 Hostname & Git Branch Validation
+- **Source:** Dokploy
+- **Description:** Two input-validation layers. Hostnames are validated against RFC 1123 (`utils/hostname-validation.ts`, labels of letters/digits/hyphens, no underscores because Let's Encrypt refuses them, ≤63 chars/label) and IDN/Unicode hosts are converted to punycode before cert issuance (`toPunycode` in `utils/traefik/domain.ts`). Git branch names are restricted to `[a-zA-Z0-9._\-/#]+` (`utils/git-branch-validation.ts`) specifically to reject shell metacharacters that enable command injection when the branch is interpolated into clone commands.
+- **Why add to Tengiz:** Tengiz builds shell strings from user input (branch names in `gitdeploy`, domain names in `domain add`/proxy) exactly like Dokploy. Copying these two regexes is near-zero-cost injection prevention and cert-issue prevention, and enables internationalized domains. Low effort, high correctness/security value — a prerequisite for the auto-SSL roadmap item.
+- **Detected:** 2026-08-19
+
+## Port Conflict Detection Before Deploy
+- **Source:** Dokploy
+- **Description:** `checkPortInUse()` (`services/settings.ts:411-452`) checks two layers before allocating a port: Docker containers currently publishing it (via `docker port`, reporting the conflicting container name) and bare host-level services, detected by spawning an ephemeral `--net=host busybox` container running `nc -z`. Returns a human-readable conflict source.
+- **Why add to Tengiz:** Tengiz allocates ports from a persisted 9000-9999 range but never verifies a port isn't already bound by a non-Tengiz container or host daemon (a real hazard after reboot/restore). A pre-deploy check in `tengiz deploy` (using the existing `os/exec` Docker pattern) turns silent routing failures into clear pre-deploy errors. Low effort, high reliability value.
+- **Detected:** 2026-08-19
+
+## SSO/OIDC Forward-Auth for App Domains (oauth2-proxy Pattern)
+- **Source:** Dokploy
+- **Description:** Per-domain forward-auth protection (`services/proprietary/forward-auth.ts`, `utils/traefik/forward-auth.ts`, `setup/forward-auth-setup.ts`): deploys an `oauth2-proxy` sidecar and central auth router; any app domain with `forwardAuthEnabled` gets a middleware chain that authenticates via OIDC, injects identity headers (`X-Auth-Request-User/Email`, `Authorization`) into the upstream, and rewrites 401-403 → 302 to a branded login page. Cookies shared across subdomains of the derived base domain.
+- **Why add to Tengiz:** Roadmap's "Built-in Authentication Service" (Juno) is a datastore-level auth-for-apps feature and "OIDC/SSO" covers *platform* login — neither protects a deployed app's public domain. Forward-auth lets `tengiz domain protect myapp.example.com --oidc` gate staging/internal apps with Google/GitHub. Fully implementable in Go as a proxy middleware (auth subrequest + 302 rewrite), no Traefik needed. High value for enterprise/staging, medium effort.
+- **Detected:** 2026-08-19
+
+## Built-in Proxy Access Log Analytics (Per-App Traffic Visibility)
+- **Source:** Dokploy
+- **Description:** First-party request analytics derived from the reverse proxy's own access log (`utils/access-log/`): structured `LogEntry` records (client addr, downstream/upstream status, duration, request host, user-agent), hourly request-volume aggregates, status-code-range breakdowns, search-by-host, paginated raw log views. A scheduled cleanup job keeps the log bounded (`tail -n 1000` + reopen via `kill -USR1 1`).
+- **Why add to Tengiz:** Roadmap #125 (GoAccess) is an *optional external container*; this is a built-in, no-extra-container alternative. Tengiz owns its Go proxy, so it can emit structured access logs natively and aggregate them (`tengiz analytics`, `tengiz traffic <app>`) — giving request counts, error rates, and slow-request detection with stdlib only. Low-medium effort, high value; the tail-and-reopen pattern is directly portable.
+- **Detected:** 2026-08-19
+
+## Proxy-Level Response Compression (gzip Middleware)
+- **Source:** Dokploy
+- **Description:** Traefik `CompressMiddleware` (`utils/traefik/file-types.ts:583`) gzip-compresses responses above a configurable `minResponseBodyBytes` while excluding configured content types (`excludedContentTypes`). Applied per-router in the proxy surface.
+- **Why add to Tengiz:** Roadmap's "Build Precompression" is build-time static-asset compression; proxy-level compression is distinct and covers dynamically generated responses (API JSON, SSR HTML). A `compress: true` option in Tengiz's per-app proxy config (Go stdlib `compress/gzip` response-writer wrapper, skipping already-encoded types) gives instant bandwidth savings for all apps with no code changes. Low effort, medium value.
+- **Detected:** 2026-08-19
+
+## Sticky Sessions & Load Balancer Health Checks (Multi-Replica Readiness)
+- **Source:** Dokploy
+- **Description:** The proxy load-balancer model supports cookie-based session affinity (`HttpLoadBalancerService.sticky`, `utils/traefik/file-types.ts:343`) and active health checks (`healthCheck`, line 362: method/path/interval/timeout) that remove unhealthy servers from rotation and re-add them on recovery.
+- **Why add to Tengiz:** Process Scaling is on the roadmap but session affinity is not. When Tengiz scales an app to multiple containers, stateful apps (socket.io, upload endpoints, auth sessions) need sticky sessions — a cookie set on first request — and the proxy should probe replica health rather than routing into a dead one. Natural additions to Tengiz's `httputil.ReverseProxy` when replicas arrive. Lower priority while default deploys are single-container scale-to-zero, medium effort.
+- **Detected:** 2026-08-19
+
+## Advanced Docker Network Management (Internal-Only Networks, IPAM, MTU)
+- **Source:** Dokploy
+- **Description:** Full Docker network CRUD beyond basic creation (`services/network.ts`): `Internal` (no external egress — network isolation for DBs), `Attachable`, IPv4/IPv6 toggles, `com.docker.network.driver.mtu`, IPAM `Subnet`/`Gateway`/`IPRange`, importing existing Docker networks into the platform, and attaching an app to multiple networks while optionally detaching from the default platform network.
+- **Why add to Tengiz:** Roadmap's "Custom Docker Network" covers basic creation only. Internal-only networks let a scale-to-zero PaaS put an app's database on a network unreachable from the public proxy at all; subnet/MTU control makes multi-service setups production-usable. Maps to thin `docker network create/connect` wrappers via `os/exec`. Low-medium effort.
+- **Detected:** 2026-08-19
+
+## Custom Wildcard Preview Base Domain & Preview Limits
+- **Source:** Dokploy
+- **Description:** Preview deployments use a configurable wildcard base domain (`application.previewWildcard`, default `*.sslip.io`, `services/preview-deployment.ts:138`; `generateWildcardDomain` substitutes appName+IP) plus per-app caps: `previewLimit` (default 3 concurrent previews), `previewPort`, `previewHttps`, `previewPath`, and an optional collaborator-permission requirement.
+- **Why add to Tengiz:** Tengiz's `preview` package has a fixed URL scheme and no limits. Letting users set `preview.wildcard: "*.preview.example.com"` in `.tengiz.yaml` (with wildcard TLS via the recorded DNS-challenge ACME path) and `preview.limit` controls sprawl of PR environments — both small config additions to the existing preview manager. Low effort, medium value.
+- **Detected:** 2026-08-19
+
+## MongoDB Single-Node Replica Set Mode
+- **Source:** Dokploy
+- **Description:** A `replicaSets` toggle (`utils/databases/mongo.ts:39-83`, schema `db/schema/mongo.ts:94`) generates a custom startup script: starts `mongod --replSet rs0`, polls with `mongosh ping`, runs `rs.initiate()` for a single-member set, waits for primary, and only then creates the root user.
+- **Why add to Tengiz:** A single-node replica set unlocks MongoDB **transactions**, **change streams**, and production semantics on a single Docker host — required for dev/staging parity with Atlas. The roadmap covers managed DB provisioning but not replica-set mode. Directly portable to Tengiz's Docker-exec model as a generated entrypoint script. Low-medium effort, medium value.
+- **Detected:** 2026-08-19
+
+## LibSQL / Turso-Compatible Managed Database Support
+- **Source:** Dokploy
+- **Description:** A full DB type built on `ghcr.io/tursodatabase/libsql-server` (`services/libsql.ts`, `utils/databases/libsql.ts`, dedicated backup/restore): HTTP/gRPC/admin ports (8080/5001/5000), `SQLD_NODE=primary|replica` modes (replicas point at a `SQLD_PRIMARY_URL`), `--enable-namespaces` for multi-tenant DBs, HTTP basic auth, and file-level backup/restore via `tar` of `/var/lib/sqld`.
+- **Why add to Tengiz:** The only SQLite-family managed DB that scales beyond one process; Turso compatibility lets users migrate existing edge databases in. Lightweight and file-based — a perfect fit for a CLI-first single-server PaaS (trivially backup-able, low resource footprint). Roadmap lists 8 DB types but not LibSQL/Turso. Low-medium effort, medium value.
+- **Detected:** 2026-08-19
+
+## Database Rebuild / Reset-to-Empty
+- **Source:** Dokploy
+- **Description:** `rebuildDatabase()` (`utils/databases/rebuild.ts`) destroys the container **and its data volumes** (`docker volume rm --force` for every mount), waits ~6s, then provisions a fresh instance with the same name/password config. Distinct from a restart or redeploy.
+- **Why add to Tengiz:** `tengiz db reset <app>` — "give me a clean database" — is the #1 repeated operation in CI, staging, and local dev, and gives a safe escape hatch for corrupted data without manual `docker rm`/`volume rm` spelunking. Roadmap #55 is bulk *app* rebuild, not DB reset. Low effort, high dev-value.
+- **Detected:** 2026-08-19
+
+## Volume & Container File Management (Browse/Edit/Upload)
+- **Source:** Dokploy
+- **Description:** File-system level access to both named volumes and live containers (`services/docker-volume.ts`: `listVolumeFiles`/`readVolumeFile`/`writeVolumeFile`/`deleteVolumeFile` via `docker run --rm -v <vol>:/__volume busybox`; `services/docker.ts`: `listContainerFiles`/`readContainerFile`/`writeContainerFile`/`deleteContainerFile`/`uploadFileToContainer` via base64 + `docker cp`, 512KB upload limit) with shell-metacharacter path validation.
+- **Why add to Tengiz:** Roadmap #102 covers volume create/list/rm only, not file access. `tengiz volume ls <app> /data`, `tengiz volume read <app> /data/config.json`, and `tengiz app upload <app> ./file /app/path` become the primary way to inspect DB state, read SQLite files, fix configs, and hot-patch files without SSH or manual `docker exec`. Low-medium effort, high debug value.
+- **Detected:** 2026-08-19
+
+## Injection-Proof Database Dump/Restore Command Construction
+- **Source:** Dokploy
+- **Description:** User-controlled values (DB name, user, password) are never interpolated into command text. `utils/backups/utils.ts:94-131` and `utils/restore/utils.ts:7-38` pass them as `docker exec -e VAR=<shell-quoted>` env vars referenced via `$VAR` inside a single-quoted inner shell (`bash -c 'set -o pipefail; pg_dump ... -U "$DB_USER" ...'`), with explicit comments documenting the pattern.
+- **Why add to Tengiz:** Tengiz builds shell commands via `os/exec` too, and the roadmap already promises pg_dump/mysqldump backups. Adopting this "env-var pass-through + single-quote + pipefail" convention from day one eliminates a whole class of command-injection bugs with DB names/passwords — a security invariant worth codifying in `runtime`/`backup`. Low effort, high security value.
+- **Detected:** 2026-08-19
+
+## Type-Specific Database Restore Hardening
+- **Source:** Dokploy
+- **Description:** Correctness details that make restores safe and predictable (`utils/restore/utils.ts`): MySQL/MariaDB dumps taken with `--databases` have their `USE`/`CREATE DATABASE` statements stripped (`stripDatabaseSwitchCommand`) so the restore goes into the user-selected DB name instead of silently recreating the original; Postgres restores use `pg_restore -O --clean --if-exists` (drop existing objects, skip ownership); Mongo restores drop the target DB first (`mongorestore --archive --drop`).
+- **Why add to Tengiz:** Roadmap #184 covers backup import generically, but these are the subtle semantics that prevent the classic "restored into the wrong DB" bug — especially restoring a prod dump into a differently-named staging DB. Tengiz's restore implementation should adopt these exact behaviors. Low effort, high data-integrity value.
+- **Detected:** 2026-08-19
+
+## Volume Restore Safety Checks
+- **Source:** Dokploy
+- **Description:** `checkVolumeCommand()` (`utils/volume-backups/restore.ts:49-103`) before restoring: if the volume exists, query **all** containers (running and stopped) via `docker ps -a --filter volume=<name>`; if in use, print each user (type/status) and abort. If it exists but is unused, auto-remove it (`docker volume rm --force`) and proceed. Restore uses a helper container (`docker run --rm -v <vol>:/volume_data ... tar xvf`).
+- **Why add to Tengiz:** The restore-side complement to the recorded Safe Volume Deletion — it prevents "restored over a live database/state". For a scale-to-zero PaaS where containers stop/start constantly, detecting in-use volumes via `docker ps -a` (not just running ones) is essential since a stopped app's volume is still live data. Low effort, high safety value.
+- **Detected:** 2026-08-19
+
+## Backup Run History with Per-Run Logs & Record Retention
+- **Source:** Dokploy
+- **Description:** Every scheduled backup run creates a deployment record (`title`, `status`, `startedAt/finishedAt`, `errorMessage`, `logPath`) and appends a timestamped log file at `LOGS_PATH/<appName>/<backupAppName>-<datetime>.log` (`services/deployment.ts` `createDeploymentBackup`/`createDeploymentVolumeBackup`). When more than 10 records exist per backup, the oldest records are deleted together with their log files (`removeLastTenDeployments`).
+- **Why add to Tengiz:** Turns backups into an auditable, inspectable operation: `tengiz backup history <app>` and `tengiz backup logs <app> <run-id>` give per-run status, failure messages, and full execution logs. Roadmap #94 Build Tracking covers deploys; backup-specific run history + log retention is a distinct, high-trust record ("did tonight's backup actually succeed?"). Low effort, high ops value.
+- **Detected:** 2026-08-19
+
+## Backup File Discovery from S3 Destinations
+- **Source:** Dokploy
+- **Description:** Listing restorable artifacts from S3 with filter-based discovery: `keepLatestNBackups` (`utils/backups/index.ts:127-158`) uses `rclone lsf` with `--include "*.{sql.gz,bson.gz}"` / `--include "<volname>-*.tar"` scoped to app/prefix paths; `cleanupOldVolumeBackups` in `utils/volume-backups/utils.ts` follows the same pattern.
+- **Why add to Tengiz:** A CLI PaaS needs `tengiz backup list --destination <name> --app <app>` to enumerate restorable artifacts (sql.gz/bson.gz/tar) from S3 before a restore. The `--include` filtering protects unrelated objects in shared buckets — a real-world footgun when users point backups at a bucket holding other data. Low effort, complements the recorded restore/retention features.
+- **Detected:** 2026-08-19
+
+## Image-Version-Aware Database Data Mount Paths
+- **Source:** Dokploy
+- **Description:** `getMountPath(dockerImage)` in `services/postgres.ts:18-29` parses `postgres:(\d+)` and returns `/var/lib/postgresql/{version}/docker` for PG 18+ vs `/var/lib/postgresql/data` for older images — because PostgreSQL 18 changed its default `PGDATA` location.
+- **Why add to Tengiz:** A subtle but real correctness guard: mounting at the old path silently leaves the database on ephemeral container storage — data loss on restart. Exactly the worst failure mode for a scale-to-zero platform that stops containers constantly. Tengiz's managed-DB roadmap should pin this behavior (and the same class of fix for MariaDB/Mongo image changes) from the start. Very low effort, prevents a catastrophic bug.
+- **Detected:** 2026-08-19
+
+## Service Template Variable Generators & Substitution
+- **Source:** Dokploy
+- **Description:** One-click service templates are TOML blueprints (metadata + `variables` + `config` with domains/env/mounts) paired with a `docker-compose.yml`, fetched from a central registry with a local-cache fallback (`templates/processors.ts`, `templates/github.ts`). Values support utility substitutions — `${password:N}`, `${base64:N}`, `${hash:N}`, `${domain}` (auto random sslip.io), `${uuid}`, `${timestamp(s)}`, `${randomPort}`, `${jwt}`, `${username}`, `${email}` — resolved in two passes so variables can reference other variables, then applied to envs, domains, mounts, and the compose file.
+- **Why add to Tengiz:** The recorded One-Click Templates feature lacks the variable-substitution engine that makes it useful: auto-random domains + generated passwords/secrets means `tengiz service create wordpress` produces a fully-configured, secure instance with zero user input. Directly reusable for Tengiz's `service create` command. Low-medium effort, headline CLI value.
+- **Detected:** 2026-08-19
+
+## Deploy Cancellation, Schedule Superseding & Orphan-Deploy Recovery
+- **Source:** Dokploy
+- **Description:** Two state-machine safeguards (`services/deployment.ts`, `utils/startup/cancel-deployments.ts`): (1) when a scheduled run fires while the previous run is still executing, the old run is forcibly marked `error` / "Superseded by a new run of this schedule" so overlapping runs never accumulate; (2) on server boot, any deployment left in `running` state from a crash is set to `cancelled` and the app reset to `idle` so the state machine recovers cleanly. `deploymentStatus` enum includes `cancelled` with a `pid` column.
+- **Why add to Tengiz:** Cheap, robust safeguards for a CLI: a `cancelled`/`superseded` status plus orphan-deploy recovery on restart prevents "stuck running" state after Ctrl-C, crashes, or overlapping `tengiz deploy` invocations — pairing well with the recorded scheduled-deploy and deploy-lock items. Low effort, high reliability value.
+- **Detected:** 2026-08-19
+
+## SPA Fallback Routing & Publish-Directory Artifact Extraction
+- **Source:** Dokploy
+- **Description:** Two mechanisms for frontend apps: (1) an `isStaticSpa` flag injects an nginx config with client-side-routing fallback (`try_files $uri $uri/ /index.html`, `utils/builders/static.ts`); (2) a `publishDirectory` option (`utils/builders/nixpacks.ts:49-65`) builds the app then extracts only the output directory (`dist/`, `.next/`) from the build container via `docker cp`, serving it as a static site.
+- **Why add to Tengiz:** Tengiz's static Dockerfile just `COPY . /usr/share/nginx/html`, so SPA routes 404 on hard refresh — a well-known Vite/Next-static pain. SPA fallback and "build-then-extract-publish-directory" (from any builder) is a high-value, low-cost fix that also unlocks static builds for nixpacks. Low-medium effort.
+- **Detected:** 2026-08-19
+
+## Dockerfile Build Options (`--target`, `--no-cache`, Custom Context Path)
+- **Source:** Dokploy
+- **Description:** When building from a user-supplied Dockerfile, Dokploy passes `--target <stage>` to select a specific multi-stage build stage, `--no-cache` when the clean-cache flag is set, and supports a custom docker context path distinct from the Dockerfile location (`utils/builders/docker-file.ts:32-43`).
+- **Why add to Tengiz:** Tengiz's Docker builder runs a bare `docker build -t tag dir`. `--target` is a one-flag addition that unlocks multi-stage Dockerfiles (the most common modern Dockerfile pattern — e.g. `dev` vs `production` stages), and `--no-cache` gives users a recovery lever for broken layer caches. Natural `.tengiz.yaml` build options (`build.target`, `build.no_cache`, `build.context`). Low effort, high value.
+- **Detected:** 2026-08-19
+
+## Build-Time `.env` File Generation
+- **Source:** Dokploy
+- **Description:** A per-app `createEnvFile` flag (default on) writes the fully-merged environment into a `.env` file inside the build context before `docker build`, so build steps that read `.env` (many frameworks, dotenv tooling) work correctly (`utils/builders/utils.ts` `createEnvFileCommand`, base64-encoded; skipped when `publishDirectory` is set because it could be publicly exposed).
+- **Why add to Tengiz:** Tengiz passes env to the runtime container but not the build context; many frameworks fail builds when `.env` is absent. A `create_env_file` option — with the same public-exposure guard for static output dirs — fixes a real class of build failures. Complements the recorded Build-Time vs Runtime Env split. Low effort.
+- **Detected:** 2026-08-19
+
+## Generic Custom Webhook Notification Channel & Server Threshold Alerts
+- **Source:** Dokploy
+- **Description:** Beyond Slack/Discord/Email, Dokploy supports a fully generic custom-webhook channel (arbitrary endpoint + user-defined headers — the catch-all integration) plus Telegram, Ntfy, Gotify, Pushover, Teams, Mattermost, Lark, and Resend (`services/notification.ts:717-807`, 12 channels total). Event types include `serverThreshold` (metric-threshold alerts), `dockerCleanup`, `dokployRestart`, `appBuildError`, and `databaseBackup` alongside deploy success/failure.
+- **Why add to Tengiz:** Tengiz's `notify` package has only Discord/Slack/Email with deploy/health/stop/warning events. A generic custom-webhook channel (headers for auth tokens) is the single highest-leverage addition to the existing `Notifier` interface, and a `serverThreshold`-style metric event rounds out ops alerting. Low effort, high value.
+- **Detected:** 2026-08-19
+
+## Host-Level Scheduled Scripts (Timezone & Shell Selection)
+- **Source:** Dokploy
+- **Description:** Schedules aren't limited to `docker exec` in an app container. Two schedule types run arbitrary shell scripts directly on the host (`scheduleType: ["application", "compose", "server", "dokploy-server"]`, `services/schedule.ts`; `utils/schedules/utils.ts` `runCommand`), with the script base64-persisted to disk, PID extracted from script output and recorded on the deployment, per-schedule `timezone` support, and `shellType` selection (`bash`/`sh`).
+- **Why add to Tengiz:** The roadmap's cron feature covers in-container `docker exec` tasks; host-level script schedules (DB maintenance, backups, cert renewal) with per-schedule timezone support cover the other major cron use case. Since Tengiz runs directly on the host, this maps 1:1 and is cheap to implement. Low effort, medium value.
+- **Detected:** 2026-08-19
+
+## ZIP Archive Deployment with Zip-Slip & Special-File Protection
+- **Source:** Dokploy
+- **Description:** Uploaded ZIP archives are unzipped directly into the app code directory with three security checks (`utils/builders/drop.ts` `unzipDrop`): path-traversal rejection (resolved path must stay inside the output dir), rejection of symlink/block-device/char-device/FIFO entries (`isDangerousNode`), and flattening of single-root-folder archives so `repo-folder/` contents land at the project root.
+- **Why add to Tengiz:** `tengiz deploy ./app.zip` is the fastest onboarding path for non-git users and a nice complement to `gitdeploy`. The zip-slip + special-file hardening is exactly the validation a CLI accepting archives must have to avoid a local RCE class of bug. Low-medium effort, good DX value.
+- **Detected:** 2026-08-19
+
+## Docker Compose Command Sanitization & Auto-Env Generation
+- **Source:** Dokploy
+- **Description:** Compose hardening (`utils/builders/compose.ts`): `sanitizeCommand()` (79-120) blocks shell control chars (`;|$(){}<>\n\`) and only allows `&&` chains whose later segments start with `docker compose`; `getCreateEnvFileCommand()` (141-180) writes the compose `.env` with auto-injected `APP_NAME`, `COMPOSE_PROJECT_NAME`, `DOCKER_CONFIG=/root/.docker`, `COMPOSE_PREFIX` (for randomized previews); `getExportEnvCommand()` (182-195) exports env as shell vars for `docker stack deploy`.
+- **Why add to Tengiz:** Compose import/stack lifecycle is on the roadmap but unbuilt. These proven design details — command injection sanitization, auto-`.env` with reserved vars, stack env export — should be baked in from day one, especially the sanitizer given Tengiz's shell-based Docker invocation. Low effort, high security value.
+- **Detected:** 2026-08-19
+
+## Import Existing Docker Resources (Env/Port Adoption)
+- **Source:** Dokploy
+- **Description:** `services/settings.ts` can inspect any existing Docker resource (swarm service or standalone container — `getDockerResourceType`), read its current env vars (`docker service inspect --format '{{json .Spec...Env}}'`) and published ports (`readEnvironmentVariables`/`readPorts`), and convert them into editable app config.
+- **Why add to Tengiz:** An `tengiz import <container>` command that snapshots an existing container's env/ports into `apps.json` would make adopting Tengiz on an existing server dramatically easier — migrating already-running containers into managed apps without downtime. Low-medium effort, high migration value.
+- **Detected:** 2026-08-19
+
+## GitHub PR Comment Status Updates for Preview Deployments
+- **Source:** Dokploy
+- **Description:** `deployPreviewApplication()`/`rebuildPreviewApplication()` (`services/application.ts:362-611`) post a "Building..." comment on the pull request, then update the *same* comment (stored comment ID) with the live preview URL on success or an error status on failure — via `createPreviewDeploymentComment`/`updateIssueComment`/`issueCommentExists`.
+- **Why add to Tengiz:** Tengiz already has PR-based preview deployments, but users live in GitHub PRs. Posting/updating a preview-URL comment on each PR is a self-contained webhook-side feature that turns preview deploys into a visible, shareable artifact — complements Commit Status Reporting with richer content. Low-medium effort, high collaboration value.
+- **Detected:** 2026-08-19
+
+## Per-Resource Access Control (Resource/Action ACLs + Member Scoping)
+- **Source:** Dokploy
+- **Description:** A declarative permission matrix (`lib/access-control.ts`) covering 25+ resources × actions (`service: [create, read, delete]`, `deployment: [read, create, cancel]`, `envVars: [read, write]`, `volume`, `backup`, `domain`, `logs`, `monitoring`, `auditLog`, ...), with custom roles stored as JSON permission sets merged at check time (`services/permission.ts` `checkPermission`) and per-member allowlists granting access to *specific* projects/environments/services. Every list/deploy/exec query is scoped through these arrays, preventing cross-resource access.
+- **Why add to Tengiz:** Roadmap #196 User Group RBAC is group-based only; this is a strictly finer model — resource-type × action + per-resource lists. Tengiz's CLI (`tengiz ps`, `logs`, `run`, `deploy`) maps naturally onto "do you have `deployment:create` on this app?" checks. Medium-high effort but the single most important multi-user platform feature.
+- **Detected:** 2026-08-19
+
+## Team/Organization Workspaces with Token-Based Email Invitations
+- **Source:** Dokploy
+- **Description:** An org/workspace model where users join via email invitation carrying a token with `status` (pending/accepted/canceled), `expiresAt`, and `role` (`services/admin.ts` `getUserByToken`, `services/user.ts` `createOrganizationUserWithCredentials`). First signup auto-creates the org and owner; signup validates the `x-dokploy-token` header and blocks duplicate signups once an owner exists.
+- **Why add to Tengiz:** No roadmap entry covers team onboarding — only permission groups. `tengiz invite <email> --role admin --expires 7d` is a clean CLI mapping for "how users actually get added" and complements the RBAC items. Medium effort, high value for shared servers.
+- **Detected:** 2026-08-19
+
+## Docker Daemon Capacity & Error Diagnostics
+- **Source:** Dokploy
+- **Description:** A zero-dependency health probe (`services/server-health.ts` `getServerHealthScript`) reads `/proc/sys/fs/inotify/*` (watches/instances exhaustion), disk usage, and Docker daemon log tails grepped for failure patterns (`oom`, `too many open`, `no space`, `could not find an available ip`, `conntrack`, `pids.max`), plus per-network IP-pool utilization and reserved-vs-total memory/CPU summaries.
+- **Why add to Tengiz:** Roadmap Server Monitoring and Platform Self-Health check basic metrics/restart but not daemon-level capacity forensics — exactly the failure modes that kill single-server Docker platforms. `tengiz doctor` / `tengiz health --daemon` in Go (exec-based, mirrors Tengiz's style) is a strong ops differentiator. Low effort (one probe + JSON parse), high impact.
+- **Detected:** 2026-08-19
+
+## Git Provider OAuth Token Auto-Refresh
+- **Source:** Dokploy
+- **Description:** Before every clone/API call, Git provider clients check token expiry and transparently rotate via the OAuth refresh-token flow, preferring an internal (loopback) URL when self-hosted on the same host (`utils/providers/gitlab.ts` `refreshGitlabToken` with 60s safety margin; `utils/providers/gitea.ts` with 5-min buffer and graceful fallback to the stale token on refresh failure). `lastAuthenticatedAt` is recorded on successful connections.
+- **Why add to Tengiz:** Roadmap Git Provider Account Management stores tokens but has no refresh lifecycle. Auto-rotation avoids the "token expired → deploy fails" incident for `tengiz git add --provider gitlab --internal-url http://gitlab:8080`. Low effort in Go (`golang.org/x/oauth2`), high reliability value.
+- **Detected:** 2026-08-19
+
+## Encryption Key Export & Cross-Server Decryption Fallback
+- **Source:** Dokploy
+- **Description:** `lib/encryption.ts` AES-256-GCM (`enc:v1:` prefix, 12-byte IV + 16-byte auth tag, HMAC-SHA256 key derivation) with `exportEncryptionKeys()` (derived keys only, never raw secrets) and `loadRestoredKeys()` reading a restored `encryption.key` backup file as a last-resort decryption fallback — restored keys decrypt until values are lazily re-encrypted with the new primary key. Encryption and auth secrets are stored separately (`lib/encryption-secret.ts`/`auth-secret.ts`, file-backed variants supported).
+- **Why add to Tengiz:** Roadmap Encryption at Rest and Full System Backup don't solve the transport problem: restore an encrypted `apps.json` to a fresh host and everything becomes unreadable. `tengiz backup create --include-keys` / `tengiz backup restore --keys-from backup/encryption.key` closes a real DR gap. Low effort, high DR value.
+- **Detected:** 2026-08-19
+
+## Passkey (WebAuthn) Authentication for Platform Access
+- **Source:** Dokploy
+- **Description:** Passwordless, phishing-resistant platform login via platform authenticators (Touch ID, Windows Hello, YubiKey) — a `passkey()` auth plugin alongside `twoFactor()` and `apiKey()` (`lib/auth.ts`), with sessions tracking multiple registered passkeys per user (`services/user.ts` `findPasskeysByUserId`: device type, backup state, AAGUID).
+- **Why add to Tengiz:** Roadmap #204 covers TOTP 2FA only; passkeys are the modern upgrade (no shared secrets, no TOTP-code interception) and Go has mature WebAuthn libraries. Pairs well with the invitation flow (first-login passkey registration). Low-medium effort, medium value.
+- **Detected:** 2026-08-19
+
+## Secret Redaction & Credential Hygiene in CLI/API Output
+- **Source:** Dokploy
+- **Description:** Systematic credential hygiene across return paths: SSH private keys stripped from server records before they reach any client (`services/server.ts` `redactServerSshKey`); registry/vault secrets masked on read (`VAULT_SECRET_MASK = "********"`, `SENSITIVE_FIELDS`) and stripped from error messages (`registry.ts` `sanitizeRegistryError`); Docker logins never pass passwords via process args — `printf %s <pass> | docker login --password-stdin`.
+- **Why add to Tengiz:** Roadmap's Deployment Log Redaction covers build logs; this is broader — a CLI tool whose output lands in CI logs must never leak SSH keys, registry passwords, or vault secrets through `ps`/`logs`/`errors`. Cheap audit + redact helpers on every return path, plus switching to `--password-stdin` in `runtime`. Low effort, high security value.
+- **Detected:** 2026-08-19
