@@ -65,6 +65,8 @@ func init() {
 	rootCmd.AddCommand(rollbackCmd)
 	rootCmd.AddCommand(buildLogsCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	initCleanupFlags(cleanupCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
@@ -1159,6 +1161,114 @@ Examples:
 
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources to reclaim disk space",
+	Long: `Removes unused Docker resources (stopped Tengiz containers, dangling images,
+old app images, unused volumes, and build cache) to reclaim disk space.
+
+By default prunes stopped Tengiz containers, dangling images, build cache, and
+old app images (keeping the last 5 per app). Use --volumes to also prune unused
+volumes (this permanently deletes volume data — requires --yes). Use --dry-run
+to preview what would be removed without removing anything.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		env := getEnv(cmd)
+		opts, keep, err := resolveCleanupFlags(cmd)
+		if err != nil {
+			return err
+		}
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		report, err := rt.Cleanup(cmd.Context(), opts)
+		if err != nil {
+			return err
+		}
+
+		if opts.Images {
+			store := config.NewStoreWithEnv(dataDir, env)
+			apps, listErr := store.ListApps()
+			if listErr == nil {
+				for _, app := range apps {
+					if opts.DryRun {
+						fmt.Printf("[tengiz] dry-run: would keep last %d images for %s\n", keep, app.Name)
+					} else if err := rt.KeepLastNImages(cmd.Context(), app.Name, keep); err != nil {
+						log.Printf("[tengiz] warning: image retention for %s: %v", app.Name, err)
+					}
+				}
+			}
+		}
+
+		printCleanupReport(report)
+		return nil
+	},
+}
+
+func initCleanupFlags(cmd *cobra.Command) {
+	cmd.Flags().Bool("all", false, "prune containers, images, and build cache")
+	cmd.Flags().Bool("containers", false, "prune stopped Tengiz containers")
+	cmd.Flags().Bool("images", false, "prune dangling images and old app images")
+	cmd.Flags().Bool("volumes", false, "prune unused volumes (requires --yes)")
+	cmd.Flags().Bool("build-cache", false, "prune Docker build cache")
+	cmd.Flags().Bool("dry-run", false, "show what would be removed without removing anything")
+	cmd.Flags().Bool("yes", false, "confirm destructive operations (required with --volumes)")
+	cmd.Flags().Int("keep", 0, "keep the last N images per app (default 5)")
+}
+
+func resolveCleanupFlags(cmd *cobra.Command) (types.CleanupOptions, int, error) {
+	all, _ := cmd.Flags().GetBool("all")
+	containers, _ := cmd.Flags().GetBool("containers")
+	images, _ := cmd.Flags().GetBool("images")
+	volumes, _ := cmd.Flags().GetBool("volumes")
+	buildCache, _ := cmd.Flags().GetBool("build-cache")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	keep, _ := cmd.Flags().GetInt("keep")
+	if keep <= 0 {
+		keep = 5
+	}
+
+	if !containers && !images && !volumes && !buildCache && !all {
+		containers, images, buildCache = true, true, true
+	}
+	if all {
+		containers, images, buildCache = true, true, true
+	}
+
+	if volumes && !dryRun {
+		yes, _ := cmd.Flags().GetBool("yes")
+		if !yes {
+			return types.CleanupOptions{}, 0, fmt.Errorf("--volumes permanently removes unused volumes; pass --yes to confirm")
+		}
+	}
+
+	return types.CleanupOptions{
+		Containers: containers,
+		Images:     images,
+		Volumes:    volumes,
+		BuildCache: buildCache,
+		DryRun:     dryRun,
+	}, keep, nil
+}
+
+func printCleanupReport(r types.CleanupReport) {
+	if r.DryRun {
+		fmt.Println("[tengiz] dry-run summary (nothing removed):")
+	} else {
+		fmt.Println("[tengiz] cleanup summary:")
+	}
+	fmt.Printf("containers removed: %d\n", r.ContainersRemoved)
+	fmt.Printf("images removed: %d\n", r.ImagesRemoved)
+	fmt.Printf("volumes removed: %d\n", r.VolumesRemoved)
+	fmt.Printf("build cache entries removed: %d\n", r.BuildCacheRemoved)
+	for _, e := range r.Errors {
+		fmt.Printf("warning: %s\n", e)
+	}
 }
 
 var gitCmd = &cobra.Command{
