@@ -238,6 +238,32 @@ func TestBuildWithSecrets(t *testing.T) {
 	}
 }
 
+func TestBuildLabelArgs(t *testing.T) {
+	got := buildLabelArgs("myapp", "staging")
+	want := []string{"--label", "tengiz-app=myapp", "--label", "tengiz-env=staging"}
+	if len(got) != len(want) {
+		t.Fatalf("buildLabelArgs() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("buildLabelArgs()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestBuildLabelArgsDefaultEnv(t *testing.T) {
+	got := buildLabelArgs("myapp", "")
+	want := []string{"--label", "tengiz-app=myapp", "--label", "tengiz-env=production"}
+	if len(got) != len(want) {
+		t.Fatalf("buildLabelArgs() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("buildLabelArgs()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestFrameworkNixpacksConstant(t *testing.T) {
 	if FrameworkNixpacks != "nixpacks" {
 		t.Errorf("expected nixpacks, got %q", FrameworkNixpacks)
