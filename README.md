@@ -21,6 +21,7 @@
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
+- **Docker housekeeping** — `tengiz cleanup` prunes unused containers, images, networks, volumes, and build cache. Tengiz-managed resources are always protected by labels.
 
 ## Prerequisites
 
@@ -148,6 +149,19 @@ The proxy also starts an **admin API** on `127.0.0.1:9099` for dynamic route man
 List all deployed applications and their status.
 
 Output: `NAME`, `STATE` (running/stopped), `PORT`, `ENVIRONMENT`, `HEALTH`.
+
+### `tengiz cleanup`
+
+Remove unused Docker resources to reclaim disk space. Runs a label-filtered `docker system prune`; every container, image, and volume carrying the `tengiz-app` label is protected.
+
+| Flag | Description |
+|------|-------------|
+| `-a`, `--all` | Also remove unused images (default removes only dangling images) |
+| `--volumes` | Also remove unused volumes |
+| `-f`, `--force` | Skip the confirmation prompt |
+| `--dry-run` | Show a `docker system df` disk usage summary without removing anything |
+
+Without `--force`, the command asks for confirmation before removing anything.
 
 ### `tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] <app>`
 
