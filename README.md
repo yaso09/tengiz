@@ -415,6 +415,33 @@ List all secrets for an application. Values are masked for security.
 |----------|-------------|
 | `app` | Application name |
 
+### `tengiz cleanup`
+
+Remove unused Docker resources to free disk space on the host.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--containers` | `true` | Remove stopped containers (Tengiz-managed containers are always protected) |
+| `--images` | `true` | Remove unused images (Tengiz-built images are always protected) |
+| `--volumes` | `false` | Remove unused anonymous volumes |
+| `--networks` | `false` | Remove unused networks |
+| `--build-cache` | `false` | Remove build cache |
+| `--all` | `false` | Remove every category of unused resources |
+| `--dry-run` | `false` | Show what would be removed without removing anything |
+| `-y`, `--yes` | `false` | Skip the confirmation prompt |
+| `--interval <duration>` | | Repeat cleanup every `<duration>` (e.g. `24h`) until stopped (requires `--yes`) |
+
+Tengiz always protects the resources it manages: containers labeled `tengiz-app` and images it built (labeled `tengiz-managed`, tagged `tengiz-apps/*`). Rollback and scale-to-zero (cold start) behavior is never broken by cleanup. Named volumes are never auto-removed.
+
+Non-interactive terminals (CI, scripts) must pass `--yes`.
+
+```bash
+tengiz cleanup                        # prune containers + images
+tengiz cleanup --all --yes            # prune everything, no prompt
+tengiz cleanup --dry-run              # preview what would be removed
+tengiz cleanup --interval 24h --yes   # housekeeping job, repeat daily
+```
+
 ## Configuration
 
 Create a `.tengiz.yaml` in your project root:

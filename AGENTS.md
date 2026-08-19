@@ -12,7 +12,7 @@
 
 | Package | Responsibility |
 |---------|---------------|
-| `runtime.Manager` | Interface for container lifecycle. `NewDocker()` = exec-based impl, `NewStub()` = test mock. Also: `CreateFromImage`, `RemoveImage`, `KeepLastNImages` for rollback + image cleanup. `ContainerName(name, env)` helper. |
+| `runtime.Manager` | Interface for container lifecycle. `NewDocker()` = exec-based impl, `NewStub()` = test mock. Also: `CreateFromImage`, `RemoveImage`, `KeepLastNImages`, `Prune`, `DiskUsage` for rollback + image cleanup + housekeeping. `ContainerName(name, env)` helper. |
 | `builder` | Framework detection (`detect.go`) + Dockerfile generation (`builder.go`). Supports: Docker, Next.js, Vite, Go, Node, Python, static. Nixpacks backend (`build.builder: nixpacks`) for hundreds of frameworks (Ruby, Rust, PHP, etc). Env-aware image tags (`{env}-{deploymentID}`). |
 | `proxy` | `httputil.ReverseProxy` with host-based routing (`appname.tengiz.local` → port 9000+) and custom domain support. Cold-starts stopped containers on demand. Env-aware via `NewWithEnv`. |
 | `idle` | Per-app timer. `Reset(name)` extends deadline. On expiry: calls `runtime.Stop()`. Default 5m timeout. Env-aware via `NewWithEnv`. |
@@ -52,6 +52,7 @@ tengiz secret get <app> <key>     → get a secret value
 tengiz secret unset <app> <key>   → remove a secret
 tengiz secret list <app>          → list secrets (values masked)
 tengiz secret rotate-key         → rotate encryption key for local store
+tengiz cleanup [--all] [--volumes] [--networks] [--build-cache] [--dry-run] [-y] [--interval DURATION] → prune unused Docker resources (Tengiz-managed containers/images always protected)
 tengiz domain add/remove/list   → custom domains
 tengiz volume add/remove/list   → persistent storage volumes
 tengiz preview list <app>       → list preview deployments
