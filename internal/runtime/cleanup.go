@@ -321,3 +321,215 @@ func computeUnusedNetworks(lines []string, inUse map[string]bool) []string {
 	}
 	return out
 }
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneSummary, error) {
+	var s PruneSummary
+	s.DryRun = opts.DryRun
+
+	if opts.Containers {
+		items, reclaimed, err := r.pruneContainers(ctx, opts.DryRun)
+		if err != nil {
+			return s, err
+		}
+		s.Containers = items
+		s.ReclaimedBytes += reclaimed
+	}
+	if opts.Images {
+		items, reclaimed, err := r.pruneImages(ctx, opts.All, opts.DryRun)
+		if err != nil {
+			return s, err
+		}
+		s.Images = items
+		s.ReclaimedBytes += reclaimed
+	}
+	if opts.Networks {
+		items, reclaimed, err := r.pruneNetworks(ctx, opts.DryRun)
+		if err != nil {
+			return s, err
+		}
+		s.Networks = items
+		s.ReclaimedBytes += reclaimed
+	}
+	if opts.Volumes {
+		items, reclaimed, err := r.pruneVolumes(ctx, opts.DryRun)
+		if err != nil {
+			return s, err
+		}
+		s.Volumes = items
+		s.ReclaimedBytes += reclaimed
+	}
+	if opts.BuildCache {
+		size, reclaimed, err := r.pruneBuildCache(ctx, opts.DryRun)
+		if err != nil {
+			return s, err
+		}
+		s.BuildCacheSize = size
+		s.ReclaimedBytes += reclaimed
+	}
+	return s, nil
+}
+
+func (r *dockerRuntime) pruneContainers(ctx context.Context, dryRun bool) ([]string, int64, error) {
+	if dryRun {
+		cmd := exec.CommandContext(ctx, "docker", "ps", "-a",
+			"--filter", "status=created",
+			"--filter", "status=exited",
+			"--format", "{{.Names}}\t{{.Labels}}")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return nil, 0, fmt.Errorf("docker ps: %w\n%s", err, string(out))
+		}
+		return filterUnmanagedContainers(string(out)), 0, nil
+	}
+	cmd := exec.CommandContext(ctx, "docker", "container", "prune", "-f",
+		"--filter", "label!="+CleanupProtectLabel)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, 0, fmt.Errorf("docker container prune: %w\n%s", err, string(out))
+	}
+	reclaimed, err := parsePruneReclaimed(string(out))
+	if err != nil {
+		return nil, 0, err
+	}
+	return parsePruneItems(string(out), "Deleted Containers:"), reclaimed, nil
+}
+
+func (r *dockerRuntime) pruneImages(ctx context.Context, all, dryRun bool) ([]string, int64, error) {
+	candidates, err := r.unusedImages(ctx, all)
+	if err != nil {
+		return nil, 0, err
+	}
+	var items []string
+	var reclaimed int64
+	for _, img := range candidates {
+		size, err := r.imageSize(ctx, img.ID)
+		if err == nil {
+			reclaimed += size
+		}
+		if dryRun {
+			items = append(items, img.Ref)
+			continue
+		}
+		if err := r.RemoveImage(ctx, img.ID); err != nil {
+			log.Printf("[runtime] cleanup: failed to remove image %s: %v", img.Ref, err)
+			continue
+		}
+		items = append(items, img.Ref)
+	}
+	return items, reclaimed, nil
+}
+
+func (r *dockerRuntime) unusedImages(ctx context.Context, all bool) ([]unusedImage, error) {
+	imgCmd := exec.CommandContext(ctx, "docker", "images", "-a",
+		"--format", "{{.ID}}\t{{.Repository}}:{{.Tag}}")
+	imgOut, err := imgCmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker images: %w\n%s", err, string(imgOut))
+	}
+	psCmd := exec.CommandContext(ctx, "docker", "ps", "-a", "--format", "{{.Image}}")
+	psOut, err := psCmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps: %w\n%s", err, string(psOut))
+	}
+	referenced := strings.Split(strings.TrimSpace(string(psOut)), "\n")
+	return computeUnusedImages(string(imgOut), referenced, all), nil
+}
+
+func (r *dockerRuntime) imageSize(ctx context.Context, id string) (int64, error) {
+	cmd := exec.CommandContext(ctx, "docker", "image", "inspect",
+		"--format", "{{.Size}}", id)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("docker image inspect: %w\n%s", err, string(out))
+	}
+	return strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+}
+
+func (r *dockerRuntime) pruneNetworks(ctx context.Context, dryRun bool) ([]string, int64, error) {
+	if dryRun {
+		cmd := exec.CommandContext(ctx, "docker", "network", "ls", "--format", "{{.ID}} {{.Name}}")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return nil, 0, fmt.Errorf("docker network ls: %w\n%s", err, string(out))
+		}
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		inUse := make(map[string]bool)
+		for _, line := range lines {
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			id := fields[0]
+			cntCmd := exec.CommandContext(ctx, "docker", "network", "inspect",
+				"--format", "{{len .Containers}}", id)
+			cntOut, err := cntCmd.CombinedOutput()
+			if err != nil {
+				continue
+			}
+			if strings.TrimSpace(string(cntOut)) != "0" {
+				inUse[id] = true
+			}
+		}
+		return computeUnusedNetworks(lines, inUse), 0, nil
+	}
+	cmd := exec.CommandContext(ctx, "docker", "network", "prune", "-f",
+		"--filter", "label!="+CleanupProtectLabel)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, 0, fmt.Errorf("docker network prune: %w\n%s", err, string(out))
+	}
+	reclaimed, err := parsePruneReclaimed(string(out))
+	if err != nil {
+		return nil, 0, err
+	}
+	return parsePruneItems(string(out), "Deleted Networks:"), reclaimed, nil
+}
+
+func (r *dockerRuntime) pruneVolumes(ctx context.Context, dryRun bool) ([]string, int64, error) {
+	if dryRun {
+		cmd := exec.CommandContext(ctx, "docker", "volume", "ls", "-q",
+			"--filter", "dangling=true")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return nil, 0, fmt.Errorf("docker volume ls: %w\n%s", err, string(out))
+		}
+		return parseDanglingVolumes(string(out)), 0, nil
+	}
+	cmd := exec.CommandContext(ctx, "docker", "volume", "prune", "-f",
+		"--filter", "label!="+CleanupProtectLabel)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, 0, fmt.Errorf("docker volume prune: %w\n%s", err, string(out))
+	}
+	reclaimed, err := parsePruneReclaimed(string(out))
+	if err != nil {
+		return nil, 0, err
+	}
+	return parsePruneItems(string(out), "Deleted Volumes:"), reclaimed, nil
+}
+
+func (r *dockerRuntime) pruneBuildCache(ctx context.Context, dryRun bool) (int64, int64, error) {
+	dfCmd := exec.CommandContext(ctx, "docker", "system", "df", "--format", "json")
+	dfOut, err := dfCmd.CombinedOutput()
+	var size int64
+	if err == nil {
+		size, err = parseSystemDFBuildCache(dfOut)
+		if err != nil {
+			log.Printf("[runtime] cleanup: failed to read build cache size: %v", err)
+			size = 0
+		}
+	}
+	if dryRun {
+		return size, 0, nil
+	}
+	cmd := exec.CommandContext(ctx, "docker", "builder", "prune", "-f", "-a")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return size, 0, fmt.Errorf("docker builder prune: %w\n%s", err, string(out))
+	}
+	reclaimed, err := parsePruneReclaimed(string(out))
+	if err != nil {
+		return size, 0, err
+	}
+	return size, reclaimed, nil
+}
