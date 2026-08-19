@@ -184,3 +184,29 @@ type AppEntry struct {
 	GitBranch        string            `json:"git_branch,omitempty"`
 	GitProvider      string            `json:"git_provider,omitempty"`
 }
+
+type CleanupCategory string
+
+const (
+	CleanupContainers CleanupCategory = "containers"
+	CleanupImages     CleanupCategory = "images"
+	CleanupVolumes    CleanupCategory = "volumes"
+	CleanupNetworks   CleanupCategory = "networks"
+	CleanupBuildCache CleanupCategory = "build-cache"
+)
+
+const ManagedImageLabel = "tengiz-managed"
+
+type PruneOptions struct {
+	Containers bool
+	Images     bool
+	Volumes    bool
+	Networks   bool
+	BuildCache bool
+}
+
+type PruneResult struct {
+	Categories     []CleanupCategory `json:"categories"`
+	TotalReclaimed string            `json:"total_reclaimed"`
+	Detail         []string          `json:"detail"`
+}

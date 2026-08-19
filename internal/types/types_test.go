@@ -116,3 +116,53 @@ func TestNixpacksConfigFields(t *testing.T) {
 		t.Error("packages not set correctly")
 	}
 }
+
+func TestCleanupCategoryConstants(t *testing.T) {
+	want := map[CleanupCategory]string{
+		CleanupContainers: "containers",
+		CleanupImages:     "images",
+		CleanupVolumes:    "volumes",
+		CleanupNetworks:   "networks",
+		CleanupBuildCache: "build-cache",
+	}
+	for cat, str := range want {
+		if string(cat) != str {
+			t.Errorf("CleanupCategory %q: expected %q", cat, str)
+		}
+	}
+	if ManagedImageLabel != "tengiz-managed" {
+		t.Errorf("ManagedImageLabel = %q, want %q", ManagedImageLabel, "tengiz-managed")
+	}
+}
+
+func TestPruneOptionsZeroValueAllFalse(t *testing.T) {
+	var opts PruneOptions
+	if opts.Containers || opts.Images || opts.Volumes || opts.Networks || opts.BuildCache {
+		t.Error("zero-value PruneOptions should have all categories false")
+	}
+}
+
+func TestPruneResultJSONRoundTrip(t *testing.T) {
+	pr := PruneResult{
+		Categories:     []CleanupCategory{CleanupContainers, CleanupImages},
+		TotalReclaimed: "1.2GB",
+		Detail:         []string{"Deleted Containers:", "abc123"},
+	}
+	data, err := json.Marshal(pr)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded PruneResult
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(decoded.Categories) != 2 || decoded.Categories[0] != CleanupContainers {
+		t.Fatalf("categories mismatch: %v", decoded.Categories)
+	}
+	if decoded.TotalReclaimed != "1.2GB" {
+		t.Fatalf("total reclaimed mismatch: %q", decoded.TotalReclaimed)
+	}
+	if len(decoded.Detail) != 2 || decoded.Detail[0] != "Deleted Containers:" {
+		t.Fatalf("detail mismatch: %v", decoded.Detail)
+	}
+}
