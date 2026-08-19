@@ -97,6 +97,7 @@ func (m *mockRTForDeploy) WaitForHealth(ctx context.Context, name string, hc *ty
 func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error { return nil }
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
+func (m *mockRTForDeploy) Prune(ctx context.Context) (runtime.PruneReport, error) { return runtime.PruneReport{}, nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
@@ -374,5 +375,60 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
 		}
+	}
+}
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatalf("cleanup command not found: %v", err)
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd.Flags().Lookup("force") == nil {
+		t.Error("cleanup missing --force flag")
+	}
+	if cmd.Flags().Lookup("keep") == nil {
+		t.Error("cleanup missing --keep flag")
+	}
+}
+
+func TestConfirmCleanup(t *testing.T) {
+	tests := []struct {
+		force bool
+		input string
+		want  bool
+	}{
+		{true, "", true},
+		{false, "y", true},
+		{false, "yes", true},
+		{false, "Y", true},
+		{false, "n", false},
+		{false, "", false},
+		{false, "maybe", false},
+	}
+	for _, tt := range tests {
+		got := confirmCleanup(tt.force, tt.input)
+		if got != tt.want {
+			t.Errorf("confirmCleanup(force=%v, input=%q) = %v, want %v", tt.force, tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestRunCleanupRetainsAndPrunes(t *testing.T) {
+	tmpDir := t.TempDir()
+	dataDir = tmpDir
+	store := config.NewStore(tmpDir)
+	store.SaveApp(types.AppEntry{Name: "myapp", Config: types.AppConfig{Name: "myapp"}})
+	store.SaveApp(types.AppEntry{Name: "other", Config: types.AppConfig{Name: "other"}})
+
+	m := &mockRTForDeploy{}
+	report, err := runCleanup(context.Background(), m, store, 5)
+	if err != nil {
+		t.Fatalf("runCleanup() error = %v", err)
+	}
+	if report.Containers != 0 || report.Images != 0 {
+		t.Errorf("expected empty prune report from mock, got %+v", report)
 	}
 }

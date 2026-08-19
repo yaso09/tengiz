@@ -235,6 +235,23 @@ Rollback to the previous deployment. The previous active container is started on
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup`
+
+Reclaim disk space by pruning unused Docker resources. Removes stopped containers (excluding Tengiz-managed ones, which are protected via the `tengiz-app` label), dangling images, unused networks, and unused volumes. Retains the last N images per app for rollback.
+
+| Flag | Description |
+|------|-------------|
+| `--force` | Skip the confirmation prompt |
+| `--keep N` | Number of images to retain per app (default: 5) |
+
+Example:
+```
+tengiz cleanup
+tengiz cleanup --force --keep 3
+```
+
+Use the global `--env` flag to scope image retention to a specific environment: `tengiz cleanup --env staging`.
+
 ### `tengiz domain`
 
 Manage custom domains for applications.
