@@ -1976,3 +1976,141 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Storage is modeled as globally-unique named entries (`storage:create <name>`, DNS-1123, ≤45 chars) that multiple apps attach to (`storage:mount <app> <name> --container-dir <path>`), each attachment carrying `ContainerPath`, `Phases` (deploy/run), `Subpath`, `Readonly`, `VolumeOptions`, `VolumeChown`, and `ProcessType`; legacy colon-form mounts auto-migrate to `legacy-<hash>` entries, and `storage:exec` runs an interactive command in a throwaway container mounting the entry at `/data`.
 - **Why add to Tengiz:** Tengiz's `volume add/remove/list` is a flat app↔path map; sharing one volume across apps, read-only mounts, deploy-vs-run phase separation, subpaths, and the volume-mounted `storage:exec` (debug a volume without finding its host path) are all missing. Named entries with per-attachment options upgrade volume management to the multi-app model the accessory-service roadmap item implies. Medium effort, medium-high value.
 - **Detected:** 2026-08-19
+
+---
+
+# CapRover Analizi (2026-08-19)
+
+Aşağıdaki özellikler CapRover kaynak kodundan (`sources/caprover/`) analiz edilmiştir ve mevcut roadmap'te kayıtlı olmayan yeni özelliklerdir.
+
+## Persistent App Flag (Scale-to-Zero Exemption + Volume Gating)
+- **Source:** CapRover
+- **Description:** Apps must be explicitly created with `hasPersistentData: true` before they can attach volumes; non-persistent apps hard-error on any volume config (`Cannot set volumes for a non-persistent container!`), and persistent apps get restart-always semantics, a stable pinned host, and single-instance enforcement. `AppDefinition.ts:67`, `ServiceManager.ts:684-729`, `AppsDataStore.ts:913-968`.
+- **Why add to Tengiz:** Tengiz's `idle` package stops *any* app purely on a timer with no notion of statefulness — a Postgres/MySQL container with volumes would get cold-stopped and lose data. A `persistent: true` field on `AppConfig` would (a) reject `tengiz volume add` on ephemeral apps, (b) exempt persistent apps from idle scale-to-zero, and (c) prevent destructive `tengiz run`/restart on stateful apps. Direct safety fix for Tengiz's core serverless model. Low effort, high value.
+- **Detected:** 2026-08-19
+
+## Transactional Proxy Config Reload (Validate-Before-Activate with Auto-Rollback)
+- **Source:** CapRover
+- **Description:** Every proxy-config regeneration runs a safe pipeline: render new config → write to `.fut` temp file → rotate current to `.bak` → atomically rename `.fut` → `.conf` → run `nginx -t` validation → only on success send reload. If validation fails, the caller (`ServiceManager.ts:782-838`) reverts the *entire app definition in the datastore* to its prior saved state and surfaces the error — the app is never left half-configured. `LoadBalancerManager.ts:110-241`.
+- **Why add to Tengiz:** Tengiz persists `AppEntry` JSON and derives routing from it; there is no transactional "validate before apply" or rollback on a bad config change (bad custom proxy config, domain, or port edit becomes a silent routing outage). Applying this pattern turns misconfiguration into a safe no-op. Medium effort, high reliability value.
+- **Detected:** 2026-08-19
+
+## Coalesced Config Reload Queue (Last-One-Wins Batching)
+- **Source:** CapRover
+- **Description:** All proxy reload requests funnel through a single queue: while one reload is running, new requests are queued and only the *latest* one is consumed (`pop()`, not `shift()`) when the current reload finishes — N rapid config changes collapse into one reload. `LoadBalancerManager.ts:48-79`.
+- **Why add to Tengiz:** With concurrent `tengiz deploy` calls or git webhooks, proxy routing state can change many times per second. A last-one-wins coalescing queue (`sync.Mutex` + latest-wins slot) means the Go proxy regenerates its route table once after the burst instead of N times, preventing reload storms. Low effort, high stability value.
+- **Detected:** 2026-08-19
+
+## Async Deployment Job Registry (Detached Deploys with Step Progress)
+- **Source:** CapRover
+- **Description:** A deploy can run in detached mode: the caller gets an immediate job ID (`deploy_<ts>_<rand>`) while a singleton in-memory registry tracks `{steps[], currentStep, error, successMessage}`. A poll endpoint returns live step progress ("Queuing deployment → Building → Starting"), jobs auto-expire via `cleanupOldJobs(24h)`, and failures surface the exact failing step. `OneClickDeploymentJobRegistry.ts:20-148`, `AppDefinitionHandler.ts:57-72`, `ServiceManager.ts:861-870`.
+- **Why add to Tengiz:** Enables `tengiz deploy --async` returning a job ID plus `tengiz deploy status <jobid>` showing named step progress and the failing step on error — ideal for CI scripts that fire a deploy and poll later, and matches how webhook-triggered deploys already behave. Tengiz already persists build logs; it just needs a background execution path + status command. Medium effort, high CLI UX value.
+- **Detected:** 2026-08-19
+
+## Inline Dockerfile in Deploy Manifest (`dockerfileLines`)
+- **Source:** CapRover
+- **Description:** The deploy definition (`ICaptainDefinition.ts:3`) can contain the full Dockerfile content inline as `dockerfileLines: [...]` instead of pointing at a Dockerfile in the repo; `ImageMaker.ts:433-480` joins the lines and writes the Dockerfile before build. Also supports `dockerfilePath` for a custom location, with source validation requiring exactly one build source (`templateId`/`imageName`/`dockerfilePath`/`dockerfileLines`).
+- **Why add to Tengiz:** Users can deploy a project with no Dockerfile in the repo at all, or override a bad existing Dockerfile without editing the repo — a `build.dockerfileLines` key in `.tengiz.yaml` that the builder writes to a temp Dockerfile before `docker build`. Distinct from existing Dockerfile-build-options plans. Low effort, high DX value.
+- **Detected:** 2026-08-19
+
+## Versioned Webhook/Deploy Tokens with Instant Rotation
+- **Source:** CapRover
+- **Description:** Each app's push-webhook token embeds a `tokenVersion`; on every webhook hit the decoded version is compared against the app's stored version and a mismatch rejects the request. When credentials change, the token is regenerated *and* `tokenVersion` is bumped (`AppsDataStore.ts:735-748`), instantly invalidating every previously issued token/URL for that app. `AppDefinition.ts:105-109`, `Injector.ts:222-227`, `Authenticator.ts:230-253`.
+- **Why add to Tengiz:** Git-push → deploy webhooks are implemented but there is no way to rotate a leaked webhook URL/token without reconfiguring the whole app. Versioned tokens give immediate invalidation on suspected leaks — store the version, not the token, in Tengiz's JSON state. Low effort, high security value.
+- **Detected:** 2026-08-19
+
+## Secrets Delivered as Read-Only Files Inside Containers
+- **Source:** CapRover
+- **Description:** Beyond env-var injection, secrets can be mounted as read-only files inside the container (`/run/secrets/<name>`), with idempotent attach/detach and `Mode: 0o444` permissions. `DockerApi.ts:1517-1562`, `DockerSecret.ts`.
+- **Why add to Tengiz:** Tengiz's `secrets` package resolves `[[secret.NAME]]` into env vars only. Many apps (DB clients, `.pgpass`, config-file readers, CLI tools) require credentials as files. For exec-based Docker this maps to bind-mounting decrypted secret files with 0444 perms — a new delivery mechanism, not a new secret store. Medium effort, high value.
+- **Detected:** 2026-08-19
+
+## Whole-App Domain Redirect (`redirectDomain`)
+- **Source:** CapRover
+- **Description:** A single per-app config (`redirectDomain`, `AppDefinition.ts:78`) makes every public domain of the app — default subdomain and all custom domains — emit `return 301 <redirectDomain>` in every server block. `LoadBalancerManager.ts:336-342, 377-383`.
+- **Why add to Tengiz:** Roadmap's URL Redirect & Rewrite Rules cover per-path redirects; this is a one-shot whole-domain redirect for domain consolidation, app renames, and deprecating old hostnames while preserving SEO. `tengiz config set myapp redirect-domain new.app.com` — checked first in the proxy's host routing. Low effort, medium value.
+- **Detected:** 2026-08-19
+
+## Dockerfile Template Tags (`templateId`)
+- **Source:** CapRover
+- **Description:** The deploy config can specify `templateId: node/18` (or php, python-django, ruby-rack) instead of a Dockerfile. A template expands to a pinned base image plus a standard post-FROM body (copy source, install deps, start). `ICaptainDefinition.ts:6`, `TemplateHelper.ts:61-78`, `ImageMaker.ts:440-443`.
+- **Why add to Tengiz:** A lightweight middle ground between Tengiz's framework detection and full Nixpacks: reproducible Dockerfile from a one-line config for the 4 most common runtimes, plus the "exactly-one-of build source" schema validation pattern for the config loader. Low effort, medium value.
+- **Detected:** 2026-08-19
+
+## End-to-End Domain Routing Verification (HTTP Challenge Handshake)
+- **Source:** CapRover
+- **Description:** Instead of a passive DNS lookup, CapRover proves a domain routes to this host by writing a random UUID to `/.well-known/captain-identifier` in the static webroot, then making a live HTTP GET to `http://<domain>:80` through the public internet and requiring the exact UUID back (`verifyDomainResolvesToDefaultServerOnHost`, `DomainResolveChecker.ts:29-125`). Used as a pre-flight gate before root-domain changes and inside the periodic health check.
+- **Why add to Tengiz:** Roadmap's DNS Validation covers the lookup layer only; a live round-trip check catches DNS-that-resolves-but-firewall/port-forward/proxy-misroutes in one shot. `tengiz domain verify <domain>` with a real end-to-end guarantee and a `--skip-verification` escape hatch. Medium effort, high value for custom domains.
+- **Detected:** 2026-08-19
+
+## Scheduled Automated Cleanup with Per-App Image Retention Limit
+- **Source:** CapRover
+- **Description:** Image pruning is a user-configurable scheduled job, not just a manual button: an `IAutomatedCleanupConfigs { mostRecentLimit, cronSchedule, timezone }` record drives a `CronJob`; changing the config stops the old job and starts a new one live. Retention is per-app deploy-version-aware — keeps `mostRecentLimit + 1` most recent deployed images per app and deletes the rest. `DiskCleanupManager.ts:27-156`, `AutomatedCleanupConfigs.ts`.
+- **Why add to Tengiz:** Tengiz has `KeepLastNImages` but no schedule + retention config. `tengiz cleanup set --cron "0 3 * * *" --keep 5 --timezone Europe/Istanbul` with immediate scheduler re-arming complements the existing Docker Housekeeping / Granular Prune one-shot commands. Medium effort, high ops value.
+- **Detected:** 2026-08-19
+
+## Dry-Run Unused-Image Preview (Retention-Aware GC Simulation)
+- **Source:** CapRover
+- **Description:** Before deleting anything, CapRover exposes a read-only endpoint returning the exact list of image IDs/tags the retention policy would remove for a given `mostRecentLimit` — computed live from deploy-version history. Deletion is a separate explicit call. `DiskCleanupManager.ts:63-130`.
+- **Why add to Tengiz:** An `tengiz images unused --keep N` / `tengiz cleanup dry-run` command gives operators a safe preview ("these 12 images will be deleted") before executing — critical for CLI-driven cleanup where mistakes are less forgiving than a web UI. Reuses `KeepLastNImages` reasoning. Low effort, high safety value.
+- **Detected:** 2026-08-19
+
+## Backup Artifact TTL Auto-Expiry
+- **Source:** CapRover
+- **Description:** After building a backup tar, CapRover moves it to a downloads dir with a timestamped name and schedules `fs.removeSync` after exactly 2 hours so stale artifacts self-delete; retrieval uses a single-use `getDownloadToken()`. Backups never accumulate on disk unnoticed. `BackupManager.ts:740-763`.
+- **Why add to Tengiz:** Roadmap's Full System Backup & Restore covers creating/restoring archives but not artifact lifecycle. A configurable `backup ttl` that auto-expires generated artifacts after N hours is a concrete retention policy and closes a real DR hygiene gap. Low effort, medium value.
+- **Detected:** 2026-08-19
+
+## Datastore Schema Versioning & Migration
+- **Source:** CapRover
+- **Description:** The store file carries a `schemaVersion` integer; on load, if it's behind current, migrations run against every record (e.g. stamp `isLegacyAppName = true` for pre-1.15 apps), the version is bumped, migration flags are carried through on save so old fields aren't resurrected, and new fields are backfilled on read (e.g. `captainDefinitionRelativeFilePath` default). `DataStore.ts:81-98`, `AppsDataStore.ts:101-107, 339-342`.
+- **Why add to Tengiz:** Tengiz's `~/.tengiz/apps.json` has no version field or migration path. As `AppEntry`/`AppConfig` grows (domains, health, git metadata already accreted), schema evolution is inevitable. A `schema_version` key + idempotent migration registry makes every future field addition safe for existing installs. Low-medium effort, high foundation value.
+- **Detected:** 2026-08-19
+
+## Startup State-File Integrity Validation with Actionable Error
+- **Source:** CapRover
+- **Description:** Before the store is constructed, the JSON file is parsed; invalid JSON refuses startup with a precise, actionable message ("Cannot start ... contains invalid JSON. Fix the file or restore it from a backup, then restart."). `DataStore.ts:42-58`.
+- **Why add to Tengiz:** A corrupted `~/.tengiz/apps.json` or `ports.json` currently surfaces as a cryptic Go unmarshal error mid-command — or worse, gets overwritten by a save. A cheap pre-load validity check with a recovery hint (restore from backup / fix line) greatly improves trust in the state layer. Low effort, medium value.
+- **Detected:** 2026-08-19
+
+## Multi-Port Mapping per App (Structured Port List)
+- **Source:** CapRover
+- **Description:** Apps hold a *list* of `IAppPort { containerPort, hostPort, protocol?, publishMode? }` pairs rather than a single port; validation rejects missing or out-of-range ports at save time before Docker is ever touched. `AppDefinition.ts:22-28`, `AppsDataStore.ts:144-167`, `DockerApi.ts:1436-1460`.
+- **Why add to Tengiz:** Tengiz models one `Port int` per app. The list structure supports apps that publish multiple ports (debugger, metrics, admin UI on a separate port, non-HTTP services) — the port allocator (9000-9999) extends naturally to reserve multiple host ports per app with store-layer validation. Distinct from the recorded TCP/UDP protocol selector. Medium effort, medium value.
+- **Detected:** 2026-08-19
+
+## Derived Build Lifecycle Status (`isAppBuilding`, Deploy Timestamps)
+- **Source:** CapRover
+- **Description:** `isAppBuilding` is not persisted — it is derived at read time from the in-memory build queue and attached to every app in listings; deployments carry `deployedVersion` plus a `versions[]` array with ISO-normalized timestamps (legacy timestamps fixed up on read). `ServiceManager.ts:841-843`, `AppsDataStore.ts:565-658`.
+- **Why add to Tengiz:** Tengiz's `AppStatus` has state/port/image hash but no "is deploying right now" flag, and `DeploymentEntry` lacks a visible "active/current version" marker. A computed `is_building` field plus last-deployed timestamp in `tengiz ps`/`app report` closes the gap between "I ran a deploy" and "I can see it finished". Low effort, medium value.
+- **Detected:** 2026-08-19
+
+## Mutating Pre-Deploy Spec Hook (`preDeployFunction`)
+- **Source:** CapRover
+- **Description:** A user stores a `preDeployFunction` string on the app; at deploy time it's loaded and called with `(captainAppObj, dockerUpdateObject)` — the already-merged container spec — and the returned spec is what gets applied (after `serviceUpdateOverride` merge). It's a pure transform of the final container config, not a side-effecting script. `ServiceManager.ts:578-605`, `DockerApi.ts:1649-1656`.
+- **Why add to Tengiz:** Roadmap's Pre-Deploy Hooks are "run a script before deploy". This is the different mechanic: a transform that can compute env vars, conditionally apply resource limits, and inject sidecar config at deploy time without server-side feature work. A per-app `preDeployTransform` (stdout JSON-merged into the run spec) is a novel escape hatch. Medium effort.
+- **Detected:** 2026-08-19
+
+## Declarative Template Variable Schema with Regex Validation & Manifest-Wide Substitution
+- **Source:** CapRover
+- **Description:** Each one-click template declares typed input variables (`IOneClickVariable { id, label, defaultValue, validRegex, description }`), one of which may be the required magic `$$cap_appname` (deploy is refused with a clear error if empty). Substitution is plain string replacement of each variable id across the *entire serialized template JSON* — image names, volume paths, ports, even `dockerfileLines` — followed by a re-parse to guarantee valid JSON. `IOneClickAppModels.ts:13-19`, `OneClickAppDeployManager.ts:11-98`.
+- **Why add to Tengiz:** Distinct from recorded variable *generators* — this is the validation + substitution engine. Tengiz's `tengiz init`/scaffolding could ship a `variables:` block (name, default, regex, description), validate input against `validRegex` before deploy, and support `$$var` placeholders anywhere in a deploy manifest. Medium effort, high DX value.
+- **Detected:** 2026-08-19
+
+## Git URL Canonicalization (scp-style / HTTPS / SSH parsing)
+- **Source:** CapRover
+- **Description:** A single regex parses every git URL form — `https://github.com/o/r.git`, `git@github.com:o/r.git`, `ssh://git@host:2222/o/r.git` — extracting user, domain, port, owner, repo, and `.git` suffix, and normalizes to canonical clone URLs; `sanitizeRepoPathHttps` also converts scp-style paths. `GitHelper.ts:13-27, 117-155`.
+- **Why add to Tengiz:** Tengiz's `gitdeploy` accepts repo URLs from users/webhooks in ~5 input formats. This normalization utility (a Go regex/parser) makes `tengiz deploy --repo` and webhook `repoInfo` robust: consistent clone URLs, port-aware SSH, cleanly separated domain/owner/repo fields for display and git-clone. Distinct from recorded SSH host verification. Low effort, medium DX value.
+- **Detected:** 2026-08-19
+
+## Passphrase-Derived Encryption Key Model (No Key File)
+- **Source:** CapRover
+- **Description:** The "key" is any user passphrase ≥32 chars, hashed with SHA-256 and sliced to 32 bytes to form the AES-256-CTR key; encryption prepends a random 16-byte IV as hex, producing a self-contained `iv:payload` ciphertext. No separate key file is stored or needed — the passphrase is the key. `Encryptor.ts:7-61`.
+- **Why add to Tengiz:** Tengiz's `encrypt` package uses AES-256-GCM with a stored key file. A passphrase-derived mode enables "encrypt secrets with a passphrase only" — portable across machines and lets `tengiz secret set --passphrase` work in scripts/CI without touching `~/.tengiz`. The self-contained `iv:payload` format is a documented, copy-pasteable ciphertext. Low effort, medium value.
+- **Detected:** 2026-08-19
+
+## Runtime Constant Override via JSON File (`config-override.json`)
+- **Source:** CapRover
+- **Description:** Any value in the configs object (port numbers, image names, gzip defaults, max history) can be overridden at runtime by dropping a JSON file with matching keys into the data directory — no recompile, no env var; build-time overrides are layered under user overrides. `CaptainConstants.ts:10-15, 230-251`.
+- **Why add to Tengiz:** Tengiz already uses viper for `.tengiz.yaml`, but constants like the proxy listen port, port range (9000-9999), idle default, and image-name defaults are compiled in. A documented `~/.tengiz/override.json` layer gives operators an escape hatch for environment-specific tuning without touching code or environment plumbing. Low effort, medium value.
+- **Detected:** 2026-08-19
