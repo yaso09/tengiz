@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -56,4 +58,57 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 		}
 	}
 	return nil
+}
+
+var reclaimPattern = regexp.MustCompile(`(?i)total reclaimed space:\s*([0-9.]+)\s*(b|kb|mb|gb|tb)`)
+
+func parseReclaimed(output string) int64 {
+	m := reclaimPattern.FindStringSubmatch(output)
+	if len(m) < 3 {
+		return 0
+	}
+	value, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		return 0
+	}
+	var mult float64
+	switch strings.ToUpper(m[2]) {
+	case "B":
+		mult = 1
+	case "KB":
+		mult = 1e3
+	case "MB":
+		mult = 1e6
+	case "GB":
+		mult = 1e9
+	case "TB":
+		mult = 1e12
+	}
+	return int64(value * mult)
+}
+
+func (r *dockerRuntime) Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
+	args := []string{"system", "prune", "--filter", "label!=tengiz-app", "-f"}
+	if opts.All {
+		args = append(args, "-a")
+	}
+	if opts.Volumes {
+		args = append(args, "--volumes")
+	}
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return PruneResult{}, fmt.Errorf("docker system prune: %w\n%s", err, string(out))
+	}
+	output := string(out)
+	return PruneResult{ReclaimedBytes: parseReclaimed(output), Output: output}, nil
+}
+
+func (r *dockerRuntime) SystemDF(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "system", "df")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker system df: %w\n%s", err, string(out))
+	}
+	return string(out), nil
 }

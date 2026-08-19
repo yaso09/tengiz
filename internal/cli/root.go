@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -83,6 +85,11 @@ func init() {
 	logsCmd.Flags().String("since", "", "show logs since timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
 	logsCmd.Flags().String("until", "", "show logs before timestamp (e.g. 5m, 2h, 2024-01-01T00:00:00Z)")
 	logsCmd.Flags().String("grep", "", "filter logs with a case-sensitive pattern (client-side)")
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().BoolP("all", "a", false, "also remove unused images (not just dangling ones)")
+	cleanupCmd.Flags().Bool("volumes", false, "also remove unused volumes")
+	cleanupCmd.Flags().BoolP("force", "f", false, "don't prompt for confirmation")
+	cleanupCmd.Flags().Bool("dry-run", false, "show disk usage summary without removing anything")
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
@@ -100,6 +107,32 @@ func getEnv(cmd *cobra.Command) string {
 		return "production"
 	}
 	return env
+}
+
+func confirm(prompt string, in io.Reader) bool {
+	fmt.Print(prompt)
+	scanner := bufio.NewScanner(in)
+	if !scanner.Scan() {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
+	case "y", "yes":
+		return true
+	}
+	return false
+}
+
+func humanBytes(b int64) string {
+	const unit = 1000
+	if b < unit {
+		return fmt.Sprintf("%dB", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f%cB", math.Round(float64(b)/float64(div)*10)/10, "KMGTPE"[exp])
 }
 
 var initCmd = &cobra.Command{
@@ -595,6 +628,58 @@ var psCmd = &cobra.Command{
 				env = "-"
 			}
 			fmt.Printf("%-20s %-10s %-8s %-12s %-10s\n", a.Name, a.State, portStr, env, health)
+		}
+		return nil
+	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Remove unused Docker resources to reclaim disk space",
+	Long:  "Runs a label-filtered docker system prune. Containers, images, and volumes labeled with 'tengiz-app' are protected. Use --dry-run to preview disk usage first.",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return err
+		}
+		ctx := context.Background()
+
+		all, _ := cmd.Flags().GetBool("all")
+		volumes, _ := cmd.Flags().GetBool("volumes")
+		force, _ := cmd.Flags().GetBool("force")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		if dryRun {
+			out, err := rt.SystemDF(ctx)
+			if err != nil {
+				return err
+			}
+			fmt.Print(out)
+			return nil
+		}
+
+		description := "unused containers, dangling images, unused networks, and build cache"
+		if all {
+			description = "unused containers, unused images, unused networks, and build cache"
+		}
+		if volumes {
+			description += ", and unused volumes"
+		}
+		if !force {
+			if !confirm(fmt.Sprintf("This will remove %s. Continue? [y/N] ", description), os.Stdin) {
+				fmt.Println("Aborted.")
+				return nil
+			}
+		}
+
+		result, err := rt.Prune(ctx, runtime.PruneOptions{All: all, Volumes: volumes})
+		if err != nil {
+			return err
+		}
+		fmt.Print(result.Output)
+		if result.ReclaimedBytes > 0 {
+			fmt.Printf("Reclaimed %s\n", humanBytes(result.ReclaimedBytes))
 		}
 		return nil
 	},

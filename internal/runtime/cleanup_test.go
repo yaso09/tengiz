@@ -18,3 +18,51 @@ func TestStubKeepLastNImages(t *testing.T) {
 		t.Fatalf("KeepLastNImages() error = %v", err)
 	}
 }
+
+func TestParseReclaimed(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   int64
+	}{
+		{"empty output", "", 0},
+		{"no match", "Nothing to prune", 0},
+		{"zero bytes", "Total reclaimed space: 0B", 0},
+		{"lowercase k", "Total reclaimed space: 12.5kB", 12500},
+		{"megabytes", "Total reclaimed space: 3.5MB", 3500000},
+		{"gigabytes", "Total reclaimed space: 1.25GB", 1250000000},
+		{"no space before unit", "Total reclaimed space: 500MB", 500000000},
+		{"uppercase unit", "Total reclaimed space: 2KB", 2000},
+		{"unit is case insensitive", "Total reclaimed space: 1.5gb", 1500000000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseReclaimed(tt.output)
+			if got != tt.want {
+				t.Errorf("parseReclaimed(%q) = %d, want %d", tt.output, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStubPrune(t *testing.T) {
+	m := NewStub()
+	res, err := m.Prune(context.Background(), PruneOptions{All: true, Volumes: true})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if res.ReclaimedBytes != 0 || res.Output != "" {
+		t.Errorf("unexpected result: %+v", res)
+	}
+}
+
+func TestStubSystemDF(t *testing.T) {
+	m := NewStub()
+	out, err := m.SystemDF(context.Background())
+	if err != nil {
+		t.Fatalf("SystemDF() error = %v", err)
+	}
+	if out != "" {
+		t.Errorf("unexpected output: %q", out)
+	}
+}

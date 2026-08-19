@@ -28,6 +28,16 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type PruneOptions struct {
+	All     bool // also remove unused images (docker -a), not just dangling
+	Volumes bool // also remove unused named volumes (docker --volumes)
+}
+
+type PruneResult struct {
+	ReclaimedBytes int64
+	Output         string
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
@@ -46,6 +56,8 @@ type Manager interface {
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
+	Prune(ctx context.Context, opts PruneOptions) (PruneResult, error)
+	SystemDF(ctx context.Context) (string, error)
 }
 
 type stubManager struct{}
@@ -120,4 +132,12 @@ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
 	return nil
+}
+
+func (m *stubManager) Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
+	return PruneResult{}, nil
+}
+
+func (m *stubManager) SystemDF(ctx context.Context) (string, error) {
+	return "", nil
 }

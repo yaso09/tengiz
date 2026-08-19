@@ -244,6 +244,23 @@ func TestFrameworkNixpacksConstant(t *testing.T) {
 	}
 }
 
+func TestDockerBuildArgs(t *testing.T) {
+	args := dockerBuildArgs("myapp", "staging", "tengiz-apps/myapp:staging-v1", "/src", []string{"--secret", "id=NPM_TOKEN,src=/tmp/tok"})
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"build",
+		"--label tengiz-app=myapp",
+		"--label tengiz-env=staging",
+		"-t tengiz-apps/myapp:staging-v1",
+		"/src",
+		"--secret id=NPM_TOKEN,src=/tmp/tok",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("dockerBuildArgs() missing %q in %q", want, joined)
+		}
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }
