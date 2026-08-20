@@ -18,6 +18,7 @@
 - **Multi-environment** — Isolate dev/staging/production with `--env` flag, env-scoped config overrides, and separate state files.
 - **Preview deployments** — Ephemeral per-PR environments at `pr-<number>.<app>.tengiz.local`, auto-created on PR open, auto-cleaned on PR close.
 - **Deployment history** — Track deploy versions with automatic rollback foundation (last 10 deployments preserved).
+- **Docker housekeeping** — `tengiz cleanup` prunes unused containers, images, networks, volumes, and build cache; Tengiz-managed containers are always protected.
 - **Health check configuration** — Optional HTTP endpoint readiness checks via `.tengiz.yaml`.
 - **No daemon required** — Stateless CLI, uses your local Docker daemon.
 - **Self-contained** — Auto-generates Dockerfiles when none exist.
@@ -148,6 +149,18 @@ The proxy also starts an **admin API** on `127.0.0.1:9099` for dynamic route man
 List all deployed applications and their status.
 
 Output: `NAME`, `STATE` (running/stopped), `PORT`, `ENVIRONMENT`, `HEALTH`.
+
+### `tengiz cleanup`
+
+Remove unused Docker resources to reclaim disk space. Prunes stopped containers, unused images, networks, volumes, and build cache.
+
+| Flag | Description |
+|------|-------------|
+| `-a`, `--all` | Remove all unused images, not just dangling ones |
+| `-v`, `--volumes` | Also remove unused volumes |
+| `-d`, `--df` | Show Docker disk usage summary (`docker system df`) without pruning anything |
+
+Tengiz-managed containers are always protected via the `tengiz-app` label filter — scale-to-zero stopped containers and their images are never removed. Run `tengiz cleanup --df` first to preview reclaimable space.
 
 ### `tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] <app>`
 
