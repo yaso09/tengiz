@@ -1804,3 +1804,81 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** `InstanceSettings.public_port_min` / `public_port_max`: restrict the range of host ports available for port mappings, complementing dynamic port allocation.
 - **Why add to Tengiz:** Tengiz hardcodes 9000-9999 for ports (#Quirks). Letting operators constrain the range (firewall-friendly, corporate policy) or expand it is a small config knob. `.tengiz.yaml`'da `server.port_min: 10000`, `server.port_max: 10999`. Low effort (range config in the allocator), removes a hardcoded assumption.
 - **Detected:** 2026-08-20
+
+## Forward-Auth SSO Gating (Protect App Domains with OIDC SSO)
+- **Source:** Dokploy
+- **Description:** `ForwardAuthRouter` (proprietary/forward-auth.ts): deploys an `oauth2-proxy` v7 container wired to the org's OIDC provider, derives a deterministic cookie secret via HMAC (instance secret + server/base-domain salt), and injects a `forwardAuth` middleware in front of any app's domain so unauthenticated requests are 302-redirected to the SSO login page (with a `*-errors` middleware rewriting 401/403 → login redirect). Per-domain toggle: `enableForwardAuthOnDomain` requires the proxy actually running (4s status check) before wiring the domain.
+- **Why add to Tengiz:** SSO-in-front-of-app is the single most distinctive enterprise capability Dokploy has: protecting staging/internal apps behind OIDC without changing app code. Tengiz has none of this today (its proxy only does basic auth #32). A Go equivalent is very feasible — run `oauth2-proxy` (or a Go session middleware) and gate routing per-domain. `tengiz domain auth <app> --oidc ...` enables. Medium effort, high value for team-hosted platforms.
+- **Detected:** 2026-08-20
+
+## AI Log Triage (LLM Analysis of Build/Runtime Logs)
+- **Source:** Dokploy
+- **Description:** `ai.analyzeLogs` (ai.ts:228): sends build or runtime container logs to a configured LLM (OpenAI/Anthropic/Ollama/Gemini, auto-detected by URL fingerprinting in `selectAIProvider`) with a structured DevOps prompt returning Summary / Issues Found / Root Cause / Suggested Fix. Enabled-provider allow-list (`saveCustomProviders`) prevents data exfiltration to arbitrary endpoints. Also `ai.suggest` generates up to 3 full docker-compose variants with sslip.io domains and env vars from a natural-language prompt, and `ai.deploy` persists the suggestion as a running service in one mutation.
+- **Why add to Tengiz:** `tengiz logs --analyze` would turn the existing log command into a debugging assistant (`tengiz logs <app> --analyze --model ollama`). The URL-fingerprinting + provider allow-list is a clean BYO-LLM pattern for a self-hosted CLI. Low-medium effort (one HTTP call + prompt), high DX value; complements AI Assistant (#132) which only covers compose generation.
+- **Detected:** 2026-08-20
+
+## Docker Event Feed (Host Activity Stream)
+- **Source:** Dokploy
+- **Description:** `docker.getEvents` (docker.ts:454): runs `docker events --since <ts> --until <ts> --format '{{json .}}'` and returns parsed create/start/die/stop events with actor attributes for the last N minutes (1–1440), newest-first — powering a host activity feed.
+- **Why add to Tengiz:** `tengiz events [--minutes 60]` gives operators a live-ish view of what's happening on the host ("why did this container die?") without a daemon socket client — pure `os/exec` + JSON parse. Pairs with Event Logging (#7) for a cross-check between platform actions and actual Docker activity. Low effort, high debugging value.
+- **Detected:** 2026-08-20
+
+## In-Container File Browser & Editor (docker cp Based)
+- **Source:** Dokploy
+- **Description:** `dockerRouter` (docker.ts:308-452): full remote file operations on a running container — `listContainerFiles` (`docker exec ls -1Ap`), `readContainerFile` (`cat | base64`, 512KB cap with truncation flag), `writeContainerFile`/`uploadFileToContainer` (write base64 to a `/tmp/dokploy-*` temp file then `docker cp`, always removing the temp), `deleteContainerFile` (root-protected). Friendly errors when the image lacks shell utilities (exit codes 126/127).
+- **Why add to Tengiz:** Beyond Container Entering (#140, an interactive shell), operators often need to edit one config file in a running container. `tengiz fs ls/read/write/upload <app> <path>` via the temp-file + `docker cp` technique is a distinctive DX feature with zero injection risk (absolute-path + null-byte validation). Low effort, complements Log Filtering and the App Report.
+- **Detected:** 2026-08-20
+
+## DNS Provider Management (Cloudflare / AWS Route53 Record CRUD)
+- **Source:** Dokploy
+- **Description:** `dnsProviderRouter` (dns-provider.ts): first-class DNS provider resources with CRUD, `testConnection` (real API probe), `listZones`, `listRecords`, `createRecord` (A/CNAME), `updateRecord`, `deleteRecord` over a pluggable `DnsClient` interface (Cloudflare Bearer token + AWS Route53 SDK backends). Provider configs are secret-masked on every read (`maskDnsProviderConfig`) and merge-partial on test.
+- **Why add to Tengiz:** Standalone DNS management is entirely absent — users point custom domains manually at Tengiz's IP. `tengiz dns create-record app.example.com A <ip>` automates the domain setup step (#10) and is the natural precursor to DNS-01 challenges later. The `DnsClient` interface is an easy Go `interface` to replicate (Cloudflare REST + Route53 via AWS SDK). Low-medium effort, high operational value.
+- **Detected:** 2026-08-20
+
+## Auto-Domain Generation (sslip.io Wildcard DNS Minting)
+- **Source:** Dokploy
+- **Description:** `generateRandomDomain()` (templates/index.ts): mints an instant subdomain `{appName}-{hash}-{ip-with-dashes}.sslip.io` from the server's public IP — sslip.io is a public wildcard DNS that resolves any subdomain to the embedded IP, so no user DNS setup is needed. 63-char DNS-label truncation handled (40-char app-name cap). Used by preview deployments (`previewWildcard`) and AI/template compose flows.
+- **Why add to Tengiz:** "Deploy and get a working URL immediately" is a killer onboarding/demo feature — no DNS configuration, no custom-domain step. `tengiz deploy --auto-domain` would give every app a reachable URL out of the box, and it pairs with preview deployments (#2) for instant PR environments. Low effort (string build + public-IP lookup), very high first-run value.
+- **Detected:** 2026-08-20
+
+## Template Variable Generator Engine (${password} / ${jwt} / ${domain} / ${randomPort})
+- **Source:** Dokploy
+- **Description:** `processTemplate`/`processValue` (templates/processors.ts): a `${...}` templating engine for one-click service templates with built-in generators — `${domain}` (sslip.io wildcard), `${base64:N}`/`${password:N}`/`${hash:N}`, `${uuid}`, `${timestamp[s]}`, `${randomPort}`, `${jwt[:secret][:payload]}` (HS256 JWT with configurable payload), `${username}`/`${email}` (faker). Two-pass resolution so variables can reference other variables; expands into domains, envs (array/object), and config-file mounts.
+- **Why add to Tengiz:** Service templates (#64/#104) are only as good as their variable resolution. A generator engine lets `tengiz init --template wordpress` auto-generate unique passwords, JWT secrets, and wildcard domains in one shot — no manual "create secret, paste it" choreography. The generator functions are language-agnostic and trivial to port to Go. Low effort, high one-click-template quality value.
+- **Detected:** 2026-08-20
+
+## LibSQL (Turso sqld) Managed Database with Primary/Replica Replication
+- **Source:** Dokploy
+- **Description:** `libsqlRouter` + `buildLibsql` (libsql.ts): provisions Turso's SQLite-compatible `libsql-server` with a **primary/replica topology** (`SQLD_NODE` + `SQLD_PRIMARY_URL`), HTTP Basic auth derived from DB credentials, **three published ports** (HTTP 8080, gRPC 5001, admin 5000), optional multi-tenant namespaces (`--enable-namespaces`), and a named volume at `/var/lib/sqld`. File-level backups via `tar` + gzip.
+- **Why add to Tengiz:** LibSQL is the closest thing to "Vercel serverless SQLite" and Dokploy is the only alternative that provisions it with replication and gRPC — Tengiz's managed DB story (#63) currently lists only Postgres/MySQL/Redis. `tengiz db create --type libsql --node primary` with an optional replica gives scale-to-zero apps a real SQLite server with replication. Medium effort, strong differentiator.
+- **Detected:** 2026-08-20
+
+## In-Container Database Password Rotation (docker exec ALTER USER)
+- **Source:** Dokploy
+- **Description:** `changePassword` (postgres.ts:422, mysql.ts, mariadb.ts, mongo.ts, redis.ts): rotates DB credentials by running the native ALTER command *inside the live container* via `docker exec` (`psql ... ALTER USER`, `mysql ... ALTER USER ... FLUSH PRIVILEGES`, `mongosh ... changeUserPassword`, `redis-cli ... CONFIG SET requirepass`), wrapped in a transaction that also persists the new password. MySQL/MariaDB support `root` vs `user` rotation. Errors if no running container.
+- **Why add to Tengiz:** Rotating a leaked or expiring DB password today requires full redeploy or manual Docker. `tengiz db passwd <app>` does it live, without recreating the container or touching data, and keeps stored state in sync — the `docker exec`-based pattern maps directly to Tengiz's exec-based runtime. Low effort, high security-hygiene value once managed DBs (#63) exist.
+- **Detected:** 2026-08-20
+
+## Platform Self-Backup (Platform Metadata + Filesystem + Encryption Keys → S3)
+- **Source:** Dokploy
+- **Description:** `runWebServerBackup` (utils/backups/web-server.ts): backups up the platform *itself* — `pg_dump` of the platform's metadata DB, `rsync` of the whole data directory (excluding backups), zipped and uploaded to S3 via rclone. Optional `includeEncryptionKey` exports the AES encryption keys into the archive so secrets can be decrypted after restore (file placed at BASE_PATH for the keyring to pick up as a decryption fallback).
+- **Why add to Tengiz:** Full System Backup (#82) archives `~/.tengiz/` state but not the encryption keys needed to restore encrypted secrets — so a restore is only half-usable. A Dokploy-style self-backup (`tengiz backup self --include-keys`) that dumps state + config + keyring to S3 completes disaster recovery. The optional key export is a thoughtful, distinctive touch. Low-medium effort, high DR value.
+- **Detected:** 2026-08-20
+
+## Deep Host Health Diagnostics (inotify / OOM / conntrack / Network Exhaustion)
+- **Source:** Dokploy
+- **Description:** `getServerHealth` (server-health.ts): one read-only probe gathers container/service counts, memory/CPU/disk, **inotify limits** (`max_user_watches`, current instances, whether persisted in sysctl), Docker daemon config, a `journalctl -u docker` window filtered for OOM/conntrack/"no space"/"too many open files", and per-network IP utilization (capacity from subnet prefix, % used). Also computes org-wide memory/CPU reservation from the DB.
+- **Why add to Tengiz:** `tengiz doctor` (#114) checks prerequisites; this surfaces the *actual failure modes* of a Docker-on-VPS host — inotify exhaustion is the classic silent killer, and OOM/conntrack journal scans pinpoint why containers died. A Go reimplementation (pure Go + `journalctl`) gives operators actionable, specific diagnostics. Low-medium effort, complements Server Doctor (#1682) and Server Monitoring (#73).
+- **Detected:** 2026-08-20
+
+## Compose File Randomization (Isolated Multi-Instance Deployments)
+- **Source:** Dokploy
+- **Description:** `randomizeSpecificationFile`/`randomizeComposeFile` (utils/docker/compose.ts, services/compose.ts): parses a compose YAML and appends a random hex suffix to every service, volume, network, config, and secret name — including rewriting `depends_on`, `container_name`, `links`, `extends`, `volumes_from` references — so the *same* compose template can run N times on one host without name collisions. Isolated deployments also create a dedicated attachable network.
+- **Why add to Tengiz:** This solves "spin up N isolated instances of the same stack" — directly enabling previews of compose apps (#2/#91), per-tenant demos, and one-click templates (#64) on a single host. A `--randomize` flag on compose deploy prevents the classic "name already in use" collision wall. Medium effort (YAML parse + reference rewrite), high preview/tenant value.
+- **Detected:** 2026-08-20
+
+## External Docker Network Import & Sync
+- **Source:** Dokploy
+- **Description:** `findNetworksToSync`/`importDockerNetworks`/`recreateNetwork` (services/network.ts): diffs live Docker networks against the platform's records, returns **importable** ones (adopting existing external networks, excluding reserved: bridge/host/none/ingress/docker_gwbridge) and **missing** ones, plus a `recreate` operation that rebuilds a network from stored IPAM config (subnet, gateway, IPRange, internal, attachable, IPv4/IPv6, MTU).
+- **Why add to Tengiz:** Migrating an existing multi-service setup into Tengiz (compose #91, custom networks #30) usually requires recreating networks by hand. Importing existing networks removes a painful migration step, and IPAM-aware creation makes `tengiz network create --subnet 10.10.0.0/16` a power feature. Low-medium effort (`docker network inspect` parse + `docker network create`), high migration value.
+- **Detected:** 2026-08-20
