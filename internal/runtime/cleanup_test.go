@@ -201,3 +201,10 @@ func TestParsePruneOutputEmpty(t *testing.T) {
 		t.Fatalf("expected zero result, got %+v", res)
 	}
 }
+
+func TestDockerRuntimeImplementsManager(t *testing.T) {
+	var m Manager = &dockerRuntime{}
+	if m == nil {
+		t.Fatal("dockerRuntime does not implement Manager")
+	}
+}

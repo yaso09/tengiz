@@ -60,8 +60,39 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 	return nil
 }
 
+func (r *dockerRuntime) runPrune(ctx context.Context, args []string) (pruneResult, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return pruneResult{}, fmt.Errorf("docker %s: %w\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return parsePruneOutput(out), nil
+}
+
 func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupReport, error) {
-	return CleanupReport{}, nil
+	var report CleanupReport
+	var freed uint64
+	for _, args := range cleanupPruneJobs(opts) {
+		res, err := r.runPrune(ctx, args)
+		if err != nil {
+			return report, err
+		}
+		freed += res.freed
+		switch args[0] {
+		case "container":
+			report.ContainersRemoved = res.removed
+		case "image":
+			report.ImagesRemoved = res.removed
+		case "volume":
+			report.VolumesRemoved = res.removed
+		case "network":
+			report.NetworksRemoved = res.removed
+		case "builder":
+			report.BuildCacheRemoved = res.removed
+		}
+	}
+	report.TotalFreed = formatBytes(freed)
+	return report, nil
 }
 
 func containerPruneArgs() []string {
