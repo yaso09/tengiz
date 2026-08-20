@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -56,4 +58,171 @@ func (r *dockerRuntime) KeepLastNImages(ctx context.Context, appName string, n i
 		}
 	}
 	return nil
+}
+
+func (r *dockerRuntime) runPrune(ctx context.Context, args []string) (pruneResult, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return pruneResult{}, fmt.Errorf("docker %s: %w\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return parsePruneOutput(out), nil
+}
+
+func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupReport, error) {
+	var report CleanupReport
+	var freed uint64
+	for _, args := range cleanupPruneJobs(opts) {
+		res, err := r.runPrune(ctx, args)
+		if err != nil {
+			return report, err
+		}
+		freed += res.freed
+		switch args[0] {
+		case "container":
+			report.ContainersRemoved = res.removed
+		case "image":
+			report.ImagesRemoved = res.removed
+		case "volume":
+			report.VolumesRemoved = res.removed
+		case "network":
+			report.NetworksRemoved = res.removed
+		case "builder":
+			report.BuildCacheRemoved = res.removed
+		}
+	}
+	report.TotalFreed = formatBytes(freed)
+	return report, nil
+}
+
+func containerPruneArgs() []string {
+	return []string{"container", "prune", "-f", "--filter", "label!=" + labelKey}
+}
+
+func imagePruneArgs() []string {
+	return []string{"image", "prune", "-a", "-f"}
+}
+
+func volumePruneArgs() []string {
+	return []string{"volume", "prune", "-f"}
+}
+
+func networkPruneArgs() []string {
+	return []string{"network", "prune", "-f"}
+}
+
+func builderPruneArgs() []string {
+	return []string{"builder", "prune", "-f"}
+}
+
+func cleanupPruneJobs(opts CleanupOptions) [][]string {
+	var jobs [][]string
+	if opts.All || opts.Containers {
+		jobs = append(jobs, containerPruneArgs())
+	}
+	if opts.All || opts.Images {
+		jobs = append(jobs, imagePruneArgs())
+	}
+	if opts.All || opts.Volumes {
+		jobs = append(jobs, volumePruneArgs())
+	}
+	if opts.All || opts.Networks {
+		jobs = append(jobs, networkPruneArgs())
+	}
+	if opts.All || opts.BuildCache {
+		jobs = append(jobs, builderPruneArgs())
+	}
+	return jobs
+}
+
+type pruneResult struct {
+	removed int
+	freed   uint64
+}
+
+var totalSpaceRe = regexp.MustCompile(`(?m)^(?:Total reclaimed space|Total):\s*(.+)$`)
+
+func parsePruneOutput(out []byte) pruneResult {
+	var res pruneResult
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if m := totalSpaceRe.FindStringSubmatch(line); m != nil {
+			res.freed = parseSize(m[1])
+			continue
+		}
+		if isShortID(line) || strings.HasPrefix(line, "deleted:") || isCacheRow(line) {
+			res.removed++
+		}
+	}
+	return res
+}
+
+func isShortID(s string) bool {
+	if len(s) < 12 || len(s) > 64 {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+func isCacheRow(s string) bool {
+	fields := strings.Fields(s)
+	if len(fields) < 4 {
+		return false
+	}
+	return isShortID(fields[0])
+}
+
+var sizeRe = regexp.MustCompile(`^\s*([0-9.]+)\s*(b|kb|mb|gb|tb|kib|mib|gib|tib)?\s*$`)
+
+func parseSize(s string) uint64 {
+	m := sizeRe.FindStringSubmatch(strings.ToLower(strings.TrimSpace(s)))
+	if m == nil {
+		return 0
+	}
+	num, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		return 0
+	}
+	var mult float64
+	switch m[2] {
+	case "", "b":
+		mult = 1
+	case "kb":
+		mult = 1000
+	case "mb":
+		mult = 1e6
+	case "gb":
+		mult = 1e9
+	case "tb":
+		mult = 1e12
+	case "kib":
+		mult = 1024
+	case "mib":
+		mult = 1024 * 1024
+	case "gib":
+		mult = 1024 * 1024 * 1024
+	case "tib":
+		mult = 1024 * 1024 * 1024 * 1024
+	default:
+		mult = 1
+	}
+	return uint64(num * mult)
+}
+
+func formatBytes(b uint64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.2fGB", float64(b)/(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.2fMB", float64(b)/(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%.2fkB", float64(b)/(1<<10))
+	default:
+		return fmt.Sprintf("%dB", b)
+	}
 }

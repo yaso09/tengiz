@@ -98,6 +98,7 @@ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppCon
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRTForDeploy) Cleanup(ctx context.Context, opts runtime.CleanupOptions) (runtime.CleanupReport, error) { return runtime.CleanupReport{}, nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}
@@ -374,5 +375,74 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
 		}
+	}
+}
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCommandFlags(t *testing.T) {
+	for _, flag := range []string{"containers", "images", "volumes", "networks", "build-cache"} {
+		f := cleanupCmd.Flags().Lookup(flag)
+		if f == nil {
+			t.Errorf("cleanupCmd missing --%s flag", flag)
+		}
+	}
+}
+
+func TestCleanupOptionsFromFlagsDefaultAll(t *testing.T) {
+	opts := cleanupOptionsFromFlags(cleanupCmd)
+	if !opts.All {
+		t.Error("expected All=true when no category flags are set")
+	}
+}
+
+func TestCleanupOptionsFromFlagsSelective(t *testing.T) {
+	cleanupCmd.Flags().Set("images", "true")
+	defer cleanupCmd.Flags().Set("images", "false")
+	opts := cleanupOptionsFromFlags(cleanupCmd)
+	if opts.All {
+		t.Error("expected All=false when a category flag is set")
+	}
+	if !opts.Images {
+		t.Error("expected Images=true")
+	}
+	if opts.Containers {
+		t.Error("expected Containers=false")
+	}
+}
+
+func TestPrintCleanupReportEmpty(t *testing.T) {
+	out := printCleanupReport(runtime.CleanupReport{})
+	if !strings.Contains(out, "nothing to clean") {
+		t.Errorf("expected 'nothing to clean', got: %q", out)
+	}
+}
+
+func TestPrintCleanupReportPopulated(t *testing.T) {
+	out := printCleanupReport(runtime.CleanupReport{
+		ContainersRemoved: 2,
+		ImagesRemoved:     5,
+		VolumesRemoved:    1,
+		TotalFreed:        "1.23GB",
+	})
+	if !strings.Contains(out, "containers removed: 2") {
+		t.Errorf("missing container count: %q", out)
+	}
+	if !strings.Contains(out, "images removed: 5") {
+		t.Errorf("missing image count: %q", out)
+	}
+	if !strings.Contains(out, "volumes removed: 1") {
+		t.Errorf("missing volume count: %q", out)
+	}
+	if !strings.Contains(out, "space reclaimed: 1.23GB") {
+		t.Errorf("missing reclaimed space: %q", out)
 	}
 }
