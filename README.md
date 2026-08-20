@@ -227,6 +227,28 @@ Remove an application completely — stops the container, deletes it, and cleans
 |----------|-------------|
 | `app` | Application name (required) |
 
+### `tengiz cleanup`
+
+Prune unused Docker resources to reclaim disk space.
+
+| Flag | Description |
+|------|-------------|
+| `--containers` | Prune stopped containers (Tengiz-managed containers are always preserved) |
+| `--images` | Prune dangling (untagged) images only — tagged `tengiz-apps/*` images are never removed |
+| `--volumes` | Prune unused volumes |
+| `--networks` | Prune unused networks |
+| `--build-cache` | Prune BuildKit build cache |
+| `--dry-run` | Preview what would be reclaimed without deleting anything |
+
+With no category flags, all categories run. Tengiz-managed containers are protected by their `tengiz-app=*` label, and old Tengiz image versions are capped per app automatically at deploy time.
+
+Examples:
+```
+tengiz cleanup
+tengiz cleanup --containers --images
+tengiz cleanup --dry-run
+```
+
 ### `tengiz rollback <app>`
 
 Rollback to the previous deployment. The previous active container is started on a new port, the proxy route is updated, and the current container is stopped and removed. Deployment statuses are updated in the deployment history.
