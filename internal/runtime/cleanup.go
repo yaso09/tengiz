@@ -23,8 +23,34 @@ type CleanupResult struct {
 	ReclaimedSpace    string
 }
 
+func cleanupArgs(opts CleanupOptions) []string {
+	args := []string{"system", "prune", "-f"}
+	if opts.All {
+		args = append(args, "-a")
+	}
+	if opts.Volumes {
+		args = append(args, "--volumes")
+	}
+	args = append(args, "--filter", "label!=tengiz-app")
+	return args
+}
+
 func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, error) {
-	return CleanupResult{}, nil
+	cmd := exec.CommandContext(ctx, "docker", cleanupArgs(opts)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return CleanupResult{}, fmt.Errorf("docker system prune: %w\n%s", err, string(out))
+	}
+	return parsePruneOutput(string(out)), nil
+}
+
+func DiskUsage(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "system", "df")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker system df: %w\n%s", err, string(out))
+	}
+	return string(out), nil
 }
 
 func parsePruneOutput(output string) CleanupResult {

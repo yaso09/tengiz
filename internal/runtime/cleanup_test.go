@@ -108,3 +108,40 @@ Total reclaimed space: 5MB`
 		t.Errorf("ReclaimedSpace = %q, want %q", got.ReclaimedSpace, "5MB")
 	}
 }
+
+func TestCleanupArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		opts CleanupOptions
+		want []string
+	}{
+		{"default protects tengiz", CleanupOptions{},
+			[]string{"system", "prune", "-f", "--filter", "label!=tengiz-app"}},
+		{"all images", CleanupOptions{All: true},
+			[]string{"system", "prune", "-f", "-a", "--filter", "label!=tengiz-app"}},
+		{"volumes", CleanupOptions{Volumes: true},
+			[]string{"system", "prune", "-f", "--volumes", "--filter", "label!=tengiz-app"}},
+		{"all and volumes", CleanupOptions{All: true, Volumes: true},
+			[]string{"system", "prune", "-f", "-a", "--volumes", "--filter", "label!=tengiz-app"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := cleanupArgs(tt.opts)
+			if len(got) != len(tt.want) {
+				t.Fatalf("cleanupArgs() = %v (len=%d), want %v (len=%d)", got, len(got), tt.want, len(tt.want))
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("cleanupArgs()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestDockerRuntimeImplementsCleanup(t *testing.T) {
+	var iface Manager = &dockerRuntime{}
+	if iface == nil {
+		t.Fatal("dockerRuntime does not implement Manager")
+	}
+}
