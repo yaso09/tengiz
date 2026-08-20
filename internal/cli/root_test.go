@@ -98,6 +98,7 @@ func (m *mockRTForDeploy) CreateFromImage(ctx context.Context, cfg *types.AppCon
 func (m *mockRTForDeploy) RemoveImage(ctx context.Context, imageTag string) error { return nil }
 func (m *mockRTForDeploy) KeepLastNImages(ctx context.Context, appName string, n int) error { return nil }
 func (m *mockRTForDeploy) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts runtime.RunOptions) error { return nil }
+func (m *mockRTForDeploy) Cleanup(ctx context.Context, opts runtime.CleanupOptions) ([]runtime.CleanupResult, error) { return nil, nil }
 
 func TestMockRTForDeployImplementsManager(t *testing.T) {
 	var m runtime.Manager = &mockRTForDeploy{}
@@ -373,6 +374,85 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 	for name, found := range expected {
 		if !found {
 			t.Fatalf("config subcommand %q not found", name)
+		}
+	}
+}
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Use != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCmdFlags(t *testing.T) {
+	flags := cleanupCmd.Flags()
+	for _, f := range []string{"containers", "images", "volumes", "networks", "build-cache", "dry-run"} {
+		if flags.Lookup(f) == nil {
+			t.Errorf("cleanupCmd missing --%s flag", f)
+		}
+	}
+}
+
+func TestCleanupCategoryFlags(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("containers", false, "")
+	cmd.Flags().Bool("images", false, "")
+	cmd.Flags().Bool("volumes", false, "")
+	cmd.Flags().Bool("networks", false, "")
+	cmd.Flags().Bool("build-cache", false, "")
+	cmd.Flags().Bool("dry-run", false, "")
+
+	if err := cmd.ParseFlags([]string{"--containers", "--build-cache"}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	got := cleanupCategoryFlags(cmd)
+	want := []runtime.CleanupCategory{runtime.CleanupContainers, runtime.CleanupBuildCache}
+	if len(got) != len(want) {
+		t.Fatalf("cleanupCategoryFlags() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("cleanupCategoryFlags()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestCleanupCategoryFlagsNone(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("containers", false, "")
+	cmd.Flags().Bool("images", false, "")
+	cmd.Flags().Bool("volumes", false, "")
+	cmd.Flags().Bool("networks", false, "")
+	cmd.Flags().Bool("build-cache", false, "")
+	cmd.Flags().Bool("dry-run", false, "")
+
+	if err := cmd.ParseFlags(nil); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	got := cleanupCategoryFlags(cmd)
+	if len(got) != 0 {
+		t.Errorf("cleanupCategoryFlags() = %v, want empty", got)
+	}
+}
+
+func TestHumanBytes(t *testing.T) {
+	tests := []struct {
+		input    uint64
+		expected string
+	}{
+		{0, "0 B"},
+		{512, "512 B"},
+		{2048, "2.0 KB"},
+		{3 * 1024 * 1024, "3.0 MB"},
+		{5 * 1024 * 1024 * 1024, "5.0 GB"},
+	}
+	for _, tt := range tests {
+		if got := humanBytes(tt.input); got != tt.expected {
+			t.Errorf("humanBytes(%d) = %q, want %q", tt.input, got, tt.expected)
 		}
 	}
 }

@@ -67,6 +67,13 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
+	rootCmd.AddCommand(cleanupCmd)
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers (preserves Tengiz-managed containers)")
+	cleanupCmd.Flags().Bool("images", false, "prune dangling (untagged) images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune BuildKit build cache")
+	cleanupCmd.Flags().Bool("dry-run", false, "preview what would be reclaimed without deleting")
 	notificationCmd.AddCommand(notificationEnableCmd)
 	notificationCmd.AddCommand(notificationDisableCmd)
 	notificationCmd.AddCommand(notificationConfigCmd)
@@ -1089,6 +1096,57 @@ Use --tail N to show only the last N lines of the latest build log.`,
 	},
 }
 
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Clean up unused Docker resources",
+	Long: `Prune unused Docker containers, images, volumes, networks, and build cache.
+
+Tengiz-managed containers (labeled tengiz-app=*) are always preserved.
+Only dangling (untagged) images are removed, so tagged Tengiz images survive.
+Old Tengiz image versions are capped per app automatically at deploy time.
+
+Use category flags to clean specific resources. With no flags, all categories run.
+Use --dry-run to preview what would be reclaimed without deleting anything.
+
+Examples:
+  tengiz cleanup
+  tengiz cleanup --containers --images
+  tengiz cleanup --dry-run`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+
+		results, err := rt.Cleanup(cmd.Context(), runtime.CleanupOptions{
+			Categories: cleanupCategoryFlags(cmd),
+			DryRun:     dryRun,
+		})
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+
+		if len(results) == 0 {
+			fmt.Println("[tengiz] nothing to clean")
+			return nil
+		}
+
+		fmt.Printf("%-12s %-14s %s\n", "CATEGORY", "RECLAIMED", "STATUS")
+		for _, res := range results {
+			status := "done"
+			if res.Error != "" {
+				status = "error: " + res.Error
+			} else if res.DryRun {
+				status = "would reclaim (dry-run)"
+			}
+			fmt.Printf("%-12s %-14s %s\n", res.Category, humanBytes(res.Reclaimed), status)
+		}
+		return nil
+	},
+}
+
 var runCmd = &cobra.Command{
 	Use:   "run <app> [--] <command> [args...]",
 	Short: "Run a one-off command in a temporary container",
@@ -1763,6 +1821,38 @@ func maskSecret(s string) string {
 		return "****"
 	}
 	return s[:1] + "**" + s[len(s)-1:]
+}
+
+func cleanupCategoryFlags(cmd *cobra.Command) []runtime.CleanupCategory {
+	var categories []runtime.CleanupCategory
+	for _, c := range []struct {
+		name string
+		cat  runtime.CleanupCategory
+	}{
+		{"containers", runtime.CleanupContainers},
+		{"images", runtime.CleanupImages},
+		{"volumes", runtime.CleanupVolumes},
+		{"networks", runtime.CleanupNetworks},
+		{"build-cache", runtime.CleanupBuildCache},
+	} {
+		if on, _ := cmd.Flags().GetBool(c.name); on {
+			categories = append(categories, c.cat)
+		}
+	}
+	return categories
+}
+
+func humanBytes(n uint64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/float64(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/float64(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/float64(1<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
 }
 
 func getwd() string {
