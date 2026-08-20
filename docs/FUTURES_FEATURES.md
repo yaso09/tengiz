@@ -1882,3 +1882,53 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** `findNetworksToSync`/`importDockerNetworks`/`recreateNetwork` (services/network.ts): diffs live Docker networks against the platform's records, returns **importable** ones (adopting existing external networks, excluding reserved: bridge/host/none/ingress/docker_gwbridge) and **missing** ones, plus a `recreate` operation that rebuilds a network from stored IPAM config (subnet, gateway, IPRange, internal, attachable, IPv4/IPv6, MTU).
 - **Why add to Tengiz:** Migrating an existing multi-service setup into Tengiz (compose #91, custom networks #30) usually requires recreating networks by hand. Importing existing networks removes a painful migration step, and IPAM-aware creation makes `tengiz network create --subnet 10.10.0.0/16` a power feature. Low-medium effort (`docker network inspect` parse + `docker network create`), high migration value.
 - **Detected:** 2026-08-20
+
+---
+
+## Native Cron Task Scheduler (Concurrency Policies, Suspension, One-Off Runs)
+- **Source:** Dokku
+- **Description:** First-class per-app cron task management (`dokku cron:list/report/set`). Tasks are declared in `app.json` (`command`, `schedule`, `concurrency-policy`, `maintenance`), validated with `robfig/cron/v3` (5-field + descriptors like `@daily`), and written to the host crontab for the docker-local scheduler. **Concurrency policies** per task: `allow` (default), `forbid` (fail if a container with the same cron-id label is running), `replace` (stop/kill the running one first). **Suspension/resume** at two levels: app-wide `maintenance` (global-cascade) and per-task `maintenance.<id>`. **One-off run**: `dokku cron:run <app> <id> [--detach] [--ttl-seconds N]` dispatches a task immediately. Tasks get deterministic content-hashed IDs, optional `mailto`/`mailfrom` notifications, shell-tokenized command validation at deploy time, and cron-container logs routed to a dedicated sink (vector-cron-sink).
+- **Why add to Tengiz:** The existing "Scheduled Tasks / Cron Jobs" (#54) is only a sketch (`docker exec` on an interval). Dokku's model is production-grade: concurrency control prevents overlapping job runs, per-task suspension enables maintenance windows, and `cron:run --ttl-seconds` gives ad-hoc execution with a hard deadline. Maps cleanly to `.tengiz.yaml`'da `cron:` + `robfig/cron` (already referenced) + Tengiz's `runtime.Exec`-based execution. Complements Scheduled Deployments (#42) which schedules the deploy pipeline — this schedules commands inside the app.
+- **Detected:** 2026-08-20
+
+## One-off Run TTL & Auto-Reaping (Active-Deadline Enforcement)
+- **Source:** Dokku
+- **Description:** Detached one-off runs (migrations, data imports, console sessions) are labeled with `com.dokku.active-deadline-seconds` (default **86400s / 24h**) and tracked in a run registry. A background reaper (`scheduler-run-retire`) periodically scans for run/cron containers past their deadline and force-kills them. Lifecycle commands: `run-list` (all active one-off containers), `run-logs`, `run-stop`, `run-retire`. `--detach` runs without TTY and with `--rm`; `DOKKU_RUN_TTL_SECONDS` overrides the deadline per invocation.
+- **Why add to Tengiz:** One-off Process Execution (#25) launches a container but nothing bounds its lifetime — an orphaned migration or forgotten console session can run forever and consume resources. A deadline + reaper guarantees automatic cleanup of every one-off container, and `tengiz run list/logs/stop` gives operators visibility and control over what's running. Low effort (label + a `time.Ticker` sweep in the existing idle/health goroutines), high ops-hygiene value.
+- **Detected:** 2026-08-20
+
+## Storage Exec (Run Commands Against Mounted Volumes)
+- **Source:** Dokku
+- **Description:** `dokku storage:exec <entry> [-- <cmd>...]` starts a temporary container that mounts a named storage entry and runs the given command (or a shell) inside it, **propagating the tool's exit code** (so `storage:exec demo -- exit 42` returns 42). Used for volume-aware maintenance: inspecting files, running DB tooling against persisted data, fixing permissions.
+- **Why add to Tengiz:** Operators today must hand-roll `docker run -v <volume>:/data alpine ls /data` to touch a volume. `tengiz storage exec <entry> -- <cmd>` makes volume operations a first-class, reproducible command, and exit-code propagation lets it be used safely inside scripts and pre-deploy hooks. Low effort (wrap `docker run --rm -v` with the existing `os/exec` runtime), high operational value for stateful apps on scale-to-zero.
+- **Detected:** 2026-08-20
+
+## Named Storage Entries (PVC-style Volume Resources)
+- **Source:** Dokku
+- **Description:** Beyond per-app mount lines, Dokku manages **named storage entries** as first-class resources: `storage:create/destroy/info/set/list-entries/wait`. Entries carry properties — `size`, `access-mode`, `storage-class`, `chown`, `mode`, `reclaim-policy` (Retain/Delete), `annotations`, `labels`, `subpath`, `readonly`, `volume-options` — and are mounted per-app with phases (`deploy`/`run`), process-type scoping, and a `_default_` fallback. The same verbs work across schedulers (docker-local host dirs vs k3s PVCs via Helm), with `storage:wait` for PVC binding. Legacy `-v host:container` mounts auto-migrate into named entries.
+- **Why add to Tengiz:** Tengiz's Persistent Storage (#21) only attaches raw volumes per app. Named entries give volumes their own identity and lifecycle — reusable across apps, metadata-tagged, safely deleted with reclaim policies, and future-proof for a k8s scheduler (#162). This is the volume-level foundation the Accessory Services (#62) and managed-DB (#63) roadmaps assume. Medium effort (new store + CRUD commands), high config-hygiene value.
+- **Detected:** 2026-08-20
+
+## Per-App Network Aliases & Network Binding Properties
+- **Source:** Dokku
+- **Description:** The `network` plugin attaches an app to multiple Docker networks with **automatic alias injection on deploy**: each container is connected with aliases `app.<processType>[.<tld>]` and `<hostname>.app.<processType>[.<tld>]`, giving stable per-app DNS names inside the private network (no raw container-IP lookup). Configurable properties per app/global: `bind-all-interfaces`, `static-web-listener`, `static-web-port`, `initial-network`, `tld`, `attach-post-create`, `attach-post-deploy`. Network CRUD with a `com.dokku.network-name` label marks dokku-managed networks (`network:list --dokku-managed`), `network:rebuild`/`rebuildall` regenerate config, and `host`/`bridge` are reserved from attachment.
+- **Why add to Tengiz:** Custom Docker Network (#30) only passes `--network`. Multi-service apps (web + db + redis on one private network) need stable hostnames, not container IDs — and per-app network properties (`bind-all-interfaces`, `static-web-listener`) control exposure. Alias injection and a `--dokku-managed` label also make cleanup and service discovery safe. Low-medium effort (aliases on `docker network connect` + a few properties), high value for compose/accessory workflows.
+- **Detected:** 2026-08-20
+
+## Per-App Proxy Port & SSL Port Configuration (Detected vs Explicit Port Maps)
+- **Source:** Dokku
+- **Description:** Per-app and global `proxy-port` / `proxy-ssl-port` properties override the HTTP/HTTPS ports an app is proxied on (defaults 80/443), plus full port-map management: `ports:add/set/clear/remove <app> <scheme>:<host>:<container>`. Port maps are persisted across rebuilds with an explicit `map` vs auto-detected `map-detected` split (`http:<proxy-port>:5000` default; `https:443` added when a cert exists), so a user's explicit mapping is never overwritten by detection. Non-`__internal__` maps survive redeploys and drive the proxy config.
+- **Why add to Tengiz:** Tengiz hardcodes host port 9000+ and proxy 80; there is no per-app way to say "serve this app on https:8443" or pin `http:80:8080` across zero-downtime redeploys. Port Mapping Protocol Selection (#111) covers TCP/UDP protocol choice — this covers HTTP proxy-port configuration and *persistence* of explicit mappings vs auto-detection, which is what survives the existing deploy-teardown cycle. Low effort (properties + persistence in AppEntry), high production fit for shared hosts and firewalled environments.
+- **Detected:** 2026-08-20
+
+## Proxy Config Preview & Validation (show-config / validate / reload)
+- **Source:** Dokku
+- **Description:** `dokku nginx:show-config <app>` renders the exact per-app proxy config (server block, port maps, TLS, headers) for inspection; `nginx:validate-config` runs `nginx -t` against a sandbox config; `nginx:reload` applies config without downtime; `nginx:access-logs`/`error-logs` stream the per-app proxy log. Proxy config is regenerated on domain/port/cert changes and only reloaded after a successful validation (rollback on failure).
+- **Why add to Tengiz:** Tengiz's reverse proxy is generated at runtime with no visibility. Operators debugging routing/domain/TLS issues must guess what config is in effect. `tengiz proxy config <app>` (preview the effective routing rules) + `tengiz proxy validate` + `tengiz proxy reload` gives a debugging loop, and validate-before-apply prevents a bad config change from taking down the proxy. Distinct from Config Display (#48, merged `.tengiz.yaml`) — this renders the *generated proxy* view. Low effort (serialize the proxy's route table + a syntax check), high debugging value.
+- **Detected:** 2026-08-20
+
+## Zero-Downtime Handover Grace Period (wait-to-retire)
+- **Source:** Dokku
+- **Description:** During zero-downtime deployment, the old container is kept running after the new one becomes healthy for a configurable **grace period** (`checks:set <app> wait-to-retire`, default **60s**, app → global → 60s cascade). New containers are registered as retired only after the window elapses (`scheduler-register-retired`), letting in-flight requests drain before the old container is stopped. `checks:disable`/`enable`/`skip` per process-type (with a `_all_` sentinel) control whether the handover even runs.
+- **Why add to Tengiz:** Tengiz's zero-downtime deploy (#1, implemented) swaps traffic immediately, which can cut off in-flight requests on slow or long-polling apps. A configurable `wait-to-retire` drain window — old container keeps serving stragglers for N seconds after the new one is live — removes last-request failures without full load balancing. Pairs with Readiness Delay (#27) and Container Retention Policy (#22). Low effort (delay before `Stop()` on the old container), high reliability value for production traffic.
+- **Detected:** 2026-08-20
