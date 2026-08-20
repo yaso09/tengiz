@@ -97,6 +97,7 @@ go build -o tengiz .
 cd my-project
 tengiz deploy          # detect framework, build image, start container
 tengiz proxy           # start reverse proxy on :8080 with scale-to-zero
+tengiz cleanup       # prune unused Docker resources (containers, images, volumes, networks, build cache)
 # Visit http://my-project.tengiz.local:8080
 ```
 
@@ -148,6 +149,27 @@ The proxy also starts an **admin API** on `127.0.0.1:9099` for dynamic route man
 List all deployed applications and their status.
 
 Output: `NAME`, `STATE` (running/stopped), `PORT`, `ENVIRONMENT`, `HEALTH`.
+
+### `tengiz cleanup`
+
+Prune unused Docker resources to free disk space. Tengiz-managed containers (labeled `tengiz-app=*`)
+are always kept, including stopped ones (scale-to-zero containers are cold-started on demand).
+
+By default all categories are pruned. Use flags to select specific categories:
+
+| Flag | Category |
+|------|----------|
+| `--containers` | stopped containers not managed by Tengiz |
+| `--images` | unused and dangling images |
+| `--volumes` | unused volumes |
+| `--networks` | unused networks |
+| `--build-cache` | BuildKit build cache |
+
+```bash
+tengiz cleanup                # prune everything
+tengiz cleanup --containers --images   # prune only containers and images
+tengiz cleanup --build-cache  # prune only BuildKit cache
+```
 
 ### `tengiz logs [-f] [--tail N] [--since timestamp] [--until timestamp] [--grep pattern] <app>`
 

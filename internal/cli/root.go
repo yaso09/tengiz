@@ -67,6 +67,7 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	secretCmd.AddCommand(secretSetCmd, secretGetCmd, secretUnsetCmd, secretListCmd, secretRotateCmd)
 	rootCmd.AddCommand(secretCmd)
+	rootCmd.AddCommand(cleanupCmd)
 	notificationCmd.AddCommand(notificationEnableCmd)
 	notificationCmd.AddCommand(notificationDisableCmd)
 	notificationCmd.AddCommand(notificationConfigCmd)
@@ -86,6 +87,11 @@ func init() {
 	webhookCmd.Flags().IntP("port", "p", 9090, "webhook listen port")
 	webhookCmd.Flags().String("env", "production", "deployment environment for auto-deploys")
 	webhookCmd.Flags().String("config", "", "path to .tengiz.yaml for webhook configuration")
+	cleanupCmd.Flags().Bool("containers", false, "prune stopped containers not managed by Tengiz")
+	cleanupCmd.Flags().Bool("images", false, "prune unused and dangling images")
+	cleanupCmd.Flags().Bool("volumes", false, "prune unused volumes")
+	cleanupCmd.Flags().Bool("networks", false, "prune unused networks")
+	cleanupCmd.Flags().Bool("build-cache", false, "prune BuildKit build cache")
 }
 
 var rootCmd = &cobra.Command{
@@ -1159,6 +1165,85 @@ Examples:
 
 		return nil
 	},
+}
+
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Prune unused Docker resources to free disk space",
+	Long: `Prunes unused Docker containers, images, volumes, networks, and build cache.
+
+Containers managed by Tengiz (labeled tengiz-app=*) are always kept, including
+stopped ones (scale-to-zero containers are cold-started on demand).
+
+By default all categories are pruned. Use flags to select specific categories:
+  tengiz cleanup
+  tengiz cleanup --containers --images
+  tengiz cleanup --build-cache`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts := cleanupOptionsFromFlags(cmd)
+		rt, err := runtime.NewDocker()
+		if err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+		report, err := rt.Cleanup(cmd.Context(), opts)
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+		fmt.Print(printCleanupReport(report))
+		return nil
+	},
+}
+
+func cleanupOptionsFromFlags(cmd *cobra.Command) runtime.CleanupOptions {
+	containers, _ := cmd.Flags().GetBool("containers")
+	images, _ := cmd.Flags().GetBool("images")
+	volumes, _ := cmd.Flags().GetBool("volumes")
+	networks, _ := cmd.Flags().GetBool("networks")
+	buildCache, _ := cmd.Flags().GetBool("build-cache")
+	opts := runtime.CleanupOptions{
+		Containers: containers,
+		Images:     images,
+		Volumes:    volumes,
+		Networks:   networks,
+		BuildCache: buildCache,
+	}
+	if !containers && !images && !volumes && !networks && !buildCache {
+		opts.All = true
+	}
+	return opts
+}
+
+func printCleanupReport(report runtime.CleanupReport) string {
+	var b strings.Builder
+	b.WriteString("[tengiz] cleanup complete\n")
+	printed := false
+	if report.ContainersRemoved > 0 {
+		fmt.Fprintf(&b, "  containers removed: %d\n", report.ContainersRemoved)
+		printed = true
+	}
+	if report.ImagesRemoved > 0 {
+		fmt.Fprintf(&b, "  images removed: %d\n", report.ImagesRemoved)
+		printed = true
+	}
+	if report.VolumesRemoved > 0 {
+		fmt.Fprintf(&b, "  volumes removed: %d\n", report.VolumesRemoved)
+		printed = true
+	}
+	if report.NetworksRemoved > 0 {
+		fmt.Fprintf(&b, "  networks removed: %d\n", report.NetworksRemoved)
+		printed = true
+	}
+	if report.BuildCacheRemoved > 0 {
+		fmt.Fprintf(&b, "  build cache removed: %d\n", report.BuildCacheRemoved)
+		printed = true
+	}
+	if !printed {
+		b.WriteString("  nothing to clean\n")
+	}
+	if report.TotalFreed != "" && report.TotalFreed != "0B" {
+		fmt.Fprintf(&b, "  space reclaimed: %s\n", report.TotalFreed)
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 var gitCmd = &cobra.Command{

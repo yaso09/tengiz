@@ -377,3 +377,72 @@ func TestConfigSetGetUnsetShowCommandsRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"cleanup"})
+	if err != nil {
+		t.Fatal("cleanup command not registered")
+	}
+	if cmd == nil || cmd.Name() != "cleanup" {
+		t.Fatal("cleanup command not found")
+	}
+}
+
+func TestCleanupCommandFlags(t *testing.T) {
+	for _, flag := range []string{"containers", "images", "volumes", "networks", "build-cache"} {
+		f := cleanupCmd.Flags().Lookup(flag)
+		if f == nil {
+			t.Errorf("cleanupCmd missing --%s flag", flag)
+		}
+	}
+}
+
+func TestCleanupOptionsFromFlagsDefaultAll(t *testing.T) {
+	opts := cleanupOptionsFromFlags(cleanupCmd)
+	if !opts.All {
+		t.Error("expected All=true when no category flags are set")
+	}
+}
+
+func TestCleanupOptionsFromFlagsSelective(t *testing.T) {
+	cleanupCmd.Flags().Set("images", "true")
+	defer cleanupCmd.Flags().Set("images", "false")
+	opts := cleanupOptionsFromFlags(cleanupCmd)
+	if opts.All {
+		t.Error("expected All=false when a category flag is set")
+	}
+	if !opts.Images {
+		t.Error("expected Images=true")
+	}
+	if opts.Containers {
+		t.Error("expected Containers=false")
+	}
+}
+
+func TestPrintCleanupReportEmpty(t *testing.T) {
+	out := printCleanupReport(runtime.CleanupReport{})
+	if !strings.Contains(out, "nothing to clean") {
+		t.Errorf("expected 'nothing to clean', got: %q", out)
+	}
+}
+
+func TestPrintCleanupReportPopulated(t *testing.T) {
+	out := printCleanupReport(runtime.CleanupReport{
+		ContainersRemoved: 2,
+		ImagesRemoved:     5,
+		VolumesRemoved:    1,
+		TotalFreed:        "1.23GB",
+	})
+	if !strings.Contains(out, "containers removed: 2") {
+		t.Errorf("missing container count: %q", out)
+	}
+	if !strings.Contains(out, "images removed: 5") {
+		t.Errorf("missing image count: %q", out)
+	}
+	if !strings.Contains(out, "volumes removed: 1") {
+		t.Errorf("missing volume count: %q", out)
+	}
+	if !strings.Contains(out, "space reclaimed: 1.23GB") {
+		t.Errorf("missing reclaimed space: %q", out)
+	}
+}
