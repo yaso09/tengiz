@@ -27,6 +27,56 @@ func (r *dockerRuntime) Cleanup(ctx context.Context, opts CleanupOptions) (Clean
 	return CleanupResult{}, nil
 }
 
+func parsePruneOutput(output string) CleanupResult {
+	var result CleanupResult
+	section := ""
+	for _, raw := range strings.Split(output, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "Total reclaimed space:") {
+			result.ReclaimedSpace = strings.TrimSpace(strings.TrimPrefix(line, "Total reclaimed space:"))
+			section = ""
+			continue
+		}
+		if strings.HasSuffix(line, ":") {
+			section = pruneSection(line)
+			continue
+		}
+		switch section {
+		case "containers":
+			result.ContainersDeleted++
+		case "images":
+			result.ImagesDeleted++
+		case "networks":
+			result.NetworksDeleted++
+		case "volumes":
+			result.VolumesDeleted++
+		case "buildcache":
+			result.BuildCacheDeleted++
+		}
+	}
+	return result
+}
+
+func pruneSection(line string) string {
+	switch {
+	case strings.HasPrefix(line, "Deleted Containers"):
+		return "containers"
+	case strings.HasPrefix(line, "Deleted Images"):
+		return "images"
+	case strings.HasPrefix(line, "Deleted Networks"):
+		return "networks"
+	case strings.HasPrefix(line, "Deleted Volumes"):
+		return "volumes"
+	case strings.HasPrefix(line, "Deleted Build Cache"):
+		return "buildcache"
+	default:
+		return ""
+	}
+}
+
 func (r *dockerRuntime) RemoveImage(ctx context.Context, imageTag string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", "-f", imageTag)
 	out, err := cmd.CombinedOutput()
