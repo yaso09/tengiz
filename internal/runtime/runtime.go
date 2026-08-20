@@ -28,6 +28,36 @@ type RunOptions struct {
 	ExtraEnv    map[string]string
 }
 
+type CleanupCategory string
+
+const (
+	CleanupContainers CleanupCategory = "containers"
+	CleanupImages     CleanupCategory = "images"
+	CleanupVolumes    CleanupCategory = "volumes"
+	CleanupNetworks   CleanupCategory = "networks"
+	CleanupBuildCache CleanupCategory = "build-cache"
+)
+
+var AllCleanupCategories = []CleanupCategory{
+	CleanupContainers,
+	CleanupImages,
+	CleanupVolumes,
+	CleanupNetworks,
+	CleanupBuildCache,
+}
+
+type CleanupOptions struct {
+	Categories []CleanupCategory
+	DryRun     bool
+}
+
+type CleanupResult struct {
+	Category  CleanupCategory `json:"category"`
+	Reclaimed uint64          `json:"reclaimed_bytes"`
+	DryRun    bool            `json:"dry_run"`
+	Error     string          `json:"error,omitempty"`
+}
+
 type Manager interface {
 	Create(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
 	CreateFromImage(ctx context.Context, cfg *types.AppConfig, imageTag string, port int) error
@@ -46,6 +76,7 @@ type Manager interface {
 	WaitForReady(ctx context.Context, name string, internalPort int) error
 	WaitForHealth(ctx context.Context, name string, hc *types.HealthCheckConfig) error
 	Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error
+	Cleanup(ctx context.Context, opts CleanupOptions) ([]CleanupResult, error)
 }
 
 type stubManager struct{}
@@ -120,4 +151,8 @@ func (m *stubManager) KeepLastNImages(ctx context.Context, appName string, n int
 
 func (m *stubManager) Run(ctx context.Context, cfg *types.AppConfig, imageTag string, cmd []string, opts RunOptions) error {
 	return nil
+}
+
+func (m *stubManager) Cleanup(ctx context.Context, opts CleanupOptions) ([]CleanupResult, error) {
+	return nil, nil
 }
