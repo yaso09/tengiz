@@ -1580,3 +1580,391 @@ Her gün Vercel alternatifleri taranır ve Tengiz'e eklenmesi mantıklı olan ö
 - **Description:** Each datastore collection can be configured with a memory type: `Heap` (fast, volatile — data lost on canister upgrade) or `Stable` (persistent across upgrades, slightly slower). This lets developers make performance/cost trade-offs per collection: cache/session data goes in Heap for speed, user profiles go in Stable for durability. Collections default to Heap for maximum performance. The memory type affects both read/write latency and upgrade behavior — Stable collections survive platform upgrades, Heap collections are re-initialized.
 - **Why add to Tengiz:** Tengiz's planned Built-in NoSQL Datastore (#1) needs a similar performance/storage trade-off. Some data is ephemeral (sessions, cache, rate limit counters) — stored in-memory for speed and automatically reset on restart. Other data is persistent (user profiles, settings, content) — written to SQLite or disk-backed storage for durability. A `db.<collection>.memory: ephemeral | persistent` setting in `.tengiz.yaml` lets developers choose: ephemeral collections use Go maps (fast, lost on container restart), persistent collections use embedded SQLite tables (durable, survives restarts). This is particularly important for scale-to-zero — ephemeral collections naturally reset on cold start (good for session data that should force re-login), persistent collections survive scale-to-zero cycles (good for app state). Implementation: two store backends (`MemoryStore` and `SQLiteStore`) implementing the same `DocStore` interface, selected per-collection at deploy time. Low-medium effort, fits Tengiz's embedded database philosophy. Complements the NoSQL Datastore with production-grade configurability.
 - **Detected:** 2026-07-17
+
+---
+
+## Per-App Proxy Middleware (gzip, strip-prefix, noindex)
+- **Source:** Coolify
+- **Description:** Per-app toggles for reverse-proxy middleware in `fqdnLabelsForTraefik()`/`fqdnLabelsForCaddy()`: response gzip/zstd compression (`is_gzip_enabled`), path-prefix stripping when served under a subpath (`is_stripprefix_enabled`), `X-Robots-Tag: noindex, nofollow` headers on selected domains (`noindex_domains`), and www ↔ non-www redirects (`redirect` enum: `www`/`non-www`/`both`). All applied per-FQDN at the proxy label layer.
+- **Why add to Tengiz:** Tengiz's proxy forwards traffic with zero per-app tuning. These four small middleware extensions (`compress/gzip`, path rewriting, response-header injection, 301 redirects in Go) cover the most common production needs — SEO control, subpath hosting, bandwidth reduction — without any custom proxy code per app. `.tengiz.yaml`'da `proxy.gzip: true`, `proxy.strip_prefix: /app`, `proxy.noindex_domains: [staging.myapp.com]`, `proxy.redirect: non-www` ile yapılandırılır. Low effort, natural extension of the existing reverse proxy.
+- **Detected:** 2026-08-20
+
+## DNS Validation & Guidance Before Certificate Issuance
+- **Source:** Coolify
+- **Description:** `validateDNSEntry()`/`createDnsQuery()`/`DnsRecordHints` verify each configured domain actually resolves (A/AAAA) to the server's IP before issuing TLS certificates, using configurable custom DNS servers. Generates copyable BIND-format zone records (`DnsRecordHints::toCopyText`) and human-readable mismatch guidance. Includes one-click Cloudflare Domain Connect provisioning to auto-create the DNS records.
+- **Why add to Tengiz:** Custom domains (#10) and Let's Encrypt (#65) fail silently when DNS isn't pointed at the server — issuance retries burn rate limits and users can't tell why. Proactive per-domain DNS status surfaced in `tengiz domain list` ("A record missing", "points to 1.2.3.4, expected 5.6.7.8") plus copy-paste record hints turns the most common domain onboarding failure into a guided fix. Implementation: `net.Resolver` with custom servers, periodic check, stored in `domain_dns_statuses`-style JSON per app.
+- **Detected:** 2026-08-20
+
+## Custom Docker Labels
+- **Source:** Coolify
+- **Description:** `Application.custom_labels`: user-supplied extra Docker labels (base64-encoded, normalized via `parseContainerLabels()`) merged with the auto-generated platform labels on the container. Operates alongside the custom `docker run` options escape hatch.
+- **Why add to Tengiz:** External tooling (Prometheus exporters, log shippers, firewalls, network scanners) relies on custom container labels for discovery and filtering. Tengiz currently hardcodes only `tengiz-app`/`tengiz-env` labels. `.tengiz.yaml`'da `docker.labels: {traefik.enable: "true", org.example: "value"}` ile yapılandırılır; `runtime.Create()`'a `--label` flag'leri olarak aktarılır. Low effort, high integration value.
+- **Detected:** 2026-08-20
+
+## Stable / Custom Container Naming
+- **Source:** Coolify
+- **Description:** `ApplicationSetting.custom_internal_name` + `is_consistent_container_name_enabled`: pin a stable container name across redeploys/rollbacks or set a fully custom internal name (with preview-suffix handling for PR deployments), so external tooling can rely on a fixed container identifier.
+- **Why add to Tengiz:** External tooling and service discovery need a predictable container name. Today every Tengiz redeploy may change the container identity, breaking cron-based `docker exec` references, monitoring agents, and ad-hoc scripts. `.tengiz.yaml`'da `container.name: myapp-stable` veya `container.consistent_name: true`. Low effort (name resolution in `runtime.ContainerName()`), high operational value for the "one tool" philosophy.
+- **Detected:** 2026-08-20
+
+## Git Watch Paths (Changed-File Deploy Filtering)
+- **Source:** Coolify
+- **Description:** `Application.watch_paths` + `parseWatchPaths()`/`matchWatchPaths()`/`isWatchPathsTriggered()`: newline-separated glob patterns (with `!` exclusion lines, last-match-wins) matched against the files changed in each git webhook push/PR. Auto-deploy fires only when changed files match; PR `synchronize` events diff the commit range via the git provider API.
+- **Why add to Tengiz:** Distinct from webhook event filtering (#50, branch/tag-level) and Pattern-Based Watch Paths (#77, local fsnotify). This is file-level: a docs-only PR or a dependency bump in a subfolder should not trigger a wasteful full rebuild. `.tengiz.yaml`'da `git.watch_paths: ["src/**/*", "!docs/**"]`. Low effort (glob matching on the webhook changed-files payload), high CI/CD cost savings for monorepos.
+- **Detected:** 2026-08-20
+
+## Platform-Managed Dockerfile (Multi-Stage Target, HEALTHCHECK & EXPOSE Auto-Import)
+- **Source:** Coolify
+- **Description:** `Application.dockerfile`/`dockerfile_location`/`dockerfile_target_build`: author or edit the Dockerfile directly in the platform (not just in the repo), select a multi-stage `--target`, and auto-import the Dockerfile's `HEALTHCHECK` directive into the app's health-check config (`parseHealthcheckFromDockerfile()`). `get_port_from_dockerfile()` parses the first `EXPOSE` line to auto-fill the exposed port.
+- **Why add to Tengiz:** Dockerfile-based apps currently require manually configuring port and healthcheck even though the Dockerfile declares them. Platform-managed Dockerfile removes those manual steps, lets users patch a build without a git push, and extends Custom Build Commands (#12) with the file itself. Low-medium effort (parse Dockerfile directives, store content in app config), high convenience for power users.
+- **Detected:** 2026-08-20
+
+## Crash-Loop Protection (Max Restart Count)
+- **Source:** Coolify
+- **Description:** `Application.max_restart_count`/`restart_count`/`last_restart_at`/`last_restart_type` + `stoppedAfterRestartLimit()`: track Docker `RestartCount` per container; when a container hits the max via crash transitions, stop it permanently and notify `ApplicationRestartLimitReached`. Uses a 30-second grace window to avoid false "exited" status during container recreation.
+- **Why add to Tengiz:** Restart policies (#44) and health-check auto-restart can loop forever on a crashy build, burning CPU, churning logs, and hiding the failure behind "restarting". Automatic crash-loop shutoff plus notification surfaces the problem instead of masking it. `.tengiz.yaml`'da `restart.max_count: 5`; `runtime`'dan RestartCount okunur, eşiğe ulaşınca `Stop()` + notify. Low effort, high production reliability value.
+- **Detected:** 2026-08-20
+
+## SPA Index-Fallback Serving
+- **Source:** Coolify
+- **Description:** `ApplicationSetting.is_spa`: serve the app's `index.html` as fallback for client-side routes in static SPA deployments (instead of 404s on deep links) — the classic Vite/React/Angular routing behavior.
+- **Why add to Tengiz:** Static SPA deployments via the existing static framework support break on hard refresh at deep routes (e.g. `myapp.tengiz.local/dashboard` returns 404). One proxy rule — fall back to `index.html` when the path has no file extension and the file doesn't exist — fixes a common deployment failure. `.tengiz.yaml`'da `spa: true`. Low effort (proxy `NotFound` fallback), high UX value.
+- **Detected:** 2026-08-20
+
+## Advanced Health Check Types (CMD-Based & Response-Text Matching)
+- **Source:** Coolify
+- **Description:** `health_check_type` (`http`/`cmd`), `health_check_command`, `health_check_response_text`, `health_check_scheme`, interval/timeout/retries/start_period: beyond HTTP GET, run a command inside the container as the health check or assert a response-body substring; auto-imports Dockerfile `HEALTHCHECK` when present.
+- **Why add to Tengiz:** The existing HTTP health check (#4, implemented) fails for non-HTTP services (workers, queues, DBs) and can't detect "200 but error page" responses. Command-based checks (`docker exec`) and substring assertion catch the cases where a service is technically up but actually broken. `.tengiz.yaml`'da `healthcheck.type: cmd`, `healthcheck.command: pg_isready`, `healthcheck.response_text: "ok"`. Low-medium effort, extends the implemented health package.
+- **Detected:** 2026-08-20
+
+## File & Directory Mounts with Inline Content Editing
+- **Source:** Coolify
+- **Description:** `LocalFileVolume`: mount individual files or directories into containers where the content is stored encrypted in the platform, editable in the UI/CLI, and written to the server with configurable `chmod`/`chown`. Detects binary/oversized files and `:ro` read-only mounts from compose. Includes a remote file browser (`getFilesFromServer()`).
+- **Why add to Tengiz:** Beyond empty volume mounts (#21), apps need config files (nginx.conf, .env, custom CAs) that operators can edit without SSH. A first-class file-mount manager — `tengiz file mount <app> --path /etc/nginx.conf --content ...` — removes the raw-Docker escape hatch and keeps content under version control in `~/.tengiz/`. Low-medium effort (content store + `--mount type=bind` from a managed path), high ops value.
+- **Detected:** 2026-08-20
+
+## Volume & Directory Backups with Retention Policies
+- **Source:** Coolify
+- **Description:** `ScheduledVolumeBackup` + `VolumeBackupJob`/`VolumeBackupRecoveryJob`: scheduled `.tar.gz` of named Docker volumes or host directories; `stop_during_backup` stops containers using the volume for a consistent snapshot (IDs persisted, auto-restarted by the recovery job if the backup crashes); independent local vs S3 retention by count, days, and max storage GB; CPU-throttled compression (`BackupCompression` selects `pigz -p N` vs `gzip -3`).
+- **Why add to Tengiz:** DB dumps (#98) don't cover non-DB data — uploads, caches, app state. Volume backups with crash-safe container stop/restart and multi-dimensional retention complete the data-loss-prevention story (#23). `.tengiz.yaml`'da `backup.volumes: [{volume: data, stop_during_backup: true, retention: {count: 7, days: 30, max_gb: 10}}]`. Medium effort (tar + S3 + state file), essential for stateful apps on scale-to-zero.
+- **Detected:** 2026-08-20
+
+## Database TCP Proxy (Expose DB Port Publicly)
+- **Source:** Coolify
+- **Description:** `StartDatabaseProxy`/`StopDatabaseProxy`: runs an `nginx:stable-alpine` stream-proxy container mapping a public port to a managed database's internal port (per-DB-type mapping: 3306/5432/6379/9000/27017), with configurable `proxy_timeout` and healthcheck. Auto-disables itself (sets `is_public=false` and notifies the team) on non-transient errors like port conflicts.
+- **Why add to Tengiz:** Scale-to-zero makes databases internal-only today; connecting an external tool (TablePlus, BI dashboards, local dev) requires raw Docker. `tengiz db expose <app> --port 5433` gives managed DBs (#63) a first-class public access path with conflict detection and auto-disable. Low-medium effort (TCP stream proxy via `os/exec` nginx container or a Go `net` listener), high value once managed DBs land.
+- **Detected:** 2026-08-20
+
+## Jump Server (SSH Bastion) Support
+- **Source:** Coolify
+- **Description:** `ServerSetting.is_jump_server`: route SSH/SCP commands through a designated bastion host (`ProxyJump`) to reach other managed servers on segmented/VPN'd networks.
+- **Why add to Tengiz:** Production networks commonly isolate infrastructure behind bastions and VPNs; direct SSH to app servers is often blocked. Bastion support lets the remote-deployment path (#105) manage those hosts without opening direct SSH. `.tengiz.yaml`'da `server.jump: bastion.example.com`. Low effort with `golang.org/x/crypto/ssh` (ProxyJump dialing), unblocks a class of locked-down deployments.
+- **Detected:** 2026-08-20
+
+## Deployment Queue Limits & Concurrent Build Throttling
+- **Source:** Coolify
+- **Description:** `ServerSetting.deployment_queue_limit` + `concurrent_builds`: per-server caps on how many deployments can queue and how many builds run concurrently, with queue-advancement logic (`ApplicationDeploymentQueue`).
+- **Why add to Tengiz:** Rapid-fire CI/CD pushes can flood a single host with concurrent builds, causing OOM, Docker daemon thrash, and flaky builds. Backpressure — max queued deploys and max parallel builds — keeps the host stable. `.tengiz.yaml`'da `server.concurrent_builds: 2`, `server.queue_limit: 10`. Low-medium effort (semaphore around the build step), complements Deploy Lock (#15) and Build Queue Dedup (#124).
+- **Detected:** 2026-08-20
+
+## Wildcard Domain Support (Server-Level)
+- **Source:** Coolify
+- **Description:** `ServerSetting.wildcard_domain`: configure `*.example.com` at the server level so subdomains auto-route to apps without per-app domain configuration.
+- **Why add to Tengiz:** Today every app needs its own custom-domain entry (#10). A server-level wildcard makes `appname.example.com` work out of the box, mirroring how `appname.tengiz.local` already works — and pairs naturally with Let's Encrypt (#65) wildcard certs. `.tengiz.yaml`'da `server.wildcard_domain: example.com`; proxy `extractApp()` already handles subdomain parsing. Low effort, high onboarding value for self-hosted teams.
+- **Detected:** 2026-08-20
+
+## Reverse Proxy Version Tracking & Outdated Notifications
+- **Source:** Coolify
+- **Description:** `CheckTraefikVersionJob`: detect the running proxy version (compose inspect + image inspect), compare against branch-aware latest, store structured `traefik_outdated_info` (current/latest, patch vs minor upgrade, checked_at), and notify `TraefikVersionOutdated` immediately. Also tracks pending config (saved-but-not-applied proxy settings).
+- **Why add to Tengiz:** Operators never know whether the embedded Go proxy (or an external Caddy/Traefik backend) is outdated or has unapplied config. Version/pending-state visibility prevents silent config drift. `tengiz proxy status` showing proxy version + "3 settings pending apply" is a small health feature. Low effort (version check + a `pending` flag), complements Prometheus Metrics (#26).
+- **Detected:** 2026-08-20
+
+## Server Metadata & Runtime Detection (Server Doctor)
+- **Source:** Coolify
+- **Description:** `Server.server_metadata` (OS, arch, kernel, CPU count, memory bytes, uptime) plus `docker_version`/`compose_version` with checked-at timestamps, gathered at validation time and used with `validateOS()` against a supported-OS list.
+- **Why add to Tengiz:** Extends #114 `tengiz doctor` with host facts and engine versions. Enables compatibility checks ("Docker 24.3 detected, 26.x required"), rich `tengiz status` output, and capacity planning. Low effort (parse `docker version --format json`, `/etc/os-release`, `/proc/meminfo`), complements Server Monitoring (#73).
+- **Detected:** 2026-08-20
+
+## Cloud Provider Server Provisioning (Hetzner / DigitalOcean / Vultr)
+- **Source:** Coolify
+- **Description:** `CloudProviderToken` + `ByHetzner`/`ByDigitalOcean`/`ByVultr` provisioning flows: create VPSes directly via provider APIs (location/image/instance-type selection, IPv4/IPv6, firewalls, private networks, backups), upload the SSH public key, auto-register the server, poll provisioning status, and backfill the real public IP from a placeholder during provisioning.
+- **Why add to Tengiz:** Turns Tengiz into a one-command platform bootstrap: `tengiz server create --provider hetzner --type cpx11` provisions the VPS, installs Docker, and registers it — no manual cloud console work. Tokens stored encrypted, status tracked through a placeholder-IP state machine. Medium-high effort (provider API clients), high strategic value for growing beyond single-node.
+- **Detected:** 2026-08-20
+
+## Reusable Cloud-Init Scripts
+- **Source:** Coolify
+- **Description:** `CloudInitScript`: team-scoped, YAML-validated (`ValidCloudInitYaml`) cloud-init user-data scripts injected into newly provisioned cloud servers; editable inline during the provisioning flow; supports user-data or user-data+meta-data variants.
+- **Why add to Tengiz:** Reproducible server baselines (users, packages, firewall rules, mounts) on day one. Pairs with cloud provisioning and Server Bootstrap (#31). `tengiz cloud-init create --name baseline --file init.yaml`, then referenced by `tengiz server create --cloud-init baseline`. Low effort (YAML validation + storage), high reproducibility value.
+- **Detected:** 2026-08-20
+
+## Cross-Instance Server Migration (Export / Import / Claim)
+- **Source:** Coolify
+- **Description:** `ServerTransferExporter`/`Importer`/`Claimer`/`Migrator`: export a server's full resource bundle (applications, databases, services, private keys, destinations, S3 storages, SSL certs, scheduled tasks/backups, previews, tags) as a versioned JSON bundle — optionally passphrase-encrypted (AES-256-CBC + HMAC) — import it into a target instance preserving UUIDs, then claim/migrate/complete via a remote claim file.
+- **Why add to Tengiz:** Teams outgrow a single instance or migrate infrastructure vendors. Full state transfer with a claim handshake beats manually re-creating every resource (#23 is config-only backup). `tengiz server export <server> --out bundle.json` / `tengiz server import bundle.json`. Medium-high effort, high value for multi-instance operations and vendor migration.
+- **Detected:** 2026-08-20
+
+## Cross-Destination Resource Migration with Volume Data Transfer
+- **Source:** Coolify
+- **Description:** `MigrateResourceToDestination` + `VolumeCloneJob`/`HostPathCloneJob`/`FinalizeResourceMigrationJob`: stop the resource on the source server, tar named volumes and bind-mount host paths, stream the archive through the host, extract on the target server, update destination pointers, and clean up in a `finally` block. Supports same-server renames and cross-server transfers.
+- **Why add to Tengiz:** App Cloning (#123) copies configuration only; real migration must carry volume data. Enables moving an app between servers or destinations (custom Docker network #30) without data loss. `tengiz app migrate <app> --dest server2`. Medium effort (tar streaming + SSH), complements Centralized Multi-Server Management (#97).
+- **Detected:** 2026-08-20
+
+## Multi-Destination Deployment (One App on Several Servers/Networks)
+- **Source:** Coolify
+- **Description:** `Application.additional_servers`/`additional_networks` via a pivot with per-destination status; `ComplexStatusCheck` aggregates statuses across destinations into `running:healthy` / `degraded:unhealthy` / `starting:unknown` and derives the app's overall status.
+- **Why add to Tengiz:** HA or geo-replication needs the same app running on multiple hosts with a single aggregate health view — today one app maps to exactly one destination. `.tengiz.yaml`'da `destinations: [server1, server2]`; deploy pipeline fans out, per-destination status rolled up into `tengiz ps`. Medium-high effort, foundational for multi-server adoption.
+- **Detected:** 2026-08-20
+
+## Deployment Configuration Snapshots & Drift Detection
+- **Source:** Coolify
+- **Description:** `ApplicationConfigurationSnapshot`/`ConfigurationDiffer`/`ConfigurationDiff`: snapshot the full app config (source, build, runtime, domains, env vars, storage, limits, healthcheck) at each deploy, hash it, and diff against the last deployed snapshot. Each change is classified as **build-impact** vs **redeploy-impact**, so the system decides whether a rebuild is required or just a restart. Warns on pending config changes (`hasPendingDeploymentConfigurationChanges()`).
+- **Why add to Tengiz:** Users redeploy blindly and can't tell whether a change needs a rebuild or only a restart, or what actually changed since the last deploy. Drift detection guides the correct action (`tengiz deploy` skips the build when only env changed) and documents history. Complements Deploy Source Metadata (#49) and Build Tracking (#94). Medium effort, high ops intelligence value.
+- **Detected:** 2026-08-20
+
+## Restart-Only Deployment (Apply Config Without Rebuild)
+- **Source:** Coolify
+- **Description:** `ApplicationDeploymentQueue.restart_only`: recreate the container from the existing image, skipping the clone/build pipeline — instant application of env/config changes. `force_rebuild` flag bypasses build caching when a rebuild is actually wanted.
+- **Why add to Tengiz:** Changing an env var or start command shouldn't rebuild the image. A restart-only path makes config updates seconds instead of minutes and avoids image churn. `tengiz deploy --restart-only` or automatic when configuration drift (#23 above) shows only runtime changes. Low effort (branch in the deploy pipeline), high developer velocity value.
+- **Detected:** 2026-08-20
+
+## Skip-Deploy Commit Markers ([skip ci] / [skip cd])
+- **Source:** Coolify
+- **Description:** `DetectsSkipDeployCommits`: commit messages or PR titles containing `[skip ci]` or `[skip cd]` (case-insensitive) suppress deployment entirely — checked as "all messages must skip" for pushes and "any message skips" for PR titles + head commits.
+- **Why add to Tengiz:** A trivial, universally-understood convention that lets developers opt out of deploys without touching Tengiz config. Complements webhook filtering (#50) and watch paths with a zero-config escape hatch. Low effort (string scan on webhook payloads), immediate developer-ergonomics value.
+- **Detected:** 2026-08-20
+
+## PR Comment Deployment Status (GitHub Bot)
+- **Source:** Coolify
+- **Description:** `ApplicationPullRequestUpdateJob`: create/update/delete a GitHub issue comment on the PR showing status (queued/in-progress/ready/failed/killed/cancelled), links to build logs and app logs, and open-preview links (including per-service links for docker-compose deployments). Comment ID persisted to allow subsequent edits/deletion.
+- **Why add to Tengiz:** Commit Status Reporting (#38) shows a checkmark; a PR comment adds actionable log links and preview URLs where developers actually look during review. Critical companion to the implemented Preview Deployments (#2). Low-medium effort (GitHub Issues API), high collaboration value.
+- **Detected:** 2026-08-20
+
+## Preview Deployment Access Gating (Fork/Author Trust)
+- **Source:** Coolify
+- **Description:** `ProcessGithubPullRequestWebhook`: when public PR deployments are disabled, never auto-deploy fork PRs (author_association untrusted for forks); same-repo PRs deploy only when author_association is OWNER/MEMBER/COLLABORATOR.
+- **Why add to Tengiz:** Auto-building fork PRs runs untrusted code on the host — a real security hole for shared instances. Author/fork gating is the safe default that the existing preview system (#2) currently lacks. `.tengiz.yaml`'da `preview.require_trusted_author: true`. Low effort (author_association check in the webhook handler), high security value.
+- **Detected:** 2026-08-20
+
+## Server OS Patch Management (Package Updates)
+- **Source:** Coolify
+- **Description:** `ServerPatchCheckJob` + `CheckUpdates`/`UpdatePackage`: weekly job detects the server OS (`/etc/os-release` with distro-family normalization), selects the package manager (apt/dnf/pacman/zypper/apk), lists available updates with per-package version diffs, applies individual or all updates via SSH, and notifies the team.
+- **Why add to Tengiz:** Servers drift and accumulate known CVEs; periodic patch scanning plus one-command apply keeps the host current without SSH. `tengiz server patches <server>` shows pending updates, `tengiz server patch <server> --all` applies. Complements Server Security Hardening (#182). Medium effort (package-manager adapters), high security hygiene value.
+- **Detected:** 2026-08-20
+
+## Tag-Based Deploy Webhook & Bulk Operations
+- **Source:** Coolify
+- **Description:** `generateTagDeployWebhook()`: a generated webhook URL (`/api/v1/deploy?tag=NAME`) triggers deployment of every resource bearing that tag. Tags are polymorphic (apps, services, databases) with orphan auto-cleanup when the last resource is untagged.
+- **Why add to Tengiz:** Extends App Tags (#113) from filtering to orchestration — redeploy all apps tagged "core" on a schedule or CI trigger with a single call. `tengiz tag webhook myapp staging` returns a deployable URL. Low effort (webhook handler + tag lookup), high multi-app value.
+- **Detected:** 2026-08-20
+
+## Scoped Shared Environment Variables (Team/Project/Environment/Server)
+- **Source:** Coolify
+- **Description:** `SharedEnvironmentVariable`: encrypted env vars defined at team, project, environment, or server scope and inherited by every resource in that scope at deploy time. Flags: `is_multiline`, `is_literal`, `is_shown_once`, `version`. Separate CRUD per scope level.
+- **Why add to Tengiz:** Per-app env duplication is the #1 config smell on multi-app instances. Scope-based inheritance centralizes shared `DATABASE_URL`s, registry credentials, and team defaults — a concrete, deploy-time implementation of Variable Resource (#53). `.tengiz.yaml`'da `shared_envs.server: [{KEY: value}]`. Low-medium effort (scope resolution + merge at deploy), high config-hygiene value.
+- **Detected:** 2026-08-20
+
+## Self-Signed SSL Certificates for Internal Services
+- **Source:** Coolify
+- **Description:** `SslHelper.generateSslCertificate()`: generate EC (secp521r1) private keys + CSRs, optionally signed by a provided CA, and mount the cert/key (or combined `server.pem`) into containers at a configurable path with correct chmod (600/644) — TLS for internal services, distinct from public Let's Encrypt certs.
+- **Why add to Tengiz:** Internal services (Redis, Postgres, microservices) need TLS without public certificates. Auto-generated self-signed or CA-signed certs mounted into containers avoid the manual openssl dance. `tengiz cert generate-internal <app> --mount /certs/server.pem`. Low-medium effort (`crypto/x509`), complements Manual SSL Cert Management (#188).
+- **Detected:** 2026-08-20
+
+## Server CA Certificate Management
+- **Source:** Coolify
+- **Description:** Server-level CA certificate management: view, replace, or regenerate the per-server CA cert used to mint application certificates, write it to the server, and force regeneration of all derived certs (`RegenerateSslCertJob`).
+- **Why add to Tengiz:** When the CA leaks or expires, admins need one command to rotate it and re-issue all app certs — currently impossible without manual server surgery. `tengiz server ca show <server>` / `tengiz server ca regenerate <server>` re-issues derived certs. Low-medium effort, high trust-anchor hygiene value for self-hosted TLS.
+- **Detected:** 2026-08-20
+
+## Aggregated Container Status (Degraded / Crash-Loop Detection)
+- **Source:** Coolify
+- **Description:** `ContainerStatusAggregator` + `ComplexStatusCheck`: reduce statuses from multiple containers (compose stacks, multi-destination apps) into a priority-based state machine (`running:healthy`, `degraded:unhealthy`, `starting:unknown`, `exited:crash-loop`), detecting crash loops (exited + restarts), mixed states, and paused/dead containers.
+- **Why add to Tengiz:** `tengiz ps` reports a single naive status per app. Composite apps (compose #91, multi-destination) need one truthful aggregate — "degraded" instead of a misleading per-container list. Low-medium effort (status reduction rules), high operational clarity value; feeds App Report (#10) and the alert system.
+- **Detected:** 2026-08-20
+
+## Backup File Security Validation (Pre-Restore Malware Detection)
+- **Source:** Coolify
+- **Description:** `DatabaseBackupFileValidator`: extension allowlist/denylist, magic-byte format checks, and scanning SQL dumps (decompressing gzip on the fly) for PostgreSQL `COPY ... FROM PROGRAM` / `\!` command-execution directives before restore.
+- **Why add to Tengiz:** Restoring an untrusted dump can execute OS commands inside the DB container (Postgres `COPY FROM PROGRAM` is a documented RCE vector). Validation before import (#184) closes a genuine supply-chain attack path. `tengiz backup import` runs the scanner first. Low effort (parse + scan), high security value.
+- **Detected:** 2026-08-20
+
+## Deployment Cancellation (Abort Queued/Running Deploys)
+- **Source:** Coolify
+- **Description:** `POST /deployments/{uuid}/cancel`: cancel QUEUED/IN_PROGRESS deployments (marked `CANCELLED_BY_USER`), kill the helper build container by UUID, remove partial PR containers, advance the deployment queue.
+- **Why add to Tengiz:** A stuck or superseded build blocks the queue and wastes disk. `tengiz deploy cancel <app>` gives operators control instead of waiting it out. Pairs with Build Queue Dedup (#124). Low-medium effort (job cancellation + container cleanup), high operational control value.
+- **Detected:** 2026-08-20
+
+## Webhook SSRF Protection (Internal Host Allowlist)
+- **Source:** Coolify
+- **Description:** `InstanceSettings.webhook_allowed_internal_hosts` + `webhook_allow_localhost`: instance-level allowlist controlling whether outgoing webhooks (deploy/webhook notifiers) may target internal/private hosts, plus `SafeWebhookUrl` validation for S3/MinIO endpoints.
+- **Why add to Tengiz:** Outgoing deploy webhooks (#121) that can hit `169.254.169.254` (cloud metadata) or internal services are an SSRF vector. An explicit internal-host allowlist is cheap defense-in-depth. `.tengiz.yaml`'da `webhook.allowed_internal_hosts: ["10.0.0.0/8"]`. Low effort (CIDR check before HTTP POST), high security value.
+- **Detected:** 2026-08-20
+
+## Configurable Public Port Range
+- **Source:** Coolify
+- **Description:** `InstanceSettings.public_port_min` / `public_port_max`: restrict the range of host ports available for port mappings, complementing dynamic port allocation.
+- **Why add to Tengiz:** Tengiz hardcodes 9000-9999 for ports (#Quirks). Letting operators constrain the range (firewall-friendly, corporate policy) or expand it is a small config knob. `.tengiz.yaml`'da `server.port_min: 10000`, `server.port_max: 10999`. Low effort (range config in the allocator), removes a hardcoded assumption.
+- **Detected:** 2026-08-20
+
+## Forward-Auth SSO Gating (Protect App Domains with OIDC SSO)
+- **Source:** Dokploy
+- **Description:** `ForwardAuthRouter` (proprietary/forward-auth.ts): deploys an `oauth2-proxy` v7 container wired to the org's OIDC provider, derives a deterministic cookie secret via HMAC (instance secret + server/base-domain salt), and injects a `forwardAuth` middleware in front of any app's domain so unauthenticated requests are 302-redirected to the SSO login page (with a `*-errors` middleware rewriting 401/403 → login redirect). Per-domain toggle: `enableForwardAuthOnDomain` requires the proxy actually running (4s status check) before wiring the domain.
+- **Why add to Tengiz:** SSO-in-front-of-app is the single most distinctive enterprise capability Dokploy has: protecting staging/internal apps behind OIDC without changing app code. Tengiz has none of this today (its proxy only does basic auth #32). A Go equivalent is very feasible — run `oauth2-proxy` (or a Go session middleware) and gate routing per-domain. `tengiz domain auth <app> --oidc ...` enables. Medium effort, high value for team-hosted platforms.
+- **Detected:** 2026-08-20
+
+## AI Log Triage (LLM Analysis of Build/Runtime Logs)
+- **Source:** Dokploy
+- **Description:** `ai.analyzeLogs` (ai.ts:228): sends build or runtime container logs to a configured LLM (OpenAI/Anthropic/Ollama/Gemini, auto-detected by URL fingerprinting in `selectAIProvider`) with a structured DevOps prompt returning Summary / Issues Found / Root Cause / Suggested Fix. Enabled-provider allow-list (`saveCustomProviders`) prevents data exfiltration to arbitrary endpoints. Also `ai.suggest` generates up to 3 full docker-compose variants with sslip.io domains and env vars from a natural-language prompt, and `ai.deploy` persists the suggestion as a running service in one mutation.
+- **Why add to Tengiz:** `tengiz logs --analyze` would turn the existing log command into a debugging assistant (`tengiz logs <app> --analyze --model ollama`). The URL-fingerprinting + provider allow-list is a clean BYO-LLM pattern for a self-hosted CLI. Low-medium effort (one HTTP call + prompt), high DX value; complements AI Assistant (#132) which only covers compose generation.
+- **Detected:** 2026-08-20
+
+## Docker Event Feed (Host Activity Stream)
+- **Source:** Dokploy
+- **Description:** `docker.getEvents` (docker.ts:454): runs `docker events --since <ts> --until <ts> --format '{{json .}}'` and returns parsed create/start/die/stop events with actor attributes for the last N minutes (1–1440), newest-first — powering a host activity feed.
+- **Why add to Tengiz:** `tengiz events [--minutes 60]` gives operators a live-ish view of what's happening on the host ("why did this container die?") without a daemon socket client — pure `os/exec` + JSON parse. Pairs with Event Logging (#7) for a cross-check between platform actions and actual Docker activity. Low effort, high debugging value.
+- **Detected:** 2026-08-20
+
+## In-Container File Browser & Editor (docker cp Based)
+- **Source:** Dokploy
+- **Description:** `dockerRouter` (docker.ts:308-452): full remote file operations on a running container — `listContainerFiles` (`docker exec ls -1Ap`), `readContainerFile` (`cat | base64`, 512KB cap with truncation flag), `writeContainerFile`/`uploadFileToContainer` (write base64 to a `/tmp/dokploy-*` temp file then `docker cp`, always removing the temp), `deleteContainerFile` (root-protected). Friendly errors when the image lacks shell utilities (exit codes 126/127).
+- **Why add to Tengiz:** Beyond Container Entering (#140, an interactive shell), operators often need to edit one config file in a running container. `tengiz fs ls/read/write/upload <app> <path>` via the temp-file + `docker cp` technique is a distinctive DX feature with zero injection risk (absolute-path + null-byte validation). Low effort, complements Log Filtering and the App Report.
+- **Detected:** 2026-08-20
+
+## DNS Provider Management (Cloudflare / AWS Route53 Record CRUD)
+- **Source:** Dokploy
+- **Description:** `dnsProviderRouter` (dns-provider.ts): first-class DNS provider resources with CRUD, `testConnection` (real API probe), `listZones`, `listRecords`, `createRecord` (A/CNAME), `updateRecord`, `deleteRecord` over a pluggable `DnsClient` interface (Cloudflare Bearer token + AWS Route53 SDK backends). Provider configs are secret-masked on every read (`maskDnsProviderConfig`) and merge-partial on test.
+- **Why add to Tengiz:** Standalone DNS management is entirely absent — users point custom domains manually at Tengiz's IP. `tengiz dns create-record app.example.com A <ip>` automates the domain setup step (#10) and is the natural precursor to DNS-01 challenges later. The `DnsClient` interface is an easy Go `interface` to replicate (Cloudflare REST + Route53 via AWS SDK). Low-medium effort, high operational value.
+- **Detected:** 2026-08-20
+
+## Auto-Domain Generation (sslip.io Wildcard DNS Minting)
+- **Source:** Dokploy
+- **Description:** `generateRandomDomain()` (templates/index.ts): mints an instant subdomain `{appName}-{hash}-{ip-with-dashes}.sslip.io` from the server's public IP — sslip.io is a public wildcard DNS that resolves any subdomain to the embedded IP, so no user DNS setup is needed. 63-char DNS-label truncation handled (40-char app-name cap). Used by preview deployments (`previewWildcard`) and AI/template compose flows.
+- **Why add to Tengiz:** "Deploy and get a working URL immediately" is a killer onboarding/demo feature — no DNS configuration, no custom-domain step. `tengiz deploy --auto-domain` would give every app a reachable URL out of the box, and it pairs with preview deployments (#2) for instant PR environments. Low effort (string build + public-IP lookup), very high first-run value.
+- **Detected:** 2026-08-20
+
+## Template Variable Generator Engine (${password} / ${jwt} / ${domain} / ${randomPort})
+- **Source:** Dokploy
+- **Description:** `processTemplate`/`processValue` (templates/processors.ts): a `${...}` templating engine for one-click service templates with built-in generators — `${domain}` (sslip.io wildcard), `${base64:N}`/`${password:N}`/`${hash:N}`, `${uuid}`, `${timestamp[s]}`, `${randomPort}`, `${jwt[:secret][:payload]}` (HS256 JWT with configurable payload), `${username}`/`${email}` (faker). Two-pass resolution so variables can reference other variables; expands into domains, envs (array/object), and config-file mounts.
+- **Why add to Tengiz:** Service templates (#64/#104) are only as good as their variable resolution. A generator engine lets `tengiz init --template wordpress` auto-generate unique passwords, JWT secrets, and wildcard domains in one shot — no manual "create secret, paste it" choreography. The generator functions are language-agnostic and trivial to port to Go. Low effort, high one-click-template quality value.
+- **Detected:** 2026-08-20
+
+## LibSQL (Turso sqld) Managed Database with Primary/Replica Replication
+- **Source:** Dokploy
+- **Description:** `libsqlRouter` + `buildLibsql` (libsql.ts): provisions Turso's SQLite-compatible `libsql-server` with a **primary/replica topology** (`SQLD_NODE` + `SQLD_PRIMARY_URL`), HTTP Basic auth derived from DB credentials, **three published ports** (HTTP 8080, gRPC 5001, admin 5000), optional multi-tenant namespaces (`--enable-namespaces`), and a named volume at `/var/lib/sqld`. File-level backups via `tar` + gzip.
+- **Why add to Tengiz:** LibSQL is the closest thing to "Vercel serverless SQLite" and Dokploy is the only alternative that provisions it with replication and gRPC — Tengiz's managed DB story (#63) currently lists only Postgres/MySQL/Redis. `tengiz db create --type libsql --node primary` with an optional replica gives scale-to-zero apps a real SQLite server with replication. Medium effort, strong differentiator.
+- **Detected:** 2026-08-20
+
+## In-Container Database Password Rotation (docker exec ALTER USER)
+- **Source:** Dokploy
+- **Description:** `changePassword` (postgres.ts:422, mysql.ts, mariadb.ts, mongo.ts, redis.ts): rotates DB credentials by running the native ALTER command *inside the live container* via `docker exec` (`psql ... ALTER USER`, `mysql ... ALTER USER ... FLUSH PRIVILEGES`, `mongosh ... changeUserPassword`, `redis-cli ... CONFIG SET requirepass`), wrapped in a transaction that also persists the new password. MySQL/MariaDB support `root` vs `user` rotation. Errors if no running container.
+- **Why add to Tengiz:** Rotating a leaked or expiring DB password today requires full redeploy or manual Docker. `tengiz db passwd <app>` does it live, without recreating the container or touching data, and keeps stored state in sync — the `docker exec`-based pattern maps directly to Tengiz's exec-based runtime. Low effort, high security-hygiene value once managed DBs (#63) exist.
+- **Detected:** 2026-08-20
+
+## Platform Self-Backup (Platform Metadata + Filesystem + Encryption Keys → S3)
+- **Source:** Dokploy
+- **Description:** `runWebServerBackup` (utils/backups/web-server.ts): backups up the platform *itself* — `pg_dump` of the platform's metadata DB, `rsync` of the whole data directory (excluding backups), zipped and uploaded to S3 via rclone. Optional `includeEncryptionKey` exports the AES encryption keys into the archive so secrets can be decrypted after restore (file placed at BASE_PATH for the keyring to pick up as a decryption fallback).
+- **Why add to Tengiz:** Full System Backup (#82) archives `~/.tengiz/` state but not the encryption keys needed to restore encrypted secrets — so a restore is only half-usable. A Dokploy-style self-backup (`tengiz backup self --include-keys`) that dumps state + config + keyring to S3 completes disaster recovery. The optional key export is a thoughtful, distinctive touch. Low-medium effort, high DR value.
+- **Detected:** 2026-08-20
+
+## Deep Host Health Diagnostics (inotify / OOM / conntrack / Network Exhaustion)
+- **Source:** Dokploy
+- **Description:** `getServerHealth` (server-health.ts): one read-only probe gathers container/service counts, memory/CPU/disk, **inotify limits** (`max_user_watches`, current instances, whether persisted in sysctl), Docker daemon config, a `journalctl -u docker` window filtered for OOM/conntrack/"no space"/"too many open files", and per-network IP utilization (capacity from subnet prefix, % used). Also computes org-wide memory/CPU reservation from the DB.
+- **Why add to Tengiz:** `tengiz doctor` (#114) checks prerequisites; this surfaces the *actual failure modes* of a Docker-on-VPS host — inotify exhaustion is the classic silent killer, and OOM/conntrack journal scans pinpoint why containers died. A Go reimplementation (pure Go + `journalctl`) gives operators actionable, specific diagnostics. Low-medium effort, complements Server Doctor (#1682) and Server Monitoring (#73).
+- **Detected:** 2026-08-20
+
+## Compose File Randomization (Isolated Multi-Instance Deployments)
+- **Source:** Dokploy
+- **Description:** `randomizeSpecificationFile`/`randomizeComposeFile` (utils/docker/compose.ts, services/compose.ts): parses a compose YAML and appends a random hex suffix to every service, volume, network, config, and secret name — including rewriting `depends_on`, `container_name`, `links`, `extends`, `volumes_from` references — so the *same* compose template can run N times on one host without name collisions. Isolated deployments also create a dedicated attachable network.
+- **Why add to Tengiz:** This solves "spin up N isolated instances of the same stack" — directly enabling previews of compose apps (#2/#91), per-tenant demos, and one-click templates (#64) on a single host. A `--randomize` flag on compose deploy prevents the classic "name already in use" collision wall. Medium effort (YAML parse + reference rewrite), high preview/tenant value.
+- **Detected:** 2026-08-20
+
+## External Docker Network Import & Sync
+- **Source:** Dokploy
+- **Description:** `findNetworksToSync`/`importDockerNetworks`/`recreateNetwork` (services/network.ts): diffs live Docker networks against the platform's records, returns **importable** ones (adopting existing external networks, excluding reserved: bridge/host/none/ingress/docker_gwbridge) and **missing** ones, plus a `recreate` operation that rebuilds a network from stored IPAM config (subnet, gateway, IPRange, internal, attachable, IPv4/IPv6, MTU).
+- **Why add to Tengiz:** Migrating an existing multi-service setup into Tengiz (compose #91, custom networks #30) usually requires recreating networks by hand. Importing existing networks removes a painful migration step, and IPAM-aware creation makes `tengiz network create --subnet 10.10.0.0/16` a power feature. Low-medium effort (`docker network inspect` parse + `docker network create`), high migration value.
+- **Detected:** 2026-08-20
+
+---
+
+## Native Cron Task Scheduler (Concurrency Policies, Suspension, One-Off Runs)
+- **Source:** Dokku
+- **Description:** First-class per-app cron task management (`dokku cron:list/report/set`). Tasks are declared in `app.json` (`command`, `schedule`, `concurrency-policy`, `maintenance`), validated with `robfig/cron/v3` (5-field + descriptors like `@daily`), and written to the host crontab for the docker-local scheduler. **Concurrency policies** per task: `allow` (default), `forbid` (fail if a container with the same cron-id label is running), `replace` (stop/kill the running one first). **Suspension/resume** at two levels: app-wide `maintenance` (global-cascade) and per-task `maintenance.<id>`. **One-off run**: `dokku cron:run <app> <id> [--detach] [--ttl-seconds N]` dispatches a task immediately. Tasks get deterministic content-hashed IDs, optional `mailto`/`mailfrom` notifications, shell-tokenized command validation at deploy time, and cron-container logs routed to a dedicated sink (vector-cron-sink).
+- **Why add to Tengiz:** The existing "Scheduled Tasks / Cron Jobs" (#54) is only a sketch (`docker exec` on an interval). Dokku's model is production-grade: concurrency control prevents overlapping job runs, per-task suspension enables maintenance windows, and `cron:run --ttl-seconds` gives ad-hoc execution with a hard deadline. Maps cleanly to `.tengiz.yaml`'da `cron:` + `robfig/cron` (already referenced) + Tengiz's `runtime.Exec`-based execution. Complements Scheduled Deployments (#42) which schedules the deploy pipeline — this schedules commands inside the app.
+- **Detected:** 2026-08-20
+
+## One-off Run TTL & Auto-Reaping (Active-Deadline Enforcement)
+- **Source:** Dokku
+- **Description:** Detached one-off runs (migrations, data imports, console sessions) are labeled with `com.dokku.active-deadline-seconds` (default **86400s / 24h**) and tracked in a run registry. A background reaper (`scheduler-run-retire`) periodically scans for run/cron containers past their deadline and force-kills them. Lifecycle commands: `run-list` (all active one-off containers), `run-logs`, `run-stop`, `run-retire`. `--detach` runs without TTY and with `--rm`; `DOKKU_RUN_TTL_SECONDS` overrides the deadline per invocation.
+- **Why add to Tengiz:** One-off Process Execution (#25) launches a container but nothing bounds its lifetime — an orphaned migration or forgotten console session can run forever and consume resources. A deadline + reaper guarantees automatic cleanup of every one-off container, and `tengiz run list/logs/stop` gives operators visibility and control over what's running. Low effort (label + a `time.Ticker` sweep in the existing idle/health goroutines), high ops-hygiene value.
+- **Detected:** 2026-08-20
+
+## Storage Exec (Run Commands Against Mounted Volumes)
+- **Source:** Dokku
+- **Description:** `dokku storage:exec <entry> [-- <cmd>...]` starts a temporary container that mounts a named storage entry and runs the given command (or a shell) inside it, **propagating the tool's exit code** (so `storage:exec demo -- exit 42` returns 42). Used for volume-aware maintenance: inspecting files, running DB tooling against persisted data, fixing permissions.
+- **Why add to Tengiz:** Operators today must hand-roll `docker run -v <volume>:/data alpine ls /data` to touch a volume. `tengiz storage exec <entry> -- <cmd>` makes volume operations a first-class, reproducible command, and exit-code propagation lets it be used safely inside scripts and pre-deploy hooks. Low effort (wrap `docker run --rm -v` with the existing `os/exec` runtime), high operational value for stateful apps on scale-to-zero.
+- **Detected:** 2026-08-20
+
+## Named Storage Entries (PVC-style Volume Resources)
+- **Source:** Dokku
+- **Description:** Beyond per-app mount lines, Dokku manages **named storage entries** as first-class resources: `storage:create/destroy/info/set/list-entries/wait`. Entries carry properties — `size`, `access-mode`, `storage-class`, `chown`, `mode`, `reclaim-policy` (Retain/Delete), `annotations`, `labels`, `subpath`, `readonly`, `volume-options` — and are mounted per-app with phases (`deploy`/`run`), process-type scoping, and a `_default_` fallback. The same verbs work across schedulers (docker-local host dirs vs k3s PVCs via Helm), with `storage:wait` for PVC binding. Legacy `-v host:container` mounts auto-migrate into named entries.
+- **Why add to Tengiz:** Tengiz's Persistent Storage (#21) only attaches raw volumes per app. Named entries give volumes their own identity and lifecycle — reusable across apps, metadata-tagged, safely deleted with reclaim policies, and future-proof for a k8s scheduler (#162). This is the volume-level foundation the Accessory Services (#62) and managed-DB (#63) roadmaps assume. Medium effort (new store + CRUD commands), high config-hygiene value.
+- **Detected:** 2026-08-20
+
+## Per-App Network Aliases & Network Binding Properties
+- **Source:** Dokku
+- **Description:** The `network` plugin attaches an app to multiple Docker networks with **automatic alias injection on deploy**: each container is connected with aliases `app.<processType>[.<tld>]` and `<hostname>.app.<processType>[.<tld>]`, giving stable per-app DNS names inside the private network (no raw container-IP lookup). Configurable properties per app/global: `bind-all-interfaces`, `static-web-listener`, `static-web-port`, `initial-network`, `tld`, `attach-post-create`, `attach-post-deploy`. Network CRUD with a `com.dokku.network-name` label marks dokku-managed networks (`network:list --dokku-managed`), `network:rebuild`/`rebuildall` regenerate config, and `host`/`bridge` are reserved from attachment.
+- **Why add to Tengiz:** Custom Docker Network (#30) only passes `--network`. Multi-service apps (web + db + redis on one private network) need stable hostnames, not container IDs — and per-app network properties (`bind-all-interfaces`, `static-web-listener`) control exposure. Alias injection and a `--dokku-managed` label also make cleanup and service discovery safe. Low-medium effort (aliases on `docker network connect` + a few properties), high value for compose/accessory workflows.
+- **Detected:** 2026-08-20
+
+## Per-App Proxy Port & SSL Port Configuration (Detected vs Explicit Port Maps)
+- **Source:** Dokku
+- **Description:** Per-app and global `proxy-port` / `proxy-ssl-port` properties override the HTTP/HTTPS ports an app is proxied on (defaults 80/443), plus full port-map management: `ports:add/set/clear/remove <app> <scheme>:<host>:<container>`. Port maps are persisted across rebuilds with an explicit `map` vs auto-detected `map-detected` split (`http:<proxy-port>:5000` default; `https:443` added when a cert exists), so a user's explicit mapping is never overwritten by detection. Non-`__internal__` maps survive redeploys and drive the proxy config.
+- **Why add to Tengiz:** Tengiz hardcodes host port 9000+ and proxy 80; there is no per-app way to say "serve this app on https:8443" or pin `http:80:8080` across zero-downtime redeploys. Port Mapping Protocol Selection (#111) covers TCP/UDP protocol choice — this covers HTTP proxy-port configuration and *persistence* of explicit mappings vs auto-detection, which is what survives the existing deploy-teardown cycle. Low effort (properties + persistence in AppEntry), high production fit for shared hosts and firewalled environments.
+- **Detected:** 2026-08-20
+
+## Proxy Config Preview & Validation (show-config / validate / reload)
+- **Source:** Dokku
+- **Description:** `dokku nginx:show-config <app>` renders the exact per-app proxy config (server block, port maps, TLS, headers) for inspection; `nginx:validate-config` runs `nginx -t` against a sandbox config; `nginx:reload` applies config without downtime; `nginx:access-logs`/`error-logs` stream the per-app proxy log. Proxy config is regenerated on domain/port/cert changes and only reloaded after a successful validation (rollback on failure).
+- **Why add to Tengiz:** Tengiz's reverse proxy is generated at runtime with no visibility. Operators debugging routing/domain/TLS issues must guess what config is in effect. `tengiz proxy config <app>` (preview the effective routing rules) + `tengiz proxy validate` + `tengiz proxy reload` gives a debugging loop, and validate-before-apply prevents a bad config change from taking down the proxy. Distinct from Config Display (#48, merged `.tengiz.yaml`) — this renders the *generated proxy* view. Low effort (serialize the proxy's route table + a syntax check), high debugging value.
+- **Detected:** 2026-08-20
+
+## Zero-Downtime Handover Grace Period (wait-to-retire)
+- **Source:** Dokku
+- **Description:** During zero-downtime deployment, the old container is kept running after the new one becomes healthy for a configurable **grace period** (`checks:set <app> wait-to-retire`, default **60s**, app → global → 60s cascade). New containers are registered as retired only after the window elapses (`scheduler-register-retired`), letting in-flight requests drain before the old container is stopped. `checks:disable`/`enable`/`skip` per process-type (with a `_all_` sentinel) control whether the handover even runs.
+- **Why add to Tengiz:** Tengiz's zero-downtime deploy (#1, implemented) swaps traffic immediately, which can cut off in-flight requests on slow or long-polling apps. A configurable `wait-to-retire` drain window — old container keeps serving stragglers for N seconds after the new one is live — removes last-request failures without full load balancing. Pairs with Readiness Delay (#27) and Container Retention Policy (#22). Low effort (delay before `Stop()` on the old container), high reliability value for production traffic.
+- **Detected:** 2026-08-20
+
+## Pre-Deploy Function (JavaScript Docker-Spec Mutator)
+- **Source:** CapRover
+- **Description:** Per-app `preDeployFunction` field stores a JavaScript function run **inside a sandboxed VM (`vm.runInNewContext`) at deploy time**, receiving the full app object and the Docker service-update object and returning a (possibly modified) update object. The function can inject labels, mutate env, add capabilities, change placement constraints, or rewrite ports — anything not expressible in the declarative app config — before the container is created/updated.
+- **Why add to Tengiz:** Pre-Deploy Hooks (#9) run shell commands before build; this is different — a programmatic **runtime-spec mutator** that alters the final Docker `run`/update parameters. It is the escape hatch for edge cases the config schema can't express, without forking Tengiz or hand-crafting raw Docker. Implementation fits Go: a `goja`-based sandbox or a restricted template/plugin hook that receives the resolved runtime spec and returns the modified one. `.tengiz.yaml`'da `pre_deploy_function:` bölümü. Distinct from build-time patches (#54) — this runs at deploy time against the generated container spec. Low-medium effort, high power-user value.
+- **Detected:** 2026-08-20
+
+## Service Update Override (Raw Docker Spec Deep-Merge)
+- **Source:** CapRover
+- **Description:** Per-app `serviceUpdateOverride` field holds arbitrary YAML/JSON (validated on save, rejected if malformed) that is **deep-merged** (`Utils.mergeObjects`) into the final Docker service-update object at deploy time. Users can set any property: `privileged`, `cap_add`, `dns`, `sysctls`, `ulimits`, `mounts`, `resources`, `restart_policy`, `log_driver` options — the entire spec surface, bypassing the typed config entirely.
+- **Why add to Tengiz:** Custom Docker Options (#36) covers per-phase CLI flags; this covers **arbitrary spec-level fields** with automatic deep-merge so the platform's own generated values survive unless explicitly overridden. It is the "last word" power-user feature for unusual workloads (GPU flags, device mapping, security profiles) that Tengiz's schema will never enumerate. `.tengiz.yaml`'da `service_update_override:` bölümü; merge logic in `runtime`/`builder` before container creation, stored in AppEntry. Validation (parse as YAML/JSON) prevents bad config from breaking deploys. Low effort (one `map[string]any` deep-merge), high escape-hatch value.
+- **Detected:** 2026-08-20
+
+## Version-Aware Image Cleanup (cron + mostRecentLimit + timezone)
+- **Source:** CapRover
+- **Description:** `DiskCleanupManager` runs on a cron schedule with a configurable timezone and removes unused Docker images while **keeping the `mostRecentLimit` most-recent deployed images per app** (tied to the app's version/deploy history, default 5). Cleanup is selective: images referenced by the app's retained version history are never deleted, so rollback targets survive while every other unused image (intermediate builds, leaked layers, orphaned tags) is freed.
+- **Why add to Tengiz:** Docker Housekeeping (#377) is label-based generic pruning and Container Retention Policy (#535) keeps old *containers*; neither preserves *images* by deploy-history. On a scale-to-zero host with frequent deploys, disk fills with intermediate images while rollback needs older tags kept. `tengiz cleanup` gains a `--keep <N>` per-app retention computed from the existing DeploymentEntry history in `~/.tengiz/`. Cron schedule + timezone avoids running cleanup during peak traffic windows. Low-medium effort (version-aware image filter + `time/ticker` cron), high ops value.
+- **Detected:** 2026-08-20
+
+## Per-App Whole-Domain Redirect (redirectDomain)
+- **Source:** CapRover
+- **Description:** Per-app `redirectDomain` field makes the proxy **redirect all traffic for the app's subdomain AND every custom domain to a target domain** (301) at the nginx layer — an app-level "this app now lives elsewhere" switch. One property replaces per-rule redirect management for the common move/rename case; the domain config stays intact (so HTTPS still terminates) while requests are forwarded.
+- **Why add to Tengiz:** URL Redirect Rules (#1065) are path-level (`/old` → `/new`); this is **domain-level**: `tengiz config set myapp redirect_domain new.example.com` sends every request hitting `myapp.tengiz.local` / `old.com` to the new domain in one shot — the standard flow when rebranding or migrating an app. Complement to App Renaming (#775) and Root Domain Change (#859). Trivial to implement as a proxy-level redirect middleware keyed on the route map. Low effort, immediate SEO/UX value for domain migrations.
+- **Detected:** 2026-08-20
+
+## Custom One-Click App Template Repositories
+- **Source:** CapRover
+- **Description:** `CUSTOM_ONE_CLICK_APP_URLS` lets users **add/remove/list third-party one-click-app repository URLs** (custom `captain-definition` + `one-click-apps` list JSON). The platform merges these community-published template catalogs with its built-in one, then resolves and deploys any template from any registered repository — so organizations can host private template repos for their internal stacks.
+- **Why add to Tengiz:** One-Click Service Templates (#23) covers the concept and Service Template Registry CDN (#1041) covers a central registry; this adds **decentralized/custom template sources** — teams publish internal templates (own Dockerfiles, pinned images, org env conventions) in their own Git repo and point Tengiz at it. `tengiz service repo add <url> / list / remove`, persisted in config; the registry URL list is used by the existing template resolver. Important for air-gapped and enterprise setups that cannot reach a central CDN. Low effort (fetch+merge a JSON catalog), high enterprise value.
+- **Detected:** 2026-08-20
+
+## Stateful App Node Pinning (hasPersistentData Single-Instance Lock)
+- **Source:** CapRover
+- **Description:** Apps marked `hasPersistentData` are **forced to a single instance and pinned to the node where their persistent volume lives** via a placement constraint (nodeId). The platform guarantees a stateful app never runs on two nodes (split-brain on shared storage) and never loses its data node on reschedule — while stateless apps freely spread across the cluster.
+- **Why add to Tengiz:** A critical invariant for multi-node deployments (Docker Swarm Resource Management #199, Centralized Multi-Server #101): persistent storage makes naive replication dangerous. Recording the *rule* — "persistent apps are single-instance + node-pinned" — prevents a future multi-node implementation from silently corrupting stateful workloads. Even on single-host Tengiz, the `has_persistent_data: true` flag can gate safe-volume-deletion and rollback behavior today. Low effort (config field + invariant checks + placement constraint when a scheduler exists), high correctness value for the multi-node roadmap.
+- **Detected:** 2026-08-20
